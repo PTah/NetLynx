@@ -207,9 +207,27 @@ if [[ "${STASH_CREATED}" -eq 1 ]]; then
 fi
 
 echo "[13/13] Доступ к UI: nginx или напрямую :8080"
+# Уже настроенный сайт — не спрашивать снова и не трогать HTTP_ADDR (часто 127.0.0.1:8080 за nginx).
+NGINX_SITE_EXISTS=0
+if [[ -e /etc/nginx/sites-enabled/netlynx || -e /etc/nginx/sites-available/netlynx ]]; then
+  NGINX_SITE_EXISTS=1
+fi
+
 USE_NGINX=0
+SKIP_HTTP_ADDR_REWRITE=0
 if [[ "${INSTALL_NGINX:-}" == "1" || "${INSTALL_NGINX:-}" == "yes" ]]; then
   USE_NGINX=1
+elif [[ "${INSTALL_NGINX:-}" == "0" || "${INSTALL_NGINX:-}" == "no" ]]; then
+  USE_NGINX=0
+  if [[ "${NGINX_SITE_EXISTS}" -eq 1 ]]; then
+    SKIP_HTTP_ADDR_REWRITE=1
+  fi
+elif [[ "${NGINX_SITE_EXISTS}" -eq 1 ]]; then
+  USE_NGINX=0
+  SKIP_HTTP_ADDR_REWRITE=1
+  PUB="$(sudo grep -E '^NETLYNX_PUBLIC_URL=' "${ENV_TARGET}" 2>/dev/null | head -1 | cut -d= -f2- || true)"
+  echo "nginx для NetLynx уже есть — шаг установки пропущен."
+  echo "UI: ${PUB:-http://<hostname>/} (backend обычно 127.0.0.1:8080)"
 elif [[ -t 0 && -z "${INSTALL_NGINX:-}" ]]; then
   read -r -p "Установить nginx reverse proxy перед NetLynx? [y/N] " NGINX_ANS
   case "${NGINX_ANS}" in
@@ -223,6 +241,8 @@ if [[ "${USE_NGINX}" -eq 1 ]]; then
   sudo systemctl restart "${SERVICE_NAME}" || true
   PUB="$(sudo grep -E '^NETLYNX_PUBLIC_URL=' "${ENV_TARGET}" 2>/dev/null | head -1 | cut -d= -f2- || true)"
   echo "UI через nginx: ${PUB:-http(s)://<hostname>}"
+elif [[ "${SKIP_HTTP_ADDR_REWRITE}" -eq 1 ]]; then
+  : # конфиг nginx/HTTP_ADDR уже на месте
 else
   if [[ -f "${ENV_TARGET}" ]]; then
     if grep -q '^HTTP_ADDR=' "${ENV_TARGET}"; then
@@ -246,9 +266,9 @@ echo ""
 ADMIN_U="$(sudo grep -E '^NETLYNX_ADMIN_USER=' "${ENV_TARGET}" 2>/dev/null | head -1 | cut -d= -f2- || true)"
 ADMIN_U="${ADMIN_U:-admin}"
 echo "UI login (bootstrap admin):"
-if [[ "${USE_NGINX:-0}" -eq 1 ]]; then
+if [[ "${USE_NGINX:-0}" -eq 1 || "${SKIP_HTTP_ADDR_REWRITE:-0}" -eq 1 ]]; then
   PUB_URL="$(sudo grep -E '^NETLYNX_PUBLIC_URL=' "${ENV_TARGET}" 2>/dev/null | head -1 | cut -d= -f2- || true)"
-  echo "  URL:   ${PUB_URL:-https://<hostname>}"
+  echo "  URL:   ${PUB_URL:-http://<hostname>/}"
 else
   echo "  URL:   http://<server-ip>:8080"
 fi

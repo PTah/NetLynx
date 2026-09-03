@@ -190,11 +190,13 @@ REMOTE=company BRANCH=main bash docs/deploy.sh
 
 ### Как открыть веб: nginx или порт 8080
 
-В **самом конце** `deploy.sh` (после успешного health) скрипт задаёт один вопрос:
+В **самом конце** `deploy.sh` (после успешного health) скрипт может спросить:
 
 ```text
 Установить nginx reverse proxy перед NetLynx? [y/N]
 ```
+
+Если сайт nginx для NetLynx уже есть (`/etc/nginx/sites-enabled/netlynx`), вопрос **не задаётся** — конфиг и `HTTP_ADDR` не трогают.
 
 **Простыми словами:**
 
