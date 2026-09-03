@@ -1,0 +1,48 @@
+﻿[
+  {
+    "manufacturer": "Ubiquiti",
+    "model": "12F Fiber",
+    "portCount": 16,
+    "copperPorts": [13, 14, 15, 16],
+    "sfpPorts": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+    "matchPatterns": ["12f\\s*[-_ ]*fiber", "edgeswitch\\s*12f", "\\b12f\\b"],
+    "matchFlags": ["i", "i", "i"],
+    "specialRules": ["Ubiquiti 12F Fiber: 1-12 SFP, 13-16 RJ-45"]
+  },
+  {
+    "manufacturer": "Ubiquiti",
+    "model": "EdgeSwitch 8",
+    "portCount": 10,
+    "copperPorts": [1, 2, 3, 4, 5, 6, 7, 8],
+    "sfpPorts": [9, 10],
+    "matchPatterns": ["\\bedgeswitch\\s*8\\b", "ubnt.*edgeswitch\\s*8"],
+    "matchFlags": ["i", "i"]
+  },
+  {
+    "manufacturer": "Ubiquiti",
+    "model": "EdgeSwitch 16",
+    "portCount": 18,
+    "copperPorts": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16],
+    "sfpPorts": [17, 18],
+    "matchPatterns": ["\\bedgeswitch\\s*16\\b", "ubnt.*edgeswitch\\s*16"],
+    "matchFlags": ["i", "i"]
+  },
+  {
+    "manufacturer": "Ubiquiti",
+    "model": "EdgeSwitch 24",
+    "portCount": 26,
+    "copperPorts": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24],
+    "sfpPorts": [25, 26],
+    "matchPatterns": ["\\bedgeswitch\\s*24\\b", "ubnt.*edgeswitch\\s*24"],
+    "matchFlags": ["i", "i"]
+  },
+  {
+    "manufacturer": "Ubiquiti",
+    "model": "EdgeSwitch 48",
+    "portCount": 52,
+    "copperPorts": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48],
+    "sfpPorts": [49, 50, 51, 52],
+    "matchPatterns": ["\\bedgeswitch\\s*48\\b", "ubnt.*edgeswitch\\s*48"],
+    "matchFlags": ["i", "i"]
+  }
+]

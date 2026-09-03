@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; connect-src 'self' http: https:; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; object-src 'none'; base-uri 'self'"
+    />
+    <title>NetLynx Desktop</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header>
+      <h1>NetLynx Desktop MVP</h1>
+      <div id="status">Не подключено</div>
+    </header>
+    <nav class="tabs">
+      <button class="tab-btn active" data-tab="overview" type="button">Overview</button>
+      <button class="tab-btn" data-tab="devices" type="button">Devices</button>
+      <button class="tab-btn" data-tab="events" type="button">Events</button>
+      <button class="tab-btn" data-tab="settings" type="button">Settings</button>
+    </nav>
+
+    <section class="panel tab-panel" data-panel="overview">
+      <h2>Подключение</h2>
+      <form id="login-form">
+        <label>API base URL</label>
+        <input id="base-url" value="http://127.0.0.1:8080" />
+        <label>Username</label>
+        <input id="username" value="admin" />
+        <label>Password</label>
+        <input id="password" type="password" />
+        <div class="row">
+          <button type="submit">Войти</button>
+          <button id="logout-btn" type="button">Выйти</button>
+          <button id="clear-local-btn" type="button">Сбросить локальную сессию</button>
+          <button id="reload-btn" type="button">Обновить</button>
+        </div>
+      </form>
+      <div id="message"></div>
+    </section>
+    <section class="panel tab-panel" data-panel="devices">
+      <h2>Узлы: операции</h2>
+      <form id="create-device-form">
+        <label>Имя узла</label>
+        <input id="new-device-name" placeholder="Switch-1" />
+        <label>Host</label>
+        <input id="new-device-host" placeholder="10.0.0.1" />
+        <label>SNMP version</label>
+        <select id="new-device-snmp">
+          <option value="v1">v1</option>
+          <option value="v2c">v2c</option>
+          <option value="v3">v3</option>
+        </select>
+        <label>Community (для v1 / v2c)</label>
+        <input id="new-device-community" value="public" />
+        <label>v3 user</label>
+        <input id="new-device-v3-user" placeholder="snmpuser" />
+        <label>v3 auth protocol</label>
+        <select id="new-device-v3-auth-proto">
+          <option value="SHA">SHA</option>
+          <option value="SHA256">SHA256</option>
+          <option value="SHA512">SHA512</option>
+          <option value="MD5">MD5</option>
+        </select>
+        <label>v3 auth pass</label>
+        <input id="new-device-v3-auth-pass" type="password" placeholder="min 8 chars" />
+        <label>v3 priv protocol</label>
+        <select id="new-device-v3-priv-proto">
+          <option value="AES">AES</option>
+          <option value="AES256">AES256</option>
+          <option value="DES">DES</option>
+          <option value="NONE">NONE</option>
+        </select>
+        <label>v3 priv pass</label>
+        <input id="new-device-v3-priv-pass" type="password" placeholder="min 8 chars (or NONE)" />
+        <label>Poll interval (sec)</label>
+        <input id="new-device-poll" type="number" min="10" value="60" />
+        <div class="row">
+          <button type="submit">Добавить узел</button>
+          <button id="update-device-btn" type="button">Сохранить изменения узла</button>
+          <button id="delete-device-btn" type="button">Удалить выбранный узел</button>
+        </div>
+      </form>
+    </section>
+
+    <main class="tab-panel" data-panel="overview">
+      <section class="panel">
+        <h2>Узлы</h2>
+        <table id="devices-table">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Name</th>
+              <th>Host</th>
+              <th>SNMP</th>
+              <th>CPU</th>
+              <th>SNMP OK</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </section>
+    </main>
+    <main class="tab-panel hidden" data-panel="devices">
+      <section class="panel">
+        <h2>Детали узла <span id="detail-title"></span></h2>
+        <table id="ifaces-table">
+          <thead>
+            <tr>
+              <th>ifIndex</th>
+              <th>Name</th>
+              <th>Oper</th>
+              <th>Role</th>
+              <th>Util max %</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </section>
+      <section class="panel">
+        <h2>События узла (последние 30)</h2>
+        <table id="device-events-table">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Type</th>
+              <th>Severity</th>
+              <th>Created</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </section>
+    </main>
+    <main class="tab-panel hidden" data-panel="events">
+      <section class="panel">
+        <h2>События (последние 50)</h2>
+        <div class="row">
+          <input id="events-filter-type" placeholder="Фильтр type, напр. LINK_DOWN" />
+          <input id="events-filter-severity" placeholder="Фильтр severity, напр. warning" />
+          <button id="events-apply-filter-btn" type="button">Применить фильтр</button>
+          <button id="events-export-csv-btn" type="button">Экспорт CSV</button>
+        </div>
+        <table id="events-table">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Device</th>
+              <th>Type</th>
+              <th>Severity</th>
+              <th>Created</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </section>
+    </main>
+    <section class="panel tab-panel hidden" data-panel="settings">
+      <h2>Уведомления</h2>
+      <form id="settings-notif-form">
+        <label><input id="set-wh-en" type="checkbox" /> Webhook enabled</label>
+        <label>Webhook URL <input id="set-wh-url" style="width:100%" /></label>
+        <label><input id="set-tg-en" type="checkbox" /> Telegram enabled</label>
+        <label>Telegram token <input id="set-tg-tok" type="password" style="width:100%" /></label>
+        <label>Telegram chat <input id="set-tg-chat" style="width:100%" /></label>
+        <label><input id="set-incident-en" type="checkbox" /> Incident port admin-down</label>
+        <label>Incident event types <input id="set-incident-types" style="width:100%" value="UNKNOWN_MAC_ON_ACCESS_PORT" /></label>
+        <button type="submit">Сохранить настройки</button>
+      </form>
+      <p id="settings-msg" style="color:#8d8"></p>
+    </section>
+
+    <script src="./renderer.js"></script>
+  </body>
+</html>

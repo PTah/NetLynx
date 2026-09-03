@@ -1,0 +1,34 @@
+{
+  "name": "netlynx-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "NetLynx Windows desktop client MVP (Electron)",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist:win": "electron-builder --win portable"
+  },
+  "devDependencies": {
+    "electron": "^37.2.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.ptah.netlynx.desktop",
+    "productName": "NetLynx Desktop",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "index.html",
+      "main.js",
+      "preload.js",
+      "renderer.js",
+      "styles.css",
+      "icon.png",
+      "package.json"
+    ],
+    "win": {
+      "icon": "icon.png"
+    }
+  }
+}

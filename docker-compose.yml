@@ -1,0 +1,18 @@
+﻿name: invetor
+
+services:
+  # PostgreSQL: роль/БД invetor — историческое имя, при миграции с Invetor не переименовываем.
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: invetor
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-invetor}
+      POSTGRES_DB: invetor
+    ports:
+      # Только localhost: не публиковать 5433 в LAN.
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - invetor_pg:/var/lib/postgresql/data
+
+volumes:
+  invetor_pg:

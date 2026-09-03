@@ -1,0 +1,53 @@
+NetLynx Freeware License
+Copyright (c) 2026 Andrey Lutsenko
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to use
+the Software for personal or other non-commercial purposes, subject to the
+conditions below.
+
+1. Non-commercial use only
+   You may run and use the Software without charge for personal use and for
+   non-commercial internal operations (for example monitoring your own network).
+   You may NOT use the Software, or any part of it, for commercial purposes
+   without prior written permission from the copyright holder. Commercial
+   purposes include, without limitation: selling the Software; charging others
+   for access, hosting, support, or services that substantially depend on the
+   Software; embedding the Software in a paid product or SaaS offering; and
+   any other use primarily intended for commercial advantage or monetary
+   compensation.
+
+2. No modification or derivative works without permission
+   You may NOT modify, adapt, reverse engineer (except to the limited extent
+   mandatory under applicable law), or create derivative works based on the
+   Software, and you may NOT distribute modified versions, without prior
+   written permission from the copyright holder.
+   Unmodified copies may be shared only if this license text and all copyright
+   and attribution notices remain intact, and only for non-commercial use
+   as described above.
+
+3. Attribution
+   Any permitted use or redistribution must clearly credit Andrey Lutsenko as
+   the author of NetLynx (for example in documentation, an "About" page, or
+   other materials distributed with the Software). Removing or obscuring this
+   credit is not permitted.
+
+4. Commercial and other special permissions
+   If you want commercial rights, permission to modify/fork, or any other
+   exception to this license, contact the author. Permission may be granted
+   under a separate written agreement (including paid terms) at the author's
+   sole discretion.
+   Contact: papatramp@gmail.com
+
+5. No trademark rights
+   This license does not grant rights to use the name "NetLynx" or related
+   marks as a trademark except as needed for reasonable attribution.
+
+6. Disclaimer
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+   IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+   FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+   AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+   LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+   OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+   SOFTWARE.

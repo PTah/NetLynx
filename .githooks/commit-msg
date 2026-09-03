@@ -1,0 +1,12 @@
+#!/bin/sh
+# Убирает любые старые Made-with: строки и задаёт единый trailer проекта.
+COMMIT_MSG_FILE=$1
+TRAILER="Made-with: \"Brain, Google and Great Cursor AI\""
+if [ ! -f "$COMMIT_MSG_FILE" ]; then
+  exit 0
+fi
+tmp="${COMMIT_MSG_FILE}.invetor-tmp"
+grep -v '^Made-with:' "$COMMIT_MSG_FILE" > "$tmp" 2>/dev/null || cp "$COMMIT_MSG_FILE" "$tmp"
+mv -f "$tmp" "$COMMIT_MSG_FILE"
+printf "\n%s\n" "$TRAILER" >> "$COMMIT_MSG_FILE"
+exit 0

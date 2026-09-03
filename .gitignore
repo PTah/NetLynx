@@ -1,0 +1,12 @@
+.env
+*.pem
+dist/
+node_modules/
+web/dist/
+.DS_Store
+/netlynxd
+/bin/
+*.exe
+/mik2wrt/
+.cursor/
+.cursorignore

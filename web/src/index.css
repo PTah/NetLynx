@@ -1,0 +1,936 @@
+﻿:root {
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, sans-serif;
+  line-height: 1.45;
+  color: #e8eaef;
+  background: #12141a;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+.app-shell {
+  min-height: 100vh;
+}
+
+.app-sidebar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 100;
+  width: 200px;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: #0d0f14;
+  border-right: 1px solid #242a38;
+  padding: 1rem 0.75rem;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.app-sidebar-brand {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  font-weight: 700;
+  margin-bottom: 1rem;
+  padding: 0 0.5rem;
+  line-height: 1.35;
+}
+
+.app-sidebar-logo {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+
+.app-sidebar-nav {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  overflow-y: auto;
+}
+
+.app-sidebar-link {
+  padding: 0.45rem 0.5rem;
+  border-radius: 6px;
+  color: #c5cedd;
+  font-weight: 400;
+  text-decoration: none;
+}
+.app-sidebar-link:hover {
+  text-decoration: none;
+  background: #1a1f2a;
+}
+.app-sidebar-link--active {
+  background: #252b38;
+  color: #fff;
+  font-weight: 600;
+}
+
+.app-sidebar-footer {
+  flex-shrink: 0;
+  margin-top: auto;
+  padding-top: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.sidebar-stats {
+  padding: 0.5rem 0.55rem;
+  border-radius: 6px;
+  background: #12141a;
+  border: 1px solid #242a38;
+  font-size: 0.72rem;
+  line-height: 1.35;
+}
+
+.sidebar-stat-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.35rem;
+  padding: 0.12rem 0;
+}
+
+.sidebar-stat-label {
+  color: #8a93a8;
+  flex-shrink: 0;
+}
+
+.sidebar-stat-value {
+  color: #d8dde8;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.app-sidebar-logout {
+  width: 100%;
+}
+
+.app-main {
+  margin-left: 200px;
+  min-height: 100vh;
+  padding: 1rem 1.25rem;
+  overflow: auto;
+  box-sizing: border-box;
+}
+
+/* Топология: холст на всю высоту окна, без пустого «подвала» */
+#app-main-scroll:has(.topology-page) {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  max-height: 100vh;
+  overflow: hidden;
+  padding-bottom: 0.75rem;
+}
+
+.topology-page {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  overflow: hidden;
+}
+
+.topology-page-toolbar {
+  flex-shrink: 0;
+}
+
+.topology-workspace {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  gap: 0.65rem;
+  align-items: stretch;
+}
+
+.topology-canvas {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  position: relative;
+  overflow: hidden;
+  background: #0d0f14;
+  border: 1px solid #242a38;
+  border-radius: 8px;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.topology-canvas svg,
+.topology-canvas text,
+.topology-canvas tspan {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.topology-inspector {
+  flex: 0 0 310px;
+  width: 310px;
+  min-height: 0;
+  overflow: auto;
+}
+
+a {
+  color: #7ab8ff;
+  text-decoration: none;
+}
+a:hover {
+  text-decoration: underline;
+}
+
+code {
+  font-size: 0.9em;
+  background: #1e222c;
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+}
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.92rem;
+}
+th,
+td {
+  border-bottom: 1px solid #2a3040;
+  padding: 0.45rem 0.5rem;
+  text-align: left;
+}
+th {
+  color: #9aa3b5;
+  font-weight: 600;
+}
+
+button {
+  cursor: pointer;
+  border-radius: 6px;
+  border: 1px solid #3d4a63;
+  background: #252b38;
+  color: #e8eaef;
+  padding: 0.4rem 0.75rem;
+}
+button:hover {
+  background: #303848;
+}
+
+button.port-ignore-btn {
+  font-size: 0.8rem;
+  padding: 0.25rem 0.5rem;
+  white-space: nowrap;
+}
+button.port-ignore-btn--off {
+  background: #f0f2f6;
+  color: #1a1f2a;
+  border-color: #c5cad6;
+}
+button.port-ignore-btn--off:hover {
+  background: #e4e8ef;
+}
+button.port-ignore-btn--soft {
+  background: #e6c84a;
+  color: #1a1408;
+  border-color: #c9a82e;
+}
+button.port-ignore-btn--soft:hover {
+  background: #f0d45c;
+}
+button.port-ignore-btn--all {
+  background: #c44;
+  color: #fff;
+  border-color: #a33;
+}
+button.port-ignore-btn--all:hover {
+  background: #d55;
+}
+
+.ports-table-scroll {
+  max-height: min(65vh, calc(100vh - 12rem));
+  overflow: auto;
+  border: 1px solid #2a3040;
+  border-radius: 8px;
+  margin-top: 0.5rem;
+}
+.ports-table-scroll thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: #12141a;
+  box-shadow: 0 1px 0 #2a3040;
+}
+
+#device-ports {
+  scroll-margin-top: 0.5rem;
+}
+
+/* Карточка узла: шапка как freeze pane (Excel) — контент крутится отдельно ниже, не сквозь шапку. */
+#app-main-scroll:has(.device-detail-page) {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  max-height: 100vh;
+  overflow: hidden;
+}
+
+.device-detail-page {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.device-detail-sticky {
+  flex-shrink: 0;
+  background: #12141a;
+  padding: 0.15rem 0 0.65rem;
+  margin: 0;
+  border-bottom: 1px solid #242a38;
+}
+
+.device-detail-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding-top: 0.85rem;
+}
+
+.device-detail-back {
+  margin: 0 0 0.4rem;
+}
+
+.device-detail-sticky-name {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: baseline;
+}
+
+.device-detail-sticky-name h1 {
+  margin: 0;
+}
+
+.device-detail-topo-link {
+  font-size: 0.9rem;
+}
+
+.devices-list-scroll {
+  overflow: visible;
+  border: 1px solid #2a3040;
+  border-radius: 8px;
+  margin-top: 0.5rem;
+}
+
+/* collapse ломает sticky thead в части браузеров */
+.devices-list-scroll > table {
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.devices-list-scroll thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: #12141a;
+  box-shadow: 0 1px 0 #2a3040;
+}
+
+button.devices-sort-th {
+  background: none;
+  border: none;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+  width: calc(100% - 6px);
+}
+button.devices-sort-th:hover {
+  background: none;
+  color: #c5d4ef;
+}
+
+.port-search-inline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+button.port-expand-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  width: 100%;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+button.port-expand-btn:hover {
+  background: none;
+  color: #c5d4ef;
+}
+.port-expand-chevron {
+  display: inline-block;
+  width: 1rem;
+  color: #9aa3b5;
+  flex-shrink: 0;
+}
+
+.port-neighbors-cell {
+  max-width: 22rem;
+  max-height: 4.5rem;
+  overflow: auto;
+  white-space: normal;
+  word-break: break-word;
+  vertical-align: top;
+}
+
+.port-clients-panel {
+  background: #0d0f14;
+  border-top: 1px solid #2a3040;
+  margin: 0 0 0.25rem;
+}
+.port-clients-table {
+  width: 100%;
+  font-size: 0.88rem;
+  border-collapse: collapse;
+}
+.port-clients-table th,
+.port-clients-table td {
+  padding: 0.35rem 0.75rem;
+  border-bottom: 1px solid #1e2430;
+}
+.port-clients-table th {
+  color: #9aa3b5;
+  font-weight: 600;
+  background: #12141a;
+}
+.mac-vendor {
+  color: #9aa3b5;
+  font-weight: 400;
+}
+
+.port-descr-input {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  background: #1a1e28;
+  border: 1px solid #2a3040;
+  color: inherit;
+  font: inherit;
+  padding: 0.2rem 0.4rem;
+  border-radius: 4px;
+}
+.port-descr-input:focus {
+  outline: 1px solid #3d8bfd;
+  border-color: #3d8bfd;
+}
+.port-descr-text {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.port-descr-input::placeholder {
+  color: #6b7385;
+}
+
+.port-search-results {
+  margin-top: 0.75rem;
+  max-height: 220px;
+  overflow: auto;
+  border: 1px solid #2a3040;
+  border-radius: 8px;
+}
+
+input,
+select {
+  background: #1a1f2a;
+  border: 1px solid #3d4a63;
+  color: #e8eaef;
+  border-radius: 6px;
+  padding: 0.35rem 0.5rem;
+}
+
+.login-page {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+}
+
+.login-form {
+  width: 100%;
+  max-width: 320px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  box-sizing: border-box;
+}
+
+.login-form-logo {
+  width: 72px;
+  height: 72px;
+  border-radius: 16px;
+  align-self: center;
+}
+
+.login-form h1 {
+  margin: 0;
+  text-align: center;
+  font-size: 1.35rem;
+}
+
+.login-form-error {
+  color: #f88;
+  margin: 0;
+}
+
+.login-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.login-form input,
+.login-form button {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.45rem 0.6rem;
+}
+
+.settings-lead {
+  color: #9aa3b5;
+  font-size: 0.92rem;
+  max-width: 720px;
+  margin: 0 0 1rem;
+}
+
+.settings-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.2rem;
+  margin: 0 0 1.15rem;
+  padding: 0.15rem 0 0;
+  border-bottom: 1px solid #242a38;
+}
+
+.device-detail-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.2rem;
+  margin: 0 0 1.15rem;
+  padding: 0.15rem 0 0;
+  border-bottom: 1px solid #242a38;
+}
+
+button.device-detail-tab {
+  appearance: none;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: #9aa3b5;
+  padding: 0.55rem 0.95rem;
+  border-radius: 6px 6px 0 0;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 500;
+}
+
+button.device-detail-tab:hover {
+  color: #e8eaef;
+  background: #1a1f2a;
+}
+
+button.device-detail-tab--active,
+button.device-detail-tab--active:hover {
+  color: #fff;
+  background: #1e2430;
+  border-bottom-color: #5b8def;
+  box-shadow: none;
+}
+
+.device-detail-vlan-stub {
+  max-width: 1100px;
+}
+
+.device-detail-vlan-stub table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.75rem 0;
+  font-size: 0.9rem;
+}
+
+.device-detail-vlan-stub th,
+.device-detail-vlan-stub td {
+  text-align: left;
+  padding: 0.4rem 0.55rem;
+  border-bottom: 1px solid #242a38;
+}
+
+.device-detail-vlan-stub th {
+  color: #9aa3b5;
+  font-weight: 500;
+}
+
+button.settings-tab {
+  appearance: none;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: #9aa3b5;
+  padding: 0.55rem 0.95rem;
+  border-radius: 6px 6px 0 0;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 500;
+}
+
+button.settings-tab:hover {
+  color: #e8eaef;
+  background: #1a1f2a;
+}
+
+button.settings-tab--active,
+button.settings-tab--active:hover {
+  color: #fff;
+  background: #1e2430;
+  border-bottom-color: #5b8def;
+  box-shadow: none;
+}
+
+button.settings-tab:disabled,
+button.settings-tab.settings-tab--disabled {
+  color: #5c6478;
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+button.settings-tab:disabled:hover,
+button.settings-tab.settings-tab--disabled:hover {
+  color: #5c6478;
+  background: transparent;
+}
+
+.settings-about {
+  display: flex;
+  justify-content: center;
+  padding: 0.5rem 0 1.5rem;
+}
+
+.settings-about-card {
+  width: 100%;
+  max-width: 560px;
+  text-align: center;
+  border: 1px solid #242a38;
+  border-radius: 10px;
+  padding: 1.75rem 1.5rem 1.5rem;
+  background: #151820;
+}
+
+.settings-about-brand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.65rem;
+  margin-bottom: 1.15rem;
+}
+
+.settings-about-logo {
+  border-radius: 12px;
+  display: block;
+}
+
+.settings-about-title {
+  margin: 0;
+  font-size: 1.65rem;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  color: #e8eaef;
+}
+
+.settings-about-meta {
+  margin: 0 auto 0.25rem;
+  display: grid;
+  gap: 0.55rem;
+  text-align: left;
+  max-width: 22rem;
+}
+
+.settings-about-meta > div {
+  display: grid;
+  grid-template-columns: 5.5rem 1fr;
+  gap: 0.5rem;
+  align-items: baseline;
+}
+
+.settings-about-meta dt {
+  margin: 0;
+  color: #9aa3b5;
+  font-size: 0.88rem;
+}
+
+.settings-about-meta dd {
+  margin: 0;
+  color: #e8eaef;
+  font-size: 0.95rem;
+}
+
+.settings-about-meta a {
+  color: #7eb8ff;
+  text-decoration: none;
+}
+
+.settings-about-meta a:hover {
+  text-decoration: underline;
+}
+
+.settings-about-muted {
+  color: #7a8499;
+  font-size: 0.85rem;
+}
+
+.settings-about-sep {
+  border: none;
+  border-top: 1px solid #2a3140;
+  margin: 1.15rem 0 1rem;
+}
+
+.settings-about-lead {
+  margin: 0 0 0.85rem;
+  color: #c5cad6;
+  font-size: 0.95rem;
+  line-height: 1.45;
+  text-align: left;
+}
+
+.settings-about-list {
+  margin: 0;
+  padding: 0 0 0 1.15rem;
+  text-align: left;
+  color: #9aa3b5;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.settings-about-list li {
+  margin-bottom: 0.35rem;
+}
+
+.settings-card {
+  border: 1px solid #242a38;
+  border-radius: 8px;
+  padding: 1rem 1.15rem 1.15rem;
+  margin-bottom: 1rem;
+  background: #151820;
+  max-width: 760px;
+}
+
+.settings-card h2 {
+  margin: 0 0 0.65rem;
+  font-size: 1.12rem;
+}
+
+.settings-card h3 {
+  margin: 1rem 0 0.4rem;
+}
+
+.settings-card--danger {
+  border-color: #4a2a2a;
+}
+
+.settings-card--journal {
+  max-width: none;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.journal-modes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-bottom: 0.85rem;
+}
+
+.journal-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.25rem;
+  margin-bottom: 0.75rem;
+}
+
+.journal-cats {
+  margin-bottom: 0.75rem;
+}
+
+.journal-cats-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem 1rem;
+}
+
+.journal-cat {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.9rem;
+}
+
+.journal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.65rem;
+  margin-bottom: 0.65rem;
+}
+
+.journal-view-wrap {
+  resize: both;
+  overflow: hidden;
+  box-sizing: border-box;
+  width: 720px;
+  height: 360px;
+  min-width: 320px;
+  min-height: 160px;
+  max-width: 100%;
+  background: #0b1220;
+  border: 1px solid #243049;
+  border-radius: 6px;
+}
+
+.journal-view {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  max-height: none;
+  overflow: auto;
+  box-sizing: border-box;
+  padding: 0.75rem;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: #c8d0e0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.journal-resize-hint {
+  margin: 0.4rem 0 0;
+  font-size: 0.8rem;
+  color: #9aa3b5;
+}
+
+.port-admin-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.25rem;
+}
+
+.port-admin-btns {
+  display: flex;
+  gap: 0.25rem;
+}
+
+button.port-admin-btn {
+  font-size: 0.72rem;
+  padding: 0.12rem 0.4rem;
+  line-height: 1.2;
+}
+
+button.port-admin-btn--down {
+  border-color: #844;
+  color: #f0a0a0;
+}
+
+.settings-soon {
+  display: inline-block;
+  margin-left: 0.45rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  vertical-align: middle;
+  padding: 0.12rem 0.45rem;
+  border-radius: 4px;
+  background: #2a3140;
+  color: #c5cedd;
+}
+
+.settings-notif-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  max-width: 560px;
+}
+
+.settings-channel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  padding: 0.85rem 0.95rem;
+  border: 1px solid #3a4458;
+  border-radius: 8px;
+  background: #12151c;
+}
+
+.settings-channel strong {
+  font-size: 0.98rem;
+}
+
+.settings-users-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  max-width: 720px;
+}
+
+.settings-user-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.45rem 0.6rem;
+  border-radius: 8px;
+  border: 1px solid #242a38;
+  background: #12151c;
+}
+
+.settings-user-row-info {
+  color: #c5cedd;
+  font-size: 0.95rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.settings-user-delete-btn {
+  border-color: #844;
+  background: #252b38;
+}
+
+.settings-user-delete-btn:hover {
+  background: #3a2a2a;
+}

@@ -1,0 +1,21 @@
+[Unit]
+Description=NetLynx SNMP monitoring service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=netlynx
+Group=netlynx
+WorkingDirectory=/opt/netlynx
+EnvironmentFile=/etc/netlynx/netlynx.env
+ExecStart=/usr/local/bin/netlynxd
+Restart=always
+RestartSec=3
+# ICMP для «онлайн» (raw socket); нужен при NoNewPrivileges (иначе /usr/bin/ping без caps).
+AmbientCapabilities=CAP_NET_RAW
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
