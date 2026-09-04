@@ -27,6 +27,7 @@ NetLynx опрашивает узлы по SNMP (интерфейсы, LLDP/CDP,
    - **RW** — если планируете shutdown / описание порта / incident admin down из NetLynx.
 3. Ограничьте доступ по ACL/source IP до сервера NetLynx (рекомендуется).
 4. Не используйте `public`/`private` на production без ACL.
+5. Для **автообнаружения** и топологии по соседям на тех же свитчах включите **LLDP** (на портах; у Cisco — при необходимости ещё CDP). NetLynx сам SNMP/LLDP на железе не включает — см. [Autodiscover.md](Autodiscover.md).
 
 Примеры смысла (синтаксис зависит от вендора):
 
@@ -58,6 +59,7 @@ Trap community (приём SNMP trap на сервере) — это **друг�
 ## Связанные документы
 
 - [Runbook-Linux.md](Runbook-Linux.md) — развёртывание сервера
+- [Autodiscover.md](Autodiscover.md) — LLDP/CDP, «Обнаружено», требования на свитче
 - [Vendors.md](Vendors.md) — поддержка производителей
 - [Roles.md](Roles.md) — кто может менять узлы и включать действия
 - [PoE-detection.md](PoE-detection.md) — опрос PoE

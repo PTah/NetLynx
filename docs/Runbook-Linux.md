@@ -36,6 +36,7 @@
 - Доступ в интернет (apt, Docker Hub, npm, Go modules).
 - С вашего ПК до сервера открыт порт **8080/tcp** (или 80/443, если позже поставите nginx).
 - Свитчи должны отвечать по **SNMP** из сети, где стоит NetLynx.
+- Для **автообнаружения** и топологии по соседям на свитчах нужны ещё **LLDP** (и CDP у Cisco) — NetLynx их сам не включает: [Autodiscover.md](Autodiscover.md).
 
 ---
 
@@ -298,8 +299,9 @@ curl -sI "http://127.0.0.1/" -H "Host: $(grep '^NETLYNX_PUBLIC_URL=' /etc/netlyn
 ## Шаг 6. Добавить коммутатор (SNMP)
 
 1. На свитче включите **SNMP v2c** (community **read-only** для мониторинга).
-2. В NetLynx: **Узлы → Добавить** — IP свитча, community, интервал опроса.
-3. Кнопка **Test SNMP** — должны появиться sysName / sysDescr.
+2. Для страницы **«Обнаружено»** и карты топологии по LLDP — включите **LLDP** на портах свитча; на ПК/серверах у портов — желательно LLDP-агент (Windows / `lldpd`). NetLynx службы сам не ставит: [Autodiscover.md](Autodiscover.md).
+3. В NetLynx: **Узлы → Добавить** — IP свитча, community, интервал опроса.
+4. Кнопка **Test SNMP** — должны появиться sysName / sysDescr.
 
 Подробно: [SNMP-Community.md](SNMP-Community.md). Поддерживаемые вендоры: [Vendors.md](Vendors.md).
 
