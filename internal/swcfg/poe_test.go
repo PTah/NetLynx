@@ -22,3 +22,32 @@ func TestUbiquitiPoEOpmodeCLI(t *testing.T) {
 		t.Fatal("expected error")
 	}
 }
+
+func TestUbiquitiPoEResetCLI(t *testing.T) {
+	got, err := UbiquitiPoEResetCLI(10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "poe reset 10" {
+		t.Fatalf("got %q", got)
+	}
+	if _, err := UbiquitiPoEResetCLI(0); err == nil {
+		t.Fatal("expected error")
+	}
+	if _, err := UbiquitiPoEResetCLI(61); err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestCompactUbiquitiInterfaceRange(t *testing.T) {
+	got, ok := CompactUbiquitiInterfaceRange([]string{"0/7", "0/4", "0/5", "0/6"})
+	if !ok || got != "0/4-0/7" {
+		t.Fatalf("got %q ok=%v", got, ok)
+	}
+	if _, ok := CompactUbiquitiInterfaceRange([]string{"0/4", "0/6"}); ok {
+		t.Fatal("gap should fail")
+	}
+	if _, ok := CompactUbiquitiInterfaceRange([]string{"GigabitEthernet1/0/1", "GigabitEthernet1/0/2"}); ok {
+		t.Fatal("non-ubnt names")
+	}
+}

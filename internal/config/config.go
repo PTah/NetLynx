@@ -63,7 +63,16 @@ type Config struct {
 	SyslogListenAddr      string
 	MACFlapMinMoves       int           // ≥K смен порта за окно → MAC_FLAPPING
 	MACFlapWindow         time.Duration // окно подсчёта moves
-	MACFlapDebounce       time.Duration // не повторять событие чаще
+	MACFlapDebounce       time.Duration
+
+	// PORT_FLAP: N LINK_UP/DOWN на порту за окно.
+	PortFlapMinBounces int
+	PortFlapWindow     time.Duration
+	PortFlapDebounce   time.Duration
+
+	// Loop watch: периодический DFS, событие на новый cycle key.
+	LoopWatchEnabled  bool
+	LoopWatchInterval time.Duration // не повторять событие чаще
 	MACMovesRetentionDays int           // prune mac_fdb_moves
 
 	// Broadcast storm heuristic (poller): ≥N ports above util % + FDB growth.
@@ -84,6 +93,12 @@ type Config struct {
 	ConfigSnapshotEnabled       bool
 	ConfigSnapshotInterval      time.Duration
 	ConfigSnapshotRetentionDays int
+
+	// Кэш L2-топологии (adj/root/dist) для VLAN delete-impact / blast-radius.
+	TopologyBlastCacheEnabled  bool
+	TopologyBlastCacheInterval time.Duration
+	TopologyBlastNightHour     int // 0–23, wall-clock nightly rebuild
+	TopologyBlastHistoryDays   int
 
 	// PublicBaseURL — публичный URL UI для ссылок в письмах (http://host:8080).
 	PublicBaseURL string
@@ -275,6 +290,49 @@ func Load() (Config, error) {
 		}
 		c.MACFlapDebounce = time.Duration(n) * time.Second
 	}
+	c.PortFlapMinBounces = 4
+	if v := os.Getenv("PORT_FLAP_MIN_BOUNCES"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 2 || n > 100 {
+			return Config{}, fmt.Errorf("PORT_FLAP_MIN_BOUNCES: invalid value %q (ожидается 2–100)", v)
+		}
+		c.PortFlapMinBounces = n
+	}
+	c.PortFlapWindow = 10 * time.Minute
+	if v := os.Getenv("PORT_FLAP_WINDOW_SECONDS"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 60 || n > 86400 {
+			return Config{}, fmt.Errorf("PORT_FLAP_WINDOW_SECONDS: invalid value %q", v)
+		}
+		c.PortFlapWindow = time.Duration(n) * time.Second
+	}
+	c.PortFlapDebounce = 15 * time.Minute
+	if v := os.Getenv("PORT_FLAP_DEBOUNCE_SECONDS"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 60 || n > 86400 {
+			return Config{}, fmt.Errorf("PORT_FLAP_DEBOUNCE_SECONDS: invalid value %q", v)
+		}
+		c.PortFlapDebounce = time.Duration(n) * time.Second
+	}
+	c.LoopWatchEnabled = true
+	if v := os.Getenv("LOOP_WATCH_ENABLED"); v != "" {
+		switch strings.ToLower(strings.TrimSpace(v)) {
+		case "0", "false", "off", "no":
+			c.LoopWatchEnabled = false
+		case "1", "true", "on", "yes":
+			c.LoopWatchEnabled = true
+		default:
+			return Config{}, fmt.Errorf("LOOP_WATCH_ENABLED: invalid value %q", v)
+		}
+	}
+	c.LoopWatchInterval = 15 * time.Minute
+	if v := os.Getenv("LOOP_WATCH_INTERVAL_SECONDS"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 60 || n > 86400 {
+			return Config{}, fmt.Errorf("LOOP_WATCH_INTERVAL_SECONDS: invalid value %q", v)
+		}
+		c.LoopWatchInterval = time.Duration(n) * time.Second
+	}
 	c.MACMovesRetentionDays = 14
 	if v := os.Getenv("MAC_MOVES_RETENTION_DAYS"); v != "" {
 		n, err := strconv.Atoi(v)
@@ -367,6 +425,32 @@ func Load() (Config, error) {
 			return Config{}, fmt.Errorf("CONFIG_SNAPSHOT_RETENTION_DAYS: invalid value %q (7–730)", v)
 		}
 		c.ConfigSnapshotRetentionDays = n
+	}
+
+	c.TopologyBlastCacheEnabled = !strings.EqualFold(strings.TrimSpace(getenv("TOPOLOGY_BLAST_CACHE_ENABLED", "true")), "false")
+	c.TopologyBlastCacheInterval = time.Hour
+	if v := os.Getenv("TOPOLOGY_BLAST_CACHE_INTERVAL_MINUTES"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 5 || n > 24*60 {
+			return Config{}, fmt.Errorf("TOPOLOGY_BLAST_CACHE_INTERVAL_MINUTES: invalid value %q (5–1440)", v)
+		}
+		c.TopologyBlastCacheInterval = time.Duration(n) * time.Minute
+	}
+	c.TopologyBlastNightHour = 3
+	if v := os.Getenv("TOPOLOGY_BLAST_NIGHT_HOUR"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 0 || n > 23 {
+			return Config{}, fmt.Errorf("TOPOLOGY_BLAST_NIGHT_HOUR: invalid value %q (0–23)", v)
+		}
+		c.TopologyBlastNightHour = n
+	}
+	c.TopologyBlastHistoryDays = 30
+	if v := os.Getenv("TOPOLOGY_BLAST_HISTORY_DAYS"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 7 || n > 365 {
+			return Config{}, fmt.Errorf("TOPOLOGY_BLAST_HISTORY_DAYS: invalid value %q (7–365)", v)
+		}
+		c.TopologyBlastHistoryDays = n
 	}
 
 	c.AccessTokenTTL = 15 * time.Minute

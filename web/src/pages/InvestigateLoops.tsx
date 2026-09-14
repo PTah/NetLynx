@@ -28,6 +28,7 @@ type LoopReport = {
   node_count: number;
   edge_count: number;
   protocol: string;
+  source?: string;
   generated_at: string;
 };
 
@@ -39,7 +40,7 @@ export default function InvestigateLoops() {
   const load = useCallback(() => {
     setLoading(true);
     setErr(null);
-    apiGet<LoopReport>("/api/v1/investigate/loops?protocol=lldp")
+    apiGet<LoopReport>("/api/v1/investigate/loops")
       .then(setReport)
       .catch((e) => setErr(e instanceof Error ? e.message : String(e)))
       .finally(() => setLoading(false));
@@ -53,10 +54,10 @@ export default function InvestigateLoops() {
     <div style={{ padding: "1rem 1.25rem", maxWidth: 1100 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
         <div>
-          <h1 style={{ margin: 0, fontSize: "1.35rem" }}>Петли топологии (LLDP)</h1>
+          <h1 style={{ margin: 0, fontSize: "1.35rem" }}>Петли топологии</h1>
           <p style={{ color: "#9aa3b5", margin: "0.35rem 0 0", fontSize: "0.9rem" }}>
-            DFS по графу LLDP-соседей inventory. Отдельно от MAC flapping — ищем циклы устройств и параллельные
-            аплинки.
+            DFS по скелету blast-cache (LLDP+CDP+manual), как VLAN blast. Отдельно от MAC flapping — ищем циклы
+            устройств и параллельные аплинки.
           </p>
         </div>
         <button type="button" onClick={load} disabled={loading}>
@@ -68,13 +69,14 @@ export default function InvestigateLoops() {
 
       {report ? (
         <p style={{ color: "#9aa3b5", fontSize: "0.85rem" }}>
-          Узлов в графе: {report.node_count}, рёбер: {report.edge_count}, протокол: {report.protocol}.{" "}
-          Сформировано: {new Date(report.generated_at).toLocaleString("ru-RU")}
+          Узлов в графе: {report.node_count}, рёбер: {report.edge_count}, источник: {report.source || report.protocol}
+          {report.protocol ? ` (${report.protocol})` : ""}. Сформировано:{" "}
+          {new Date(report.generated_at).toLocaleString("ru-RU")}
         </p>
       ) : null}
 
       {!loading && report && (report.cycles ?? []).length === 0 ? (
-        <p style={{ color: "#8d8" }}>Циклов не найдено — по LLDP топология без петель (или мало соседей).</p>
+        <p style={{ color: "#8d8" }}>Циклов не найдено — топология без петель (или мало соседей / пустой кэш).</p>
       ) : null}
 
       {report?.cycles?.map((c, idx) => (

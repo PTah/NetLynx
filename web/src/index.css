@@ -296,9 +296,10 @@ button.port-ignore-btn--all:hover {
 .device-detail-sticky {
   flex-shrink: 0;
   background: #12141a;
-  padding: 0.15rem 0 0.65rem;
+  padding: 0.15rem 0 0;
   margin: 0;
   border-bottom: 1px solid #242a38;
+  z-index: 5;
 }
 
 .device-detail-body {
@@ -537,9 +538,61 @@ select {
   display: flex;
   flex-wrap: wrap;
   gap: 0.2rem;
-  margin: 0 0 1.15rem;
+  margin: 0.55rem 0 0;
   padding: 0.15rem 0 0;
-  border-bottom: 1px solid #242a38;
+  border-bottom: none;
+}
+
+.device-detail-sticky .device-detail-tabs {
+  margin-bottom: 0;
+}
+
+.device-detail-port-bulk {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem 0.75rem;
+  margin: 0.55rem 0 0.55rem;
+  padding: 0.55rem 0.7rem;
+  background: linear-gradient(180deg, rgba(59, 130, 246, 0.18), rgba(59, 130, 246, 0.08));
+  border: 1px solid rgba(91, 141, 239, 0.45);
+  border-radius: 8px;
+}
+
+.device-detail-port-bulk-title {
+  font-weight: 600;
+  font-size: 0.92rem;
+  color: #dce7ff;
+}
+
+.device-detail-port-bulk-hint {
+  font-size: 0.8rem;
+  color: #9bb0d4;
+}
+
+.device-detail-port-bulk-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-left: auto;
+}
+
+.port-if-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.port-if-select input[type="checkbox"] {
+  width: 0.95rem;
+  height: 0.95rem;
+  accent-color: #3b82f6;
+  cursor: pointer;
+}
+
+tr.port-row--selected {
+  background: rgba(59, 130, 246, 0.14) !important;
+  box-shadow: inset 0 0 0 1px rgba(91, 141, 239, 0.4);
 }
 
 button.device-detail-tab {

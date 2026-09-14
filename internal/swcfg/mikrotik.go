@@ -71,6 +71,13 @@ func MikrotikPortCmds(iface string, ch PortChange) ([]string, error) {
 		// poe строка уже содержит полный путь команды с плейсхолдером %s или find.
 		cmds = append(cmds, fmt.Sprintf(poe, find))
 	}
+	if ch.PoEResetSeconds != nil {
+		sec, err := NormalizePoEResetSeconds(*ch.PoEResetSeconds)
+		if err != nil {
+			return nil, err
+		}
+		cmds = append(cmds, fmt.Sprintf("/interface ethernet poe power-cycle %s duration=%ds", find, sec))
+	}
 	if len(cmds) == 0 {
 		return nil, fmt.Errorf("нечего менять")
 	}

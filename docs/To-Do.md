@@ -147,6 +147,14 @@
 
 Сознательно **не в ближайшем релизе** — продукт уже рабочий; это улучшения и паритет:
 
+### NMS backlog (после blast 0.8.x / investigate 0.9.x)
+
+- [ ] **Полный NMS UI (DNA/LibreNMS-уровень).** UI уже есть (карта, VLAN, investigate). Здесь — расширение: граф с путями/петлями/VLAN-раскраской как главный продукт, дашборды сегментов, drill-down blast. Делать после зрелой модели сети.
+- [ ] **Hard-block DELETE VLAN на любой warning.** Сейчас блокируется только mgmt SVI (host = SVI IP). «На любой warning» = запрет при downlink/gateway/FDB. Отложено: ложные срабатывания остановят чистку vlan database.
+- [ ] **FDB как скелет топологии.** Сейчас скелет: LLDP + CDP + manual (+ VLAN-on-edge). FDB — клиенты/moves. «FDB-скелет» = угадывать свитч↔свитч по куче MAC — шум (AP/телефоны).
+
+### Прочее
+
 - [ ] TanStack Query + split giant pages (DeviceDetail, Settings, …)
 - [ ] Desktop parity / safeStorage warning / recent_events
 - [ ] Incident actions 2.0 дальше: per-device rules, webhook action, admin_up

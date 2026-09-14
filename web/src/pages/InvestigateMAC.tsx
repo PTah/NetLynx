@@ -156,10 +156,23 @@ type Report = {
   };
   investigation: InvestigationStatus;
   hypotheses: Hypothesis[];
+  likely_cause?: {
+    id: string;
+    title: string;
+    confidence: string;
+    explanation: string;
+  };
   timeline: Timeline[];
   footprint: Footprint[];
   fdb_history?: FDBHistoryPoint[];
   l2_paths?: L2Path[];
+  loops_touching?: {
+    length: number;
+    device_ids: number[];
+    device_names: string[];
+    summary: string;
+    cycle_key?: string;
+  }[];
   move_graph?: { nodes: MoveGraphNode[]; edges: MoveGraphEdge[] };
   correlated_events: CorrEvent[];
   wifi_untracked?: boolean;
@@ -506,6 +519,25 @@ export default function InvestigateMAC() {
             <p style={{ color: "#8d8", marginBottom: "1rem" }}>{actionMsg}</p>
           ) : null}
 
+          {report.likely_cause ? (
+            <div
+              role="status"
+              style={{
+                marginBottom: "1rem",
+                padding: "0.75rem 1rem",
+                borderRadius: 6,
+                border: "1px solid #3a4a62",
+                background: "#1a2230",
+              }}
+            >
+              <strong>Вероятная причина:</strong> {report.likely_cause.title}
+              <span style={{ color: "#9aa3b5", marginLeft: 8, fontSize: "0.85rem" }}>
+                ({report.likely_cause.id}, {confLabel(report.likely_cause.confidence)})
+              </span>
+              <div style={{ color: "#c5cddb", fontSize: "0.9rem", marginTop: 4 }}>{report.likely_cause.explanation}</div>
+            </div>
+          ) : null}
+
           <section style={{ marginBottom: "1.5rem", padding: "0.75rem 1rem", background: "#141820", borderRadius: 6, border: "1px solid #2a3344" }}>
             <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
               <strong>Расследование:</strong>
@@ -627,6 +659,33 @@ export default function InvestigateMAC() {
                 </div>
               </div>
             ))}
+          </section>
+
+          <section style={{ marginBottom: "1.5rem" }}>
+            <h2 style={{ fontSize: "1.1rem" }}>Петли, задевающие путь MAC</h2>
+            <p style={{ color: "#9aa3b5", fontSize: "0.85rem", marginTop: 0 }}>
+              Циклы топологии (blast-cache), пересекающие footprint этого MAC. Полный отчёт —{" "}
+              <Link to="/investigate/loops">/investigate/loops</Link>.
+            </p>
+            {!report.loops_touching || report.loops_touching.length === 0 ? (
+              <p style={{ color: "#9aa3b5" }}>Нет пересечений с известными циклами (или гипотеза петли не сработала).</p>
+            ) : (
+              report.loops_touching.map((c, i) => (
+                <div
+                  key={c.cycle_key || `${c.summary}-${i}`}
+                  style={{
+                    border: "1px solid #2a3344",
+                    borderRadius: 6,
+                    padding: "0.6rem 0.85rem",
+                    marginBottom: "0.5rem",
+                    background: "#141820",
+                  }}
+                >
+                  <div style={{ fontFamily: "ui-monospace, monospace", fontSize: "0.9rem" }}>{c.summary}</div>
+                  <div style={{ color: "#9aa3b5", fontSize: "0.8rem", marginTop: 4 }}>длина {c.length}</div>
+                </div>
+              ))
+            )}
           </section>
 
           <section style={{ marginBottom: "1.5rem" }}>

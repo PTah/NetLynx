@@ -265,9 +265,11 @@ func (s *Server) handlePatchDevice(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	s.audit(r, "device.update", "device", &id, map[string]interface{}{
+	details := map[string]interface{}{
 		"name": body.Name, "host": body.Host, "snmp_version": body.SNMPVersion,
-	})
+	}
+	s.audit(r, "device.update", "device", &id, details)
+	s.emitConfigEditEvent(r, id, nil, "device.snmp", details)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "id": id})
 }
 
@@ -1040,7 +1042,9 @@ func (s *Server) handlePatchDeviceName(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	s.audit(r, "device.rename", "device", &id, map[string]interface{}{"name": name})
+	details := map[string]interface{}{"name": name}
+	s.audit(r, "device.rename", "device", &id, details)
+	s.emitConfigEditEvent(r, id, nil, "device.name", details)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "id": id, "name": name})
 }
 
@@ -1079,7 +1083,9 @@ func (s *Server) handlePatchDeviceHost(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	s.audit(r, "device.host", "device", &id, map[string]interface{}{"host": strings.TrimSpace(host)})
+	details := map[string]interface{}{"host": strings.TrimSpace(host)}
+	s.audit(r, "device.host", "device", &id, details)
+	s.emitConfigEditEvent(r, id, nil, "device.host", details)
 	outHost := strings.TrimSpace(host)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "id": id, "host": outHost})
 }
@@ -1121,7 +1127,9 @@ func (s *Server) handlePatchDeviceChassisMAC(w http.ResponseWriter, r *http.Requ
 			outMAC = mac
 		}
 	}
-	s.audit(r, "device.chassis_mac", "device", &id, map[string]interface{}{"chassis_mac": outMAC})
+	details := map[string]interface{}{"chassis_mac": outMAC}
+	s.audit(r, "device.chassis_mac", "device", &id, details)
+	s.emitConfigEditEvent(r, id, nil, "device.chassis_mac", details)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "id": id, "chassis_mac": outMAC})
 }
 
@@ -1152,7 +1160,9 @@ func (s *Server) handlePatchDeviceOnlineOverride(w http.ResponseWriter, r *http.
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	s.audit(r, "device.online_override", "device", &id, map[string]interface{}{"mode": mode})
+	details := map[string]interface{}{"mode": mode}
+	s.audit(r, "device.online_override", "device", &id, details)
+	s.emitConfigEditEvent(r, id, nil, "device.online_override", details)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "id": id, "mode": mode})
 }
 
@@ -1179,7 +1189,9 @@ func (s *Server) handlePatchDeviceTrustLinkTraps(w http.ResponseWriter, r *http.
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	s.audit(r, "device.trust_link_traps", "device", &id, map[string]interface{}{"trust_link_traps": body.TrustLinkTraps})
+	details := map[string]interface{}{"trust_link_traps": body.TrustLinkTraps}
+	s.audit(r, "device.trust_link_traps", "device", &id, details)
+	s.emitConfigEditEvent(r, id, nil, "device.trust_link_traps", details)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "id": id, "trust_link_traps": body.TrustLinkTraps})
 }
 
@@ -1207,6 +1219,11 @@ func (s *Server) handlePatchDeviceLocation(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	s.audit(r, "device.location.update", "device", &id, nil)
+	locDetails := map[string]interface{}{}
+	if body.Location != nil {
+		locDetails["location"] = strings.TrimSpace(*body.Location)
+	}
+	s.emitConfigEditEvent(r, id, nil, "device.location", locDetails)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "id": id})
 }
 
@@ -1248,7 +1265,9 @@ func (s *Server) handlePatchDeviceCategory(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	s.audit(r, "device.category.update", "device", &id, map[string]interface{}{"device_category": cat})
+	details := map[string]interface{}{"device_category": cat}
+	s.audit(r, "device.category.update", "device", &id, details)
+	s.emitConfigEditEvent(r, id, nil, "device.category", details)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "id": id, "device_category": cat})
 }
 
@@ -1275,9 +1294,11 @@ func (s *Server) handlePatchDevicePollInterval(w http.ResponseWriter, r *http.Re
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	s.audit(r, "device.poll_interval.update", "device", &id, map[string]interface{}{
+	details := map[string]interface{}{
 		"poll_interval_seconds": body.PollIntervalSeconds,
-	})
+	}
+	s.audit(r, "device.poll_interval.update", "device", &id, details)
+	s.emitConfigEditEvent(r, id, nil, "device.poll_interval", details)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "id": id, "poll_interval_seconds": body.PollIntervalSeconds})
 }
 

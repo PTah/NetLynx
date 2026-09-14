@@ -215,14 +215,16 @@ func (s *Server) handlePatchPortVLAN(w http.ResponseWriter, r *http.Request) {
 	_ = s.st.UpdateInterfaceVLANAfterCLI(r.Context(), deviceID, ifIndex, ch.Op, ch.VLANID)
 	s.refreshConfigAfterVLANDB(r.Context(), deviceID, creds)
 	via, inv, _ := s.deviceVLANInventory(r.Context(), deviceID)
-	s.audit(r, "port.vlan.update", "device", &deviceID, map[string]interface{}{
-		"if_index":       ifIndex,
-		"op":             ch.Op,
-		"vlan_id":        ch.VLANID,
-		"allowed_mode":   ch.AllowedMode,
-		"allowed_vlans":  swcfg.NormalizeVLANList(ch.AllowedList),
-		"via":            "ssh",
-	})
+	details := map[string]interface{}{
+		"if_index":      ifIndex,
+		"op":            ch.Op,
+		"vlan_id":       ch.VLANID,
+		"allowed_mode":  ch.AllowedMode,
+		"allowed_vlans": swcfg.NormalizeVLANList(ch.AllowedList),
+		"via":           "ssh",
+	}
+	s.audit(r, "port.vlan.update", "device", &deviceID, details)
+	s.emitConfigEditEvent(r, deviceID, &ifIndex, "port.vlan", details)
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"ok": true, "op": ch.Op, "vlan_id": ch.VLANID, "via": "ssh",
 		"allowed_mode": ch.AllowedMode, "allowed_vlans": swcfg.NormalizeVLANList(ch.AllowedList),
@@ -310,9 +312,11 @@ func (s *Server) handleCreateDeviceVLAN(w http.ResponseWriter, r *http.Request) 
 	}
 	s.refreshConfigAfterVLANDB(r.Context(), deviceID, creds)
 	via, inv, _ := s.deviceVLANInventory(r.Context(), deviceID)
-	s.audit(r, "vlan.database.create", "device", &deviceID, map[string]interface{}{
+	details := map[string]interface{}{
 		"vlan_id": body.VLANID, "name": name, "via": "ssh",
-	})
+	}
+	s.audit(r, "vlan.database.create", "device", &deviceID, details)
+	s.emitConfigEditEvent(r, deviceID, nil, "vlan.database.create", details)
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"ok": true, "vlan_id": body.VLANID, "name": name, "via": "ssh",
 		"source": via, "vlans": inv,
@@ -362,9 +366,11 @@ func (s *Server) handlePatchDeviceVLAN(w http.ResponseWriter, r *http.Request) {
 	}
 	s.refreshConfigAfterVLANDB(r.Context(), deviceID, creds)
 	via, inv, _ := s.deviceVLANInventory(r.Context(), deviceID)
-	s.audit(r, "vlan.database.name", "device", &deviceID, map[string]interface{}{
+	details := map[string]interface{}{
 		"vlan_id": vlanID, "name": name, "via": "ssh",
-	})
+	}
+	s.audit(r, "vlan.database.name", "device", &deviceID, details)
+	s.emitConfigEditEvent(r, deviceID, nil, "vlan.database.name", details)
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"ok": true, "vlan_id": vlanID, "name": name, "via": "ssh",
 		"source": via, "vlans": inv,
@@ -443,6 +449,23 @@ func (s *Server) applyDeleteDeviceVLANs(w http.ResponseWriter, r *http.Request, 
 		writeError(w, http.StatusConflict, "сначала снимите VLAN с портов («Убрать с порта» / Access→другой VLAN), затем удаляйте из vlan database. "+strings.Join(blocked, "; "))
 		return
 	}
+	// Hard-block: management SVI = devices.host
+	cfgText, _ := s.deviceConfigTextForVLAN(r.Context(), deviceID)
+	dev, _ := s.st.GetDevice(r.Context(), deviceID)
+	host := ""
+	if dev != nil {
+		host = dev.Host
+	}
+	if vid, sip, ok := swcfg.MgmtVLANFromSVI(host, swcfg.ParseSVIAddresses(cfgText)); ok {
+		for _, id := range ch.DeleteIDs() {
+			if id == vid {
+				writeError(w, http.StatusConflict, fmt.Sprintf(
+					"удаление запрещено: VLAN %d — management SVI этого свитча (host %s = %s)",
+					vid, host, sip))
+				return
+			}
+		}
+	}
 	creds, err := s.resolveDeviceSSH(r.Context(), deviceID)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, err.Error())
@@ -455,9 +478,11 @@ func (s *Server) applyDeleteDeviceVLANs(w http.ResponseWriter, r *http.Request, 
 	s.refreshConfigAfterVLANDB(r.Context(), deviceID, creds)
 	via, inv, _ := s.deviceVLANInventory(r.Context(), deviceID)
 	deleted := ch.DeleteIDs()
-	s.audit(r, "vlan.database.delete", "device", &deviceID, map[string]interface{}{
+	details := map[string]interface{}{
 		"vlan_ids": deleted, "via": "ssh",
-	})
+	}
+	s.audit(r, "vlan.database.delete", "device", &deviceID, details)
+	s.emitConfigEditEvent(r, deviceID, nil, "vlan.database.delete", details)
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"ok": true, "vlan_ids": deleted, "via": "ssh",
 		"source": via, "vlans": inv,

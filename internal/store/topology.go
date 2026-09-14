@@ -58,6 +58,10 @@ type TopologyEdge struct {
 type TopologyGraph struct {
 	Nodes []TopologyNode `json:"nodes"`
 	Edges []TopologyEdge `json:"edges"`
+	// VLANFilterID — запрошенный vlan_id (подсветка по vlan database, не фильтр рёбер).
+	VLANFilterID *int `json:"vlan_filter_id,omitempty"`
+	// VLANMatchDeviceIDs — узлы, у которых VLAN есть в show run vlan database.
+	VLANMatchDeviceIDs []int64 `json:"vlan_match_device_ids,omitempty"`
 }
 
 // TopologyFilter — серверная фильтрация графа.
@@ -67,7 +71,6 @@ type TopologyFilter struct {
 	Protocol     string // lldp | cdp | ""
 	IncludeStale *bool  // nil = true
 	Depth        *int
-	VlanID       *int
 	Location     string
 	Dedup        bool // default true: слить LLDP+CDP между парой портов
 }
@@ -864,7 +867,8 @@ func virtualPeerIdentity(e TopologyEdge) (key, label string) {
 	return key, label
 }
 
-// ApplyTopologyFilter применяет q / device_id / protocol / stale / depth / vlan / location.
+// ApplyTopologyFilter применяет q / device_id / protocol / stale / depth / location.
+// Подсветка VLAN (vlan database) — на уровне API, не здесь.
 func ApplyTopologyFilter(g *TopologyGraph, f TopologyFilter) *TopologyGraph {
 	if g == nil {
 		return g
@@ -915,7 +919,7 @@ func ApplyTopologyFilter(g *TopologyGraph, f TopologyFilter) *TopologyGraph {
 	}
 
 	proto := strings.ToLower(strings.TrimSpace(f.Protocol))
-	if proto != "" || !includeStale || f.VlanID != nil {
+	if proto != "" || !includeStale {
 		filtered := make([]TopologyEdge, 0, len(edges))
 		for _, e := range edges {
 			if !includeStale && e.Stale {
@@ -924,14 +928,10 @@ func ApplyTopologyFilter(g *TopologyGraph, f TopologyFilter) *TopologyGraph {
 			if proto != "" && !edgeHasProtocol(e, proto) {
 				continue
 			}
-			if f.VlanID != nil && (e.VlanID == nil || *e.VlanID != *f.VlanID) {
-				continue
-			}
 			filtered = append(filtered, e)
 		}
 		edges = filtered
-		// оставить узлы, связанные оставшимися рёбрами + изолированные inventory при отсутствии edge-фильтров по vlan?
-		if f.VlanID != nil || proto != "" {
+		if proto != "" {
 			keep := map[int64]bool{}
 			for _, e := range edges {
 				keep[e.LocalDeviceID] = true
@@ -940,8 +940,6 @@ func ApplyTopologyFilter(g *TopologyGraph, f TopologyFilter) *TopologyGraph {
 				}
 			}
 			nodes, edges = filterGraphByNodes(nodes, edges, keep, false)
-		} else if !includeStale {
-			// узлы без изменений
 		}
 	}
 

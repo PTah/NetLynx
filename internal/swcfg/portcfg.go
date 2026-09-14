@@ -12,14 +12,17 @@ import (
 )
 
 // PortChange — изменение порта через CLI (configure → interface → …).
+// Interface может быть диапазоном EdgeSwitch: "0/4-0/7".
 type PortChange struct {
-	Interface string // ifName, напр. "0/1" или "GigabitEthernet 1/0/1"
+	Interface string // ifName, напр. "0/1", "0/4-0/7" или "GigabitEthernet 1/0/1"
 	// Description: nil = не трогать; указатель на "" = снять description.
 	Description *string
 	// AdminUp: nil = не трогать; true = no shutdown; false = shutdown.
 	AdminUp *bool
 	// PoEMode: nil = не трогать; "off" | "24v" | "poe+"
 	PoEMode *string
+	// PoEResetSeconds: nil = не трогать; 1..60 — сброс питания PoE (EdgeSwitch: poe reset N).
+	PoEResetSeconds *int
 	// Isolate: nil = не трогать
 	Isolate *bool
 	// FlowControl: nil = не трогать
@@ -35,6 +38,7 @@ type PortChange struct {
 
 func (ch PortChange) empty() bool {
 	return ch.Description == nil && ch.AdminUp == nil && ch.PoEMode == nil &&
+		ch.PoEResetSeconds == nil &&
 		ch.Isolate == nil && ch.FlowControl == nil && ch.STP == nil && ch.VLAN == nil
 }
 
@@ -91,6 +95,14 @@ func ApplyPortChange(c Creds, ch PortChange) error {
 	if ch.PoEMode != nil {
 		if _, err := PoEModeCLI(v, *ch.PoEMode); err != nil {
 			return err
+		}
+	}
+	if ch.PoEResetSeconds != nil {
+		if _, err := NormalizePoEResetSeconds(*ch.PoEResetSeconds); err != nil {
+			return err
+		}
+		if PoEResetPlan(v) != PoEResetNative {
+			return fmt.Errorf("%s: native poe reset не поддерживается (используйте power-cycle)", v)
 		}
 	}
 	if ch.STP != nil {
@@ -164,6 +176,7 @@ func portConfigBody(v Vendor, iface string, ch PortChange) ([]string, error) {
 	}
 
 	needIF := ch.Description != nil || ch.AdminUp != nil || ch.PoEMode != nil ||
+		ch.PoEResetSeconds != nil ||
 		ch.FlowControl != nil || ch.STP != nil || ch.VLAN != nil ||
 		(ch.Isolate != nil && v != VendorSNR)
 
@@ -188,6 +201,13 @@ func portConfigBody(v Vendor, iface string, ch PortChange) ([]string, error) {
 		}
 		if ch.PoEMode != nil {
 			cmd, err := PoEModeCLI(v, *ch.PoEMode)
+			if err != nil {
+				return nil, err
+			}
+			steps = append(steps, cmd)
+		}
+		if ch.PoEResetSeconds != nil {
+			cmd, err := UbiquitiPoEResetCLI(*ch.PoEResetSeconds)
 			if err != nil {
 				return nil, err
 			}
@@ -371,6 +391,7 @@ func interpretPortCLI(out string) error {
 		strings.Contains(low, "undo shutdown") ||
 		strings.Contains(low, "\nshutdown") ||
 		strings.Contains(low, "poe opmode") ||
+		strings.Contains(low, "poe reset") ||
 		strings.Contains(low, "power inline") ||
 		strings.Contains(low, "power-over-ethernet") ||
 		strings.Contains(low, "poe mode") ||

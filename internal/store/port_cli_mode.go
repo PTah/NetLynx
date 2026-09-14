@@ -14,6 +14,8 @@ type CLIPortModeUpdate struct {
 	CLIPortMode string
 	PortRole    string
 	AccessVLAN  *int
+	// Clear — блок interface есть в show run, но без switchport/VLAN: сбросить устаревшие cli_*.
+	Clear bool
 }
 
 // CLIDescrUpdate — description из show running-config.
@@ -54,12 +56,39 @@ func (s *Store) ListInterfaceNameIndex(ctx context.Context, deviceID int64) (map
 }
 
 // UpdateInterfaceCLIPortModes пишет cli_port_mode и port_role из конфига.
+// Пустой CLIPortMode при Clear=true — сброс устаревших cli_* (порт есть в show run без switchport/VLAN).
 func (s *Store) UpdateInterfaceCLIPortModes(ctx context.Context, deviceID int64, updates []CLIPortModeUpdate, syncedAt time.Time) (int, error) {
 	if len(updates) == 0 {
 		return 0, nil
 	}
 	n := 0
 	for _, u := range updates {
+		if u.Clear {
+			// EdgeSwitch «чистый» порт: в show run нет switchport — сбрасываем cli_* и
+			// устаревший trunk (иначе роль залипает после no vlan / mode general).
+			tag, err := s.pool.Exec(ctx, `
+				UPDATE device_interfaces SET
+					cli_port_mode = NULL,
+					cli_access_vlan = NULL,
+					port_role = CASE
+						WHEN lower(btrim(COALESCE(port_role, ''))) = 'ignore' THEN port_role
+						ELSE 'access'
+					END,
+					cli_mode_synced_at = $3,
+					updated_at = now()
+				WHERE device_id = $1 AND if_index = $2
+				  AND (
+					cli_port_mode IS NOT NULL
+					OR cli_access_vlan IS NOT NULL
+					OR lower(btrim(COALESCE(port_role, ''))) NOT IN ('', 'access', 'ignore')
+				  )`,
+				deviceID, u.IfIndex, syncedAt)
+			if err != nil {
+				return n, err
+			}
+			n += int(tag.RowsAffected())
+			continue
+		}
 		if u.CLIPortMode == "" || u.PortRole == "" {
 			continue
 		}
@@ -138,22 +167,23 @@ func (s *Store) ApplyConfigPortRoles(ctx context.Context, deviceID int64, config
 		if !ok {
 			continue
 		}
-		if strings.TrimSpace(p.Mode) != "" {
-			role := swcfg.PortRoleFromCLIMode(p.Mode)
-			if role != "" {
-				if _, dup := seenRole[ifIndex]; !dup {
-					seenRole[ifIndex] = struct{}{}
-					access := p.AccessVLAN
-					if access == nil {
-						access = p.PVID
-					}
-					roleUpdates = append(roleUpdates, CLIPortModeUpdate{
-						IfIndex:     ifIndex,
-						CLIPortMode: strings.ToLower(strings.TrimSpace(p.Mode)),
-						PortRole:    role,
-						AccessVLAN:  access,
-					})
+		if _, dup := seenRole[ifIndex]; !dup {
+			seenRole[ifIndex] = struct{}{}
+			mode := strings.ToLower(strings.TrimSpace(p.Mode))
+			if mode == "" {
+				// Порт в конфиге без switchport/access vlan — не гадать и не оставлять старый cli_access_vlan.
+				roleUpdates = append(roleUpdates, CLIPortModeUpdate{IfIndex: ifIndex, Clear: true})
+			} else if role := swcfg.PortRoleFromCLIMode(mode); role != "" {
+				access := p.AccessVLAN
+				if access == nil {
+					access = p.PVID
 				}
+				roleUpdates = append(roleUpdates, CLIPortModeUpdate{
+					IfIndex:     ifIndex,
+					CLIPortMode: mode,
+					PortRole:    role,
+					AccessVLAN:  access,
+				})
 			}
 		}
 		if p.HasDescr {
@@ -220,6 +250,16 @@ func (s *Store) UpdateInterfaceVLANAfterCLI(ctx context.Context, deviceID int64,
 				updated_at = now()
 			WHERE device_id = $1 AND if_index = $2`, deviceID, ifIndex, vlanID, now)
 		return err
+	case swcfg.VLANOpNoVLAN:
+		_, err := s.pool.Exec(ctx, `
+			UPDATE device_interfaces SET
+				cli_port_mode = 'general',
+				port_role = 'access',
+				cli_access_vlan = 1,
+				cli_mode_synced_at = $3,
+				updated_at = now()
+			WHERE device_id = $1 AND if_index = $2`, deviceID, ifIndex, now)
+		return err
 	default:
 		return nil
 	}
@@ -231,7 +271,7 @@ func ResolveInterfacePortRole(portRole string, cliPortMode *string) string {
 		switch strings.ToLower(strings.TrimSpace(*cliPortMode)) {
 		case "trunk":
 			return "trunk"
-		case "access":
+		case "access", "general":
 			return "access"
 		}
 	}

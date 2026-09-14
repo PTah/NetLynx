@@ -71,11 +71,13 @@ func (s *Server) handlePatchPortDescr(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusInternalServerError, err.Error())
 				return
 			}
-			s.audit(r, "port.descr.update", "device", &deviceID, map[string]interface{}{
+			details := map[string]interface{}{
 				"if_index": ifIndex,
 				"descr":    descr,
 				"via":      "local",
-			})
+			}
+			s.audit(r, "port.descr.update", "device", &deviceID, details)
+			s.emitConfigEditEvent(r, deviceID, &ifIndex, "port.descr", details)
 			writeJSON(w, http.StatusOK, map[string]interface{}{
 				"ok":             true,
 				"descr":          descr,
@@ -99,11 +101,13 @@ func (s *Server) handlePatchPortDescr(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	s.audit(r, "port.descr.update", "device", &deviceID, map[string]interface{}{
+	details := map[string]interface{}{
 		"if_index": ifIndex,
 		"descr":    descr,
 		"via":      via,
-	})
+	}
+	s.audit(r, "port.descr.update", "device", &deviceID, details)
+	s.emitConfigEditEvent(r, deviceID, &ifIndex, "port.descr", details)
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"ok": true, "descr": descr, "descr_override": nil, "via": via,
 	})
@@ -159,9 +163,11 @@ func (s *Server) handlePatchPortAdmin(w http.ResponseWriter, r *http.Request) {
 	if status == 2 {
 		action = "shutdown"
 	}
-	s.audit(r, "port.admin.update", "device", &deviceID, map[string]interface{}{
+	details := map[string]interface{}{
 		"if_index": ifIndex, "admin_status": status, "action": action, "via": via,
-	})
+	}
+	s.audit(r, "port.admin.update", "device", &deviceID, details)
+	s.emitConfigEditEvent(r, deviceID, &ifIndex, "port.admin", details)
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"ok": true, "admin_status": status, "via": via,
 	})
@@ -297,11 +303,13 @@ func (s *Server) handlePatchPortPoE(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	s.audit(r, "port.poe.update", "device", &deviceID, map[string]interface{}{
+	details := map[string]interface{}{
 		"if_index": ifIndex,
 		"poe_mode": mode,
 		"via":      via,
-	})
+	}
+	s.audit(r, "port.poe.update", "device", &deviceID, details)
+	s.emitConfigEditEvent(r, deviceID, &ifIndex, "port.poe", details)
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"ok": true, "poe_mode": mode, "via": via,
 	})
@@ -346,11 +354,13 @@ func (s *Server) handlePatchPortIsolate(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	s.audit(r, "port.isolate.update", "device", &deviceID, map[string]interface{}{
+	details := map[string]interface{}{
 		"if_index": ifIndex,
 		"isolate":  body.Isolate,
 		"via":      via,
-	})
+	}
+	s.audit(r, "port.isolate.update", "device", &deviceID, details)
+	s.emitConfigEditEvent(r, deviceID, &ifIndex, "port.isolate", details)
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"ok": true, "isolate": body.Isolate, "via": via,
 	})
@@ -394,11 +404,13 @@ func (s *Server) handlePatchPortFlowControl(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	s.audit(r, "port.flow_control.update", "device", &deviceID, map[string]interface{}{
-		"if_index":      ifIndex,
-		"flow_control":  body.FlowControl,
-		"via":           via,
-	})
+	details := map[string]interface{}{
+		"if_index":     ifIndex,
+		"flow_control": body.FlowControl,
+		"via":          via,
+	}
+	s.audit(r, "port.flow_control.update", "device", &deviceID, details)
+	s.emitConfigEditEvent(r, deviceID, &ifIndex, "port.flow_control", details)
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"ok": true, "flow_control": body.FlowControl, "via": via,
 	})
@@ -449,9 +461,11 @@ func (s *Server) handlePatchPortSTP(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	s.audit(r, "port.stp.update", "device", &deviceID, map[string]interface{}{
+	details := map[string]interface{}{
 		"if_index": ifIndex, "body": body, "via": via,
-	})
+	}
+	s.audit(r, "port.stp.update", "device", &deviceID, details)
+	s.emitConfigEditEvent(r, deviceID, &ifIndex, "port.stp", details)
 	writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true, "via": via})
 }
 
@@ -505,11 +519,13 @@ func (s *Server) handlePatchPortDHCPSnoop(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	s.audit(r, "port.dhcp_snooping.update", "device", &deviceID, map[string]interface{}{
+	details := map[string]interface{}{
 		"if_index": ifIndex,
 		"trusted":  body.Trusted,
 		"via":      via,
-	})
+	}
+	s.audit(r, "port.dhcp_snooping.update", "device", &deviceID, details)
+	s.emitConfigEditEvent(r, deviceID, &ifIndex, "port.dhcp_snooping", details)
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"ok": true, "trusted": body.Trusted, "via": via,
 	})

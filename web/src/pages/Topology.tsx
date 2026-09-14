@@ -305,8 +305,18 @@ export default function Topology() {
     const onDocClick = (e: MouseEvent) => {
       if (typeMenuRef.current && !typeMenuRef.current.contains(e.target as Node)) setTypeMenuOpen(false);
     };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setTypeMenuOpen(false);
+      }
+    };
     document.addEventListener("mousedown", onDocClick);
-    return () => document.removeEventListener("mousedown", onDocClick);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDocClick);
+      window.removeEventListener("keydown", onKey);
+    };
   }, [typeMenuOpen]);
 
   // Zoom колесом без Ctrl (passive:false — иначе preventDefault не сработает).
@@ -551,6 +561,12 @@ export default function Topology() {
       .filter((v, i, a) => a.indexOf(v) === i);
   }, [isLocView, isExpanded, expandedView, locGraph, nodes, edges, search, hitIds]);
   const matchSet = useMemo(() => new Set(matchIds), [matchIds]);
+  const vlanFilterId = graph?.vlan_filter_id ?? null;
+  const vlanMatchSet = useMemo(
+    () => new Set((graph?.vlan_match_device_ids ?? []).map((id) => Number(id))),
+    [graph?.vlan_match_device_ids],
+  );
+  const vlanFilterActive = vlanFilterId != null && vlanFilterId > 0;
 
   const cardH = isExpanded ? CARD_H : isLocView ? LOC_CARD_H : CARD_H;
   const cardW = useMemo(() => {
@@ -1113,7 +1129,19 @@ export default function Topology() {
           <option value="fdb">FDB</option>
           <option value="manual">manual</option>
         </select>
-        <input value={vlan} onChange={(e) => setVlan(e.target.value)} placeholder="VLAN" inputMode="numeric" style={{ width: 64 }} />
+        <input
+          value={vlan}
+          onChange={(e) => setVlan(e.target.value.replace(/[^\d]/g, "").slice(0, 4))}
+          placeholder="VLAN"
+          inputMode="numeric"
+          title="Подсветить устройства, у которых VLAN есть в vlan database (show run)"
+          style={{ width: 64 }}
+        />
+        {vlanFilterActive ? (
+          <span style={{ fontSize: "0.85rem", color: "#5eead4" }}>
+            VLAN {vlanFilterId}: {vlanMatchSet.size} устр.
+          </span>
+        ) : null}
         <input value={location} onChange={(e) => setLocation(e.target.value)} placeholder="Локация" style={{ width: 100 }} />
         <input value={depth} onChange={(e) => setDepth(e.target.value)} placeholder="Глубина" inputMode="numeric" style={{ width: 74 }} />
         <input value={deviceId} onChange={(e) => setDeviceId(e.target.value)} placeholder="ID узла" inputMode="numeric" style={{ width: 75 }} />
@@ -1591,8 +1619,11 @@ export default function Topology() {
                       if (!finitePos(p)) return null;
                       const isSelected = focus === n.id;
                       const isOff = offline(n);
-                      const dim = !!search && !matchSet.has(n.id);
-                      const stroke = topologyCardStroke(n, { selected: isSelected, offline: isOff, categories });
+                      const vlanHL = vlanFilterActive && vlanMatchSet.has(n.id);
+                      const dim = (!!search && !matchSet.has(n.id)) || (vlanFilterActive && !vlanHL);
+                      const stroke = vlanHL
+                        ? "#5eead4"
+                        : topologyCardStroke(n, { selected: isSelected, offline: isOff, categories });
                       return (
                         <g
                           key={`dev:${expandedView.path}:${n.id}`}
@@ -1600,7 +1631,7 @@ export default function Topology() {
                           role="button"
                           tabIndex={0}
                           transform={`translate(${p.x},${p.y})`}
-                          opacity={dim ? 0.15 : 1}
+                          opacity={dim ? 0.18 : 1}
                           style={{ cursor: "pointer" }}
                           onPointerDown={(e) => {
                             e.stopPropagation();
@@ -1625,14 +1656,14 @@ export default function Topology() {
                             width={el.cardW}
                             height={el.deviceCardH}
                             rx={8}
-                            fill={topologyCardFill(n, isOff)}
+                            fill={vlanHL ? "#14352f" : topologyCardFill(n, isOff)}
                             stroke={stroke}
-                            strokeWidth={isSelected ? 2.5 : 1.4}
+                            strokeWidth={isSelected || vlanHL ? 2.5 : 1.4}
                           />
-                          <StatusDot cx={16} cy={el.deviceCardH / 2} r={6} node={n} selected={isSelected} offline={isOff} categories={categories} />
+                          <StatusDot cx={16} cy={el.deviceCardH / 2} r={6} node={n} selected={isSelected || vlanHL} offline={isOff} categories={categories} />
                           <text x={28} y={22} fill="#e8eaef" fontSize="12" fontWeight="600">{label(n).slice(0, 38)}</text>
                           <text x={28} y={39} fill="#9aa3b5" fontSize="10">{(n.host || "—").slice(0, 44)}</text>
-                          <title>{`${label(n)} · ${n.host || "—"}`}</title>
+                          <title>{`${label(n)} · ${n.host || "—"}${vlanHL ? ` · VLAN ${vlanFilterId} в database` : ""}`}</title>
                         </g>
                       );
                     })}
@@ -1832,8 +1863,11 @@ export default function Topology() {
                 const isSelected = focus === n.id;
                 const isPath = pathNodes.has(n.id);
                 const isOff = offline(n);
-                const dim = !!search && !matchSet.has(n.id);
-                const stroke = topologyCardStroke(n, { selected: isSelected, onPath: isPath, offline: isOff, categories });
+                const vlanHL = vlanFilterActive && vlanMatchSet.has(n.id);
+                const dim = (!!search && !matchSet.has(n.id)) || (vlanFilterActive && !vlanHL);
+                const stroke = vlanHL
+                  ? "#5eead4"
+                  : topologyCardStroke(n, { selected: isSelected, onPath: isPath, offline: isOff, categories });
                 const sub = n.virtual ? "не в списке Узлы" : n.host || "—";
                 return (
                   <g
@@ -1842,7 +1876,7 @@ export default function Topology() {
                     role="button"
                     tabIndex={0}
                     transform={`translate(${p.x},${p.y})`}
-                    opacity={dim ? 0.15 : 1}
+                    opacity={dim ? 0.18 : 1}
                     style={{ cursor: "pointer" }}
                     onPointerDown={(e) => {
                       e.stopPropagation();
@@ -1867,14 +1901,14 @@ export default function Topology() {
                       width={layout.cardW}
                       height={cardH}
                       rx={8}
-                      fill={topologyCardFill(n, isOff)}
+                      fill={vlanHL ? "#14352f" : topologyCardFill(n, isOff)}
                       stroke={stroke}
-                      strokeWidth={isSelected || isPath ? 2.5 : 1.4}
+                      strokeWidth={isSelected || isPath || vlanHL ? 2.5 : 1.4}
                     />
-                    <StatusDot cx={16} cy={cardH / 2} r={6} node={n} selected={isSelected} offline={isOff} categories={categories} />
+                    <StatusDot cx={16} cy={cardH / 2} r={6} node={n} selected={isSelected || vlanHL} offline={isOff} categories={categories} />
                     <text x={28} y={22} fill="#e8eaef" fontSize="12" fontWeight="600">{label(n).slice(0, 38)}</text>
                     <text x={28} y={39} fill="#9aa3b5" fontSize="10">{sub.slice(0, 44)}</text>
-                    <title>{`${label(n)} · ${sub}`}</title>
+                    <title>{`${label(n)} · ${sub}${vlanHL ? ` · VLAN ${vlanFilterId} в database` : ""}`}</title>
                   </g>
                 );
               })}

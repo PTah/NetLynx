@@ -84,3 +84,25 @@ func TestCycleKeyNormalized(t *testing.T) {
 		t.Fatalf("reverse should match: %s vs %s", a, c)
 	}
 }
+
+func TestFilterLoopsTouching(t *testing.T) {
+	cycles := []TopologyCycle{
+		{DeviceIDs: []int64{1, 2, 3}, Summary: "A"},
+		{DeviceIDs: []int64{10, 11}, Summary: "B"},
+	}
+	got := FilterLoopsTouching(cycles, []int64{2, 99})
+	if len(got) != 1 || got[0].Summary != "A" {
+		t.Fatalf("%+v", got)
+	}
+	if FilterLoopsTouching(cycles, nil) != nil {
+		t.Fatal("empty device set")
+	}
+}
+
+func TestCycleKeyForParallel(t *testing.T) {
+	c := TopologyCycle{DeviceIDs: []int64{2, 1}, CycleKey: ""}
+	k := CycleKeyFor(c)
+	if k == "" || k[:9] != "parallel:" {
+		t.Fatalf("want parallel: prefix, got %q", k)
+	}
+}

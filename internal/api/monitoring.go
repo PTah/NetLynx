@@ -120,6 +120,17 @@ func (s *Server) handlePatchDeviceMonitoring(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	s.audit(r, "device.monitoring.update", "device", &id, nil)
+	details := map[string]interface{}{}
+	if body.UtilHighPct != nil {
+		details["util_high_pct"] = *body.UtilHighPct
+	}
+	if body.UtilOkPct != nil {
+		details["util_ok_pct"] = *body.UtilOkPct
+	}
+	if body.FDBPollIntervalSeconds != nil {
+		details["fdb_poll_interval_seconds"] = *body.FDBPollIntervalSeconds
+	}
+	s.emitConfigEditEvent(r, id, nil, "device.monitoring", details)
 	d, _ := s.st.GetDevice(r.Context(), id)
 	writeJSON(w, http.StatusOK, d)
 }
@@ -143,7 +154,15 @@ func (s *Server) handlePatchPortThresholds(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	s.audit(r, "port.thresholds.update", "device", &deviceID, map[string]interface{}{"if_index": ifIndex})
+	details := map[string]interface{}{"if_index": ifIndex}
+	if body.UtilHighPct != nil {
+		details["util_high_pct"] = *body.UtilHighPct
+	}
+	if body.UtilOkPct != nil {
+		details["util_ok_pct"] = *body.UtilOkPct
+	}
+	s.audit(r, "port.thresholds.update", "device", &deviceID, details)
+	s.emitConfigEditEvent(r, deviceID, &ifIndex, "port.thresholds", details)
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 

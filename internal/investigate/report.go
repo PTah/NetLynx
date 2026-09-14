@@ -60,15 +60,25 @@ type Report struct {
 	Identity      Identity                 `json:"identity"`
 	Investigation store.MACInvestigationStatus `json:"investigation"`
 	Hypotheses    []Hypothesis             `json:"hypotheses"`
+	LikelyCause   *LikelyCause             `json:"likely_cause,omitempty"`
 	Timeline    []TimelineEntry    `json:"timeline"`
 	Footprint   []FootprintEntry   `json:"footprint"`
 	FDBHistory  []FDBHistoryPoint  `json:"fdb_history,omitempty"`
 	L2Paths     []L2Path           `json:"l2_paths,omitempty"`
+	LoopsTouching []TopologyCycle  `json:"loops_touching,omitempty"`
 	MoveGraph   MoveGraph          `json:"move_graph"`
 	Correlated  []store.EventBrief `json:"correlated_events"`
 	WiFiUntracked bool               `json:"wifi_untracked,omitempty"`
 	WiFiUntrackedNote string           `json:"wifi_untracked_note,omitempty"`
 	GeneratedAt time.Time          `json:"generated_at"`
+}
+
+// LikelyCause — эвристическая «вероятная причина» flapping / аномалии MAC.
+type LikelyCause struct {
+	ID          string `json:"id"`
+	Title       string `json:"title"`
+	Confidence  Confidence `json:"confidence"`
+	Explanation string `json:"explanation"`
 }
 
 type FDBHistoryPoint struct {
@@ -200,6 +210,25 @@ func (b *Builder) BuildMACReport(ctx context.Context, rawMAC string) (*Report, e
 	rep.Hypotheses = buildHypotheses(rep)
 	applyInvestigators(ctx, b.St, rep, DefaultInvestigators())
 	rep.Hypotheses = preferInvestigatorIDs(rep.Hypotheses)
+
+	// loops_touching при гипотезах unmanaged_loop / core_loop_broadcast
+	needLoops := false
+	for _, h := range rep.Hypotheses {
+		if h.ID == "unmanaged_loop" || h.ID == "core_loop_broadcast" {
+			needLoops = true
+			break
+		}
+	}
+	if needLoops {
+		if lr, err := b.BuildLoopReport(ctx, ""); err == nil && lr != nil {
+			devIDs := make([]int64, 0, len(seenDev))
+			for id := range seenDev {
+				devIDs = append(devIDs, id)
+			}
+			rep.LoopsTouching = FilterLoopsTouching(lr.Cycles, devIDs)
+		}
+	}
+	rep.LikelyCause = classifyLikelyCause(rep)
 	return rep, nil
 }
 
@@ -700,3 +729,99 @@ func virtualizationChecks(hv string) []string {
 	}
 	return base
 }
+
+func classifyLikelyCause(rep *Report) *LikelyCause {
+	if rep == nil {
+		return nil
+	}
+	hypIDs := map[string]Hypothesis{}
+	for _, h := range rep.Hypotheses {
+		hypIDs[h.ID] = h
+	}
+	hasPortFlap, hasSTP, hasStorm, hasMACFlap, hasMulti := false, false, false, false, false
+	footIfs := map[int]struct{}{}
+	for _, f := range rep.Footprint {
+		footIfs[f.IfIndex] = struct{}{}
+	}
+	for _, ev := range rep.Correlated {
+		switch ev.EventType {
+		case "PORT_FLAP":
+			if ev.IfIndex == nil {
+				hasPortFlap = true
+			} else if _, ok := footIfs[*ev.IfIndex]; ok || len(footIfs) == 0 {
+				hasPortFlap = true
+			} else {
+				hasPortFlap = true // correlated уже отфильтрован по footprint-портам
+			}
+		case "STP_TOPOLOGY_CHANGE", "STP_ROOT_CHANGED":
+			hasSTP = true
+		case "BROADCAST_STORM_SUSPECTED":
+			hasStorm = true
+		case "MAC_FLAPPING":
+			hasMACFlap = true
+		case "MAC_MULTI_ACCESS":
+			hasMulti = true
+		}
+	}
+	_ = hasMACFlap
+
+	if len(rep.LoopsTouching) > 0 && (hasMACFlap || hasMulti || hasStorm || hypIDs["unmanaged_loop"].ID != "" || hypIDs["core_loop_broadcast"].ID != "") {
+		return &LikelyCause{
+			ID:         "l2_loop",
+			Title:      "L2-петля",
+			Confidence: ConfidenceHigh,
+			Explanation: "Есть цикл в топологии, пересекающий footprint MAC, и признаки flapping/MULTI_ACCESS/storm.",
+		}
+	}
+	if hypIDs["unmanaged_loop"].ID != "" || hypIDs["core_loop_broadcast"].ID != "" {
+		return &LikelyCause{
+			ID:         "l2_loop",
+			Title:      "L2-петля (гипотеза)",
+			Confidence: ConfidenceMedium,
+			Explanation: "Гипотеза unmanaged_loop / core_loop_broadcast без подтверждённого цикла в кэше — проверить /investigate/loops.",
+		}
+	}
+	if hasPortFlap && !hasSTP {
+		return &LikelyCause{
+			ID:         "port_flap_cable",
+			Title:      "Порт flapping / кабель",
+			Confidence: ConfidenceMedium,
+			Explanation: "На том же ifIndex есть PORT_FLAP, STP-событий рядом мало — вероятны bounce линка, патчкорд или SFP.",
+		}
+	}
+	if hasSTP {
+		return &LikelyCause{
+			ID:         "stp_reconvergence",
+			Title:      "STP reconvergence",
+			Confidence: ConfidenceMedium,
+			Explanation: "STP_TOPOLOGY_CHANGE / ROOT рядом по времени с перемещениями MAC.",
+		}
+	}
+	if hypIDs["ap_roaming"].ID != "" || hypIDs["wifi_roaming"].ID != "" {
+		h := hypIDs["ap_roaming"]
+		if h.ID == "" {
+			h = hypIDs["wifi_roaming"]
+		}
+		return &LikelyCause{
+			ID:          "ap_roaming",
+			Title:       "Roaming AP / Wi‑Fi",
+			Confidence:  h.Confidence,
+			Explanation: "Гипотеза перемещения между точками доступа (без deep Wi‑Fi в этом релизе).",
+		}
+	}
+	if hypIDs["kvm_dual_uplink"].ID != "" {
+		return &LikelyCause{
+			ID:         "kvm_dual_uplink",
+			Title:      hypIDs["kvm_dual_uplink"].Title,
+			Confidence: hypIDs["kvm_dual_uplink"].Confidence,
+			Explanation: "Два access без LLDP и виртуальный OUI — типичный dual-uplink гипервизора.",
+		}
+	}
+	return &LikelyCause{
+		ID:          "unknown",
+		Title:       "Неясно",
+		Confidence:  ConfidenceLow,
+		Explanation: "Недостаточно коррелированных сигналов (STP / PORT_FLAP / петли) для уверенного диагноза.",
+	}
+}
+

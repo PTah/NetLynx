@@ -8,7 +8,7 @@ import MetricChart from "../components/MetricChart";
 import { PortOverviewGrid, isLikelyFiberPort, showPoEIndicator } from "../components/PortOverviewGrid";
 import { PortSettingsModal, type PortLiveSettings, type PortSettingsTarget } from "../components/PortSettingsModal";
 import { formatBitRate, TrafficSparkline } from "../components/TrafficSparkline";
-import { formatEventSummary } from "../eventFormat";
+import { formatEventSummary, formatEventTypeLabel } from "../eventFormat";
 import { usePersistedColumnWidths } from "../hooks/usePersistedColumnWidths";
 import { useAuthRole } from "../hooks/useAuthRole";
 import { formatPortSpeedFromRow, linkMbps } from "../linkSpeedFormat";
@@ -204,12 +204,14 @@ const emptyPortPromote: PromoteFormValues = {
 
 const PORT_TABLE_COLS = 14;
 
-function portVlanDisplay(p: Pick<IfRow, "port_role" | "vlan_id" | "cli_access_vlan">): string {
+/** Колонка VLAN в «Порты»: номер из конфига (в т.ч. 1), иначе пусто. Trunk / general (No VLAN) — пусто. */
+function portVlanDisplay(p: Pick<IfRow, "port_role" | "cli_access_vlan" | "cli_port_mode">): string {
+  const mode = (p.cli_port_mode ?? "").toLowerCase();
+  if (mode === "trunk" || mode === "general") return "";
   const role = (p.port_role ?? "").toLowerCase();
   if (role === "trunk") return "";
   if (p.cli_access_vlan != null && p.cli_access_vlan > 0) return String(p.cli_access_vlan);
-  if (p.vlan_id != null && p.vlan_id > 0) return String(p.vlan_id);
-  return "1";
+  return "";
 }
 
 type Detail = {
@@ -366,7 +368,7 @@ export default function DeviceDetail() {
   const {
     colgroup: portsColgroup,
     ResizeHandle: PortsResizeHandle,
-  } = usePersistedColumnWidths("device-detail-ports-v3", [40, 76, 180, 72, 80, 48, 56, 72, 88, 100, 100, 100, 140, 72]);
+  } = usePersistedColumnWidths("device-detail-ports-v4", [52, 76, 180, 72, 80, 48, 56, 72, 88, 100, 100, 100, 140, 72]);
   const {
     colgroup: eventsColgroup,
     ResizeHandle: EventsResizeHandle,
@@ -439,6 +441,8 @@ export default function DeviceDetail() {
   const [cliSyncBusy, setCliSyncBusy] = useState(false);
   const [descrMsg, setDescrMsg] = useState<string | null>(null);
   const [portSettings, setPortSettings] = useState<PortSettingsTarget | null>(null);
+  const [portBulkOpen, setPortBulkOpen] = useState(false);
+  const [selectedPortIndexes, setSelectedPortIndexes] = useState<number[]>([]);
   const [trafficByIf, setTrafficByIf] = useState<
     Record<number, { rx: { t: string; v: number }[]; tx: { t: string; v: number }[] }>
   >({});
@@ -615,6 +619,9 @@ export default function DeviceDetail() {
 
   useEffect(() => {
     formSyncedId.current = null;
+    setSelectedPortIndexes([]);
+    setPortBulkOpen(false);
+    setPortSettings(null);
   }, [id]);
 
   useEffect(() => {
@@ -1220,9 +1227,37 @@ export default function DeviceDetail() {
         })
     : [];
 
+  const portSelectEnabled =
+    showTabs && canWrite && data != null && devicePortSettingsWritable(data.device);
+  const selectedPorts = shownInterfaces.filter((p) => selectedPortIndexes.includes(p.if_index));
+  const bulkReady = selectedPorts.length >= 2;
+
+  function togglePortSelected(ifIndex: number) {
+    setSelectedPortIndexes((prev) =>
+      prev.includes(ifIndex) ? prev.filter((x) => x !== ifIndex) : [...prev, ifIndex],
+    );
+  }
+
+  function clearPortSelection() {
+    setSelectedPortIndexes([]);
+    setPortBulkOpen(false);
+  }
+
+  useEffect(() => {
+    if (!portSelectEnabled || selectedPortIndexes.length === 0) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      if (portSettings != null || portBulkOpen) return;
+      e.preventDefault();
+      clearPortSelection();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [portSelectEnabled, selectedPortIndexes.length, portSettings, portBulkOpen]);
+
   return (
     <div className="device-detail-page">
-      <div className="device-detail-sticky">
+      <div className="device-detail-sticky" style={{ paddingBottom: showTabs ? "0.55rem" : "0.65rem" }}>
         <p className="device-detail-back">
           <Link to={back.path}>← {back.label}</Link>
         </p>
@@ -1247,34 +1282,54 @@ export default function DeviceDetail() {
             </p>
           </div>
         )}
+        {showTabs && (
+          <div className="device-detail-tabs" role="tablist" aria-label="Разделы карточки коммутатора">
+            {DEVICE_DETAIL_TABS.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                role="tab"
+                aria-selected={detailTab === t.id}
+                className={[
+                  "device-detail-tab",
+                  detailTab === t.id ? "device-detail-tab--active" : "",
+                ]
+                  .filter(Boolean)
+                  .join(" ")}
+                onClick={() => setDetailTab(t.id)}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+        )}
+        {showTabs && detailTab === "ports" && portSelectEnabled && bulkReady && (
+          <div className="device-detail-port-bulk" role="region" aria-label="Массовая настройка портов">
+            <div>
+              <div className="device-detail-port-bulk-title">
+                Выбрано портов: {selectedPorts.length} — можно править сразу несколько
+              </div>
+              <div className="device-detail-port-bulk-hint">
+                Admin up/down, PoE, Access VLAN / No VLAN, сброс PoE. На EdgeSwitch подряд идущие порты уходят как{" "}
+                <code>interface 0/4-0/7</code>. Снять выбор — кнопка или Esc.
+              </div>
+            </div>
+            <div className="device-detail-port-bulk-actions">
+              <button type="button" onClick={() => setPortBulkOpen(true)}>
+                Настроить выбранные…
+              </button>
+              <button type="button" onClick={clearPortSelection}>
+                Снять выбор
+              </button>
+            </div>
+          </div>
+        )}
       </div>
       <div className="device-detail-body">
       {err && <p style={{ color: "#f88" }}>{err}</p>}
       {!data && !err && <p>Загрузка…</p>}
       {data && (
         <>
-          {showTabs && (
-            <div className="device-detail-tabs" role="tablist" aria-label="Разделы карточки коммутатора">
-              {DEVICE_DETAIL_TABS.map((t) => (
-                <button
-                  key={t.id}
-                  type="button"
-                  role="tab"
-                  aria-selected={detailTab === t.id}
-                  className={[
-                    "device-detail-tab",
-                    detailTab === t.id ? "device-detail-tab--active" : "",
-                  ]
-                    .filter(Boolean)
-                    .join(" ")}
-                  onClick={() => setDetailTab(t.id)}
-                >
-                  {t.label}
-                </button>
-              ))}
-            </div>
-          )}
-
           {showPanel("info") && (
           <div role={showTabs ? "tabpanel" : undefined} aria-label={showTabs ? "Информация об узле" : undefined}>
           <div style={{ marginBottom: "0.75rem" }}>
@@ -2171,6 +2226,9 @@ export default function DeviceDetail() {
             Колонка «Комментарий»: {canWrite
               ? "Enter/уход с поля — запись на свитч (SNMP ifAlias, иначе SSH). Пустое поле — снять description на устройстве."
               : "подпись порта (только просмотр)."}
+            {portSelectEnabled
+              ? " Чекбокс у if — выбор портов; от двух и больше сверху появляется панель массовой настройки."
+              : ""}
           </p>
           {data.interfaces.length === 0 && <p>Интерфейсы появятся после первого успешного опроса.</p>}
           {data.interfaces.length > 0 && shownInterfaces.length === 0 && (
@@ -2198,8 +2256,20 @@ export default function DeviceDetail() {
                 expandedIfIndex={expandedIfIndex}
               />
               <PortSettingsModal
-                open={portSettings != null}
-                port={portSettings}
+                open={portSettings != null || portBulkOpen}
+                port={portBulkOpen ? null : portSettings}
+                bulkPorts={
+                  portBulkOpen
+                    ? selectedPorts.map((p) => ({
+                        if_index: p.if_index,
+                        if_name: p.if_name,
+                        admin_status: p.admin_status,
+                        label: portDisplayDescr(p) || undefined,
+                        cli_access_vlan: p.cli_access_vlan,
+                        cli_port_mode: p.cli_port_mode,
+                      }))
+                    : null
+                }
                 canWrite={canWrite}
                 settingsWritable={devicePortSettingsWritable(data.device)}
                 poe24vSupported={devicePoE24VSupported(data.device)}
@@ -2217,7 +2287,35 @@ export default function DeviceDetail() {
                     .filter((v) => v.in_database && v.vlan_id >= 1 && v.vlan_id <= 4094)
                     .map((v) => v.vlan_id);
                 }}
-                onClose={() => setPortSettings(null)}
+                onClose={() => {
+                  setPortSettings(null);
+                  setPortBulkOpen(false);
+                }}
+                onPoEReset={async (seconds) => {
+                  if (portBulkOpen) {
+                    const idxs = selectedPorts.map((p) => p.if_index);
+                    const res = await apiPost<{ ok: boolean; applied?: { poe_reset_via?: string } }>(
+                      `/api/v1/devices/${id}/interfaces/bulk`,
+                      { if_indexes: idxs, poe_reset_seconds: seconds },
+                    );
+                    setDescrMsg(
+                      `PoE reset ${seconds}s → ${idxs.length} портов${res.applied?.poe_reset_via ? ` (${res.applied.poe_reset_via})` : ""}`,
+                    );
+                    clearPortSelection();
+                    load();
+                    return;
+                  }
+                  if (!portSettings) throw new Error("Порт не выбран");
+                  const res = await apiPost<{ ok: boolean; via?: string; seconds?: number }>(
+                    `/api/v1/devices/${id}/interfaces/${portSettings.if_index}/poe-reset`,
+                    { seconds },
+                  );
+                  const portLabel = portSettings.if_name?.trim() || String(portSettings.if_index);
+                  setDescrMsg(
+                    `Порт ${portLabel}: PoE reset ${res.seconds ?? seconds}s${res.via ? ` (${res.via})` : ""}`,
+                  );
+                  load();
+                }}
                 onSave={async ({
                   adminUp,
                   poeMode,
@@ -2237,6 +2335,35 @@ export default function DeviceDetail() {
                   vlanDirty,
                   accessVlan,
                 }) => {
+                  if (portBulkOpen) {
+                    const idxs = selectedPorts.map((p) => p.if_index);
+                    const body: {
+                      if_indexes: number[];
+                      admin_up?: boolean;
+                      poe_mode?: string;
+                      vlan?: { op: string; vlan_id: number };
+                    } = { if_indexes: idxs };
+                    if (enableDirty) body.admin_up = adminUp;
+                    if (poeDirty) body.poe_mode = poeMode;
+                    if (vlanDirty) {
+                      body.vlan =
+                        accessVlan === 0
+                          ? { op: "no_vlan", vlan_id: 0 }
+                          : { op: "set_access", vlan_id: accessVlan };
+                    }
+                    if (body.admin_up == null && body.poe_mode == null && body.vlan == null) {
+                      throw new Error("Нет изменений для применения");
+                    }
+                    await apiPost(`/api/v1/devices/${id}/interfaces/bulk`, body);
+                    const bits: string[] = [];
+                    if (enableDirty) bits.push(adminUp ? "admin up" : "shutdown");
+                    if (poeDirty) bits.push(`PoE ${poeMode}`);
+                    if (vlanDirty) bits.push(accessVlan === 0 ? "No VLAN" : `VLAN ${accessVlan}`);
+                    setDescrMsg(`Массово (${idxs.length}): ${bits.join("; ")}`);
+                    clearPortSelection();
+                    load();
+                    return;
+                  }
                   const p = shownInterfaces.find((x) => x.if_index === portSettings?.if_index);
                   if (!p) throw new Error("Порт не найден");
                   const portLabel = p.if_name?.trim() || String(p.if_index);
@@ -2278,11 +2405,19 @@ export default function DeviceDetail() {
                     notes.push(`STP → ${stpEnabled ? "on" : "off"}${res.via ? ` (${res.via})` : ""}`);
                   }
                   if (vlanDirty) {
-                    const res = await apiPatch<{ ok: boolean; via?: string; vlan_id?: number }>(
-                      `/api/v1/devices/${id}/interfaces/${p.if_index}/vlan`,
-                      { op: "set_access", vlan_id: accessVlan },
-                    );
-                    notes.push(`VLAN access → ${res.vlan_id ?? accessVlan}${res.via ? ` (${res.via})` : ""}`);
+                    if (accessVlan === 0) {
+                      const res = await apiPatch<{ ok: boolean; via?: string }>(
+                        `/api/v1/devices/${id}/interfaces/${p.if_index}/vlan`,
+                        { op: "no_vlan" },
+                      );
+                      notes.push(`VLAN → No VLAN${res.via ? ` (${res.via})` : ""}`);
+                    } else {
+                      const res = await apiPatch<{ ok: boolean; via?: string; vlan_id?: number }>(
+                        `/api/v1/devices/${id}/interfaces/${p.if_index}/vlan`,
+                        { op: "set_access", vlan_id: accessVlan },
+                      );
+                      notes.push(`VLAN access → ${res.vlan_id ?? accessVlan}${res.via ? ` (${res.via})` : ""}`);
+                    }
                   }
                   if (poeDirty) {
                     const res = await apiPatch<{ ok: boolean; via?: string; poe_mode?: string }>(
@@ -2319,7 +2454,7 @@ export default function DeviceDetail() {
                   {portsColgroup}
                   <thead>
                     <tr>
-                      <th style={{ position: "relative", userSelect: "none" }}>
+                      <th style={{ position: "relative", userSelect: "none" }} title="ifIndex; чекбокс — выбор для массовой настройки">
                         if
                         <PortsResizeHandle colIndex={0} />
                       </th>
@@ -2381,8 +2516,11 @@ export default function DeviceDetail() {
                     {shownInterfaces.map((p) => {
                       const igMode = portIgnoreMode(p);
                       const expanded = expandedIfIndex === p.if_index;
+                      const selected = selectedPortIndexes.includes(p.if_index);
                       const rowHighlight =
-                        expanded
+                        selected
+                          ? undefined
+                          : expanded
                           ? { background: "rgba(88, 164, 255, 0.12)" }
                           : hoveredPortIfIndex === p.if_index
                             ? {
@@ -2395,13 +2533,28 @@ export default function DeviceDetail() {
                       return (
                       <Fragment key={p.if_index}>
                       <tr
+                        className={selected ? "port-row--selected" : undefined}
                         style={rowHighlight}
                         ref={(el) => {
                           if (el) portRowRefs.current.set(p.if_index, el);
                           else portRowRefs.current.delete(p.if_index);
                         }}
                       >
-                        <td style={portTableCellStyle(p, "data")}>{p.if_index}</td>
+                        <td style={portTableCellStyle(p, "data")}>
+                          <span className="port-if-select">
+                            {portSelectEnabled ? (
+                              <input
+                                type="checkbox"
+                                checked={selected}
+                                onChange={() => togglePortSelected(p.if_index)}
+                                onClick={(e) => e.stopPropagation()}
+                                title="Выбрать для массовой настройки"
+                                aria-label={`Выбрать порт if ${p.if_index}`}
+                              />
+                            ) : null}
+                            {p.if_index}
+                          </span>
+                        </td>
                         <td
                           style={portTableCellStyle(p, "data", {
                             overflow: "hidden",
@@ -2755,7 +2908,7 @@ export default function DeviceDetail() {
                 {data.recent_events.map((ev) => (
                   <tr key={ev.id}>
                     <td style={{ whiteSpace: "nowrap" }}>{new Date(ev.created_at).toLocaleString()}</td>
-                    <td>{ev.event_type}</td>
+                    <td>{formatEventTypeLabel(ev.event_type)}</td>
                     <td>{ev.if_index ?? "—"}</td>
                     <td>{ev.severity}</td>
                     <td style={{ fontSize: "0.9rem", overflow: "hidden", textOverflow: "ellipsis" }}>{formatEventSummary(ev)}</td>

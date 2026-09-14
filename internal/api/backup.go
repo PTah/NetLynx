@@ -432,6 +432,23 @@ func (s *Server) handlePatchDeviceSSH(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.audit(r, "device.ssh.update", "device", &id, nil)
+	sshDetails := map[string]interface{}{}
+	if body.SSHUser != nil {
+		sshDetails["ssh_user"] = strings.TrimSpace(*body.SSHUser)
+	}
+	if body.SSHPort != nil {
+		sshDetails["ssh_port"] = *body.SSHPort
+	}
+	if body.SSHVendor != nil {
+		sshDetails["ssh_vendor"] = strings.TrimSpace(*body.SSHVendor)
+	}
+	if body.SSHPassword != nil {
+		sshDetails["ssh_password_changed"] = strings.TrimSpace(*body.SSHPassword) != ""
+	}
+	if body.SSHEnablePassword != nil {
+		sshDetails["ssh_enable_password_changed"] = strings.TrimSpace(*body.SSHEnablePassword) != ""
+	}
+	s.emitConfigEditEvent(r, id, nil, "device.ssh", sshDetails)
 	d, err := s.st.GetDevice(r.Context(), id)
 	if err != nil || d == nil {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "id": id})

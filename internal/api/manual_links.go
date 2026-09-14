@@ -78,6 +78,7 @@ func (s *Server) handleCreateManualLink(w http.ResponseWriter, r *http.Request) 
 		"a_device_id": link.ADeviceID, "a_if_index": link.AIfIndex,
 		"b_device_id": link.BDeviceID, "b_if_index": link.BIfIndex,
 	})
+	s.notifyTopologyDirty("manual")
 	writeJSON(w, http.StatusCreated, link)
 }
 
@@ -126,6 +127,7 @@ func (s *Server) handlePatchManualLink(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.audit(r, "manual_link.update", "manual_topology_link", &link.ID, nil)
+	s.notifyTopologyDirty("manual")
 	writeJSON(w, http.StatusOK, link)
 }
 
@@ -144,5 +146,6 @@ func (s *Server) handleDeleteManualLink(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	s.audit(r, "manual_link.delete", "manual_topology_link", &id, nil)
+	s.notifyTopologyDirty("manual")
 	writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true, "id": id})
 }

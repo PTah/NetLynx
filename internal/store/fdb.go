@@ -212,3 +212,37 @@ func (s *Store) ListFDBVLANPorts(ctx context.Context, deviceID int64) ([]FDBVLAN
 	}
 	return out, rows.Err()
 }
+
+// FDBEntryVLAN — MAC на порту в конкретном VLAN (live FDB).
+type FDBEntryVLAN struct {
+	MAC     string
+	IfIndex int
+	VLANID  int
+}
+
+// ListFDBEntriesByVLANs — записи FDB устройства для набора VLAN.
+func (s *Store) ListFDBEntriesByVLANs(ctx context.Context, deviceID int64, vlanIDs []int) ([]FDBEntryVLAN, error) {
+	if len(vlanIDs) == 0 {
+		return nil, nil
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT mac, if_index, vlan_id
+		FROM device_fdb_entries
+		WHERE device_id = $1
+		  AND vlan_id = ANY($2)
+		  AND if_index > 0
+		ORDER BY vlan_id, if_index, mac`, deviceID, vlanIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []FDBEntryVLAN
+	for rows.Next() {
+		var e FDBEntryVLAN
+		if err := rows.Scan(&e.MAC, &e.IfIndex, &e.VLANID); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}

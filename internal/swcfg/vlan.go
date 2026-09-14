@@ -8,10 +8,12 @@ import (
 )
 
 const (
-	VLANOpSetAccess   = "set_access"
-	VLANOpAddTagged   = "add_tagged" // устар.: один tagged; предпочтительно trunk_allow
-	VLANOpRemove      = "remove"
-	VLANOpTrunkAllow  = "trunk_allow"
+	VLANOpSetAccess  = "set_access"
+	VLANOpAddTagged  = "add_tagged" // устар.: один tagged; предпочтительно trunk_allow
+	VLANOpRemove     = "remove"
+	VLANOpTrunkAllow = "trunk_allow"
+	// VLANOpNoVLAN — очистить порт от VLAN (EdgeSwitch: participation auto + general + access vlan 1).
+	VLANOpNoVLAN = "no_vlan"
 
 	TrunkAllowAdd    = "add"
 	TrunkAllowRemove = "remove"
@@ -45,6 +47,8 @@ type PortVLANChange struct {
 
 func (v PortVLANChange) Validate() error {
 	switch v.Op {
+	case VLANOpNoVLAN:
+		return nil
 	case VLANOpSetAccess, VLANOpAddTagged, VLANOpRemove:
 		if v.VLANID < 1 || v.VLANID > 4094 {
 			return fmt.Errorf("vlan_id должен быть 1–4094")
@@ -633,6 +637,103 @@ func VLANConfiguredOnPorts(r VLANInventoryRow) bool {
 	return len(r.AccessPorts) > 0 || len(r.TaggedPorts) > 0
 }
 
+// InventoryVLANOnPort — VLAN есть в access/tagged inventory на ifIndex.
+func InventoryVLANOnPort(inv []VLANInventoryRow, vlanID, ifIndex int) bool {
+	if ifIndex <= 0 {
+		return false
+	}
+	for _, r := range inv {
+		if r.VLANID != vlanID {
+			continue
+		}
+		for _, p := range r.AccessPorts {
+			if p.IfIndex == ifIndex {
+				return true
+			}
+		}
+		for _, p := range r.TaggedPorts {
+			if p.IfIndex == ifIndex {
+				return true
+			}
+		}
+		return false
+	}
+	return false
+}
+
+func findParsedIface(modes map[string]ParsedInterfaceCLI, ifIndex int, ifName string) (ParsedInterfaceCLI, bool) {
+	if len(modes) == 0 {
+		return ParsedInterfaceCLI{}, false
+	}
+	key := NormalizeIfaceKey(ifName)
+	if key != "" {
+		if b, ok := modes[key]; ok {
+			return b, true
+		}
+	}
+	ifNames := map[int]string{}
+	if ifIndex > 0 && strings.TrimSpace(ifName) != "" {
+		ifNames[ifIndex] = ifName
+	}
+	for _, b := range modes {
+		if ifIndex > 0 && len(ifNames) > 0 {
+			if idx, ok := MatchConfigIfaceToIfIndex(b.IfaceName, ifNames); ok && idx == ifIndex {
+				return b, true
+			}
+		}
+		if key != "" && NormalizeIfaceKey(b.IfaceName) == key {
+			return b, true
+		}
+	}
+	return ParsedInterfaceCLI{}, false
+}
+
+// VLANCarriedOnPort — VLAN идёт через порт: inventory ИЛИ trunk allowed all / allowed list / participation / tagged.
+// Нужно для EdgeSwitch: «switchport trunk allowed vlan all» не разворачивается в TaggedPorts inventory.
+// Bare «switchport mode trunk» без allowed-list на EdgeSwitch/Cisco = все VLAN (как allowed all).
+func VLANCarriedOnPort(inv []VLANInventoryRow, vlanID, ifIndex int, ifName string, modes map[string]ParsedInterfaceCLI) bool {
+	if InventoryVLANOnPort(inv, vlanID, ifIndex) {
+		return true
+	}
+	block, ok := findParsedIface(modes, ifIndex, ifName)
+	if !ok {
+		return false
+	}
+	if block.TrunkAllowedAll {
+		return true
+	}
+	// Явного allowed list нет → на trunk по умолчанию несутся все VLAN.
+	mode := strings.ToLower(strings.TrimSpace(block.Mode))
+	if mode == "trunk" && len(block.TrunkAllowed) == 0 {
+		return true
+	}
+	for _, id := range block.TrunkAllowed {
+		if id == vlanID {
+			return true
+		}
+	}
+	for _, id := range block.Include {
+		if id == vlanID {
+			return true
+		}
+	}
+	for _, id := range block.Tagged {
+		if id == vlanID {
+			return true
+		}
+	}
+	if block.AccessVLAN != nil && *block.AccessVLAN == vlanID {
+		return true
+	}
+	if block.PVID != nil && *block.PVID == vlanID {
+		return true
+	}
+	if block.TrunkNative != nil && *block.TrunkNative == vlanID {
+		return true
+	}
+	return false
+}
+
 // FormatVLANPortBindings — «0/2 (access), 0/5 (trunk)» для ошибок удаления.
 func FormatVLANPortBindings(r VLANInventoryRow) string {
 	var parts []string
@@ -661,9 +762,28 @@ func VLANCLILines(style vlanCLIStyle, ch PortVLANChange) []string {
 	return vlanCiscoLines(ch)
 }
 
+// vlanNoVLANLines — сброс VLAN на порту как на EdgeSwitch (general + participation auto).
+func vlanNoVLANLines(includeSwitchport bool) []string {
+	lines := []string{
+		"vlan participation auto 2-4093",
+		"vlan participation include 1",
+	}
+	if includeSwitchport {
+		lines = append(lines,
+			"switchport mode general",
+			"switchport access vlan 1",
+		)
+	} else {
+		lines = append(lines, "vlan pvid 1")
+	}
+	return lines
+}
+
 func vlanCiscoLines(ch PortVLANChange) []string {
 	id := strconv.Itoa(ch.VLANID)
 	switch ch.Op {
+	case VLANOpNoVLAN:
+		return vlanNoVLANLines(true)
 	case VLANOpSetAccess:
 		return []string{
 			"switchport mode access",
@@ -707,6 +827,8 @@ func vlanCiscoLines(ch PortVLANChange) []string {
 func vlanIEEELines(ch PortVLANChange) []string {
 	id := strconv.Itoa(ch.VLANID)
 	switch ch.Op {
+	case VLANOpNoVLAN:
+		return vlanNoVLANLines(false)
 	case VLANOpSetAccess:
 		lines := []string{
 			"vlan pvid " + id,

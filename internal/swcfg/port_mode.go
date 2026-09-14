@@ -205,7 +205,8 @@ func PortRoleFromCLIMode(mode string) string {
 	switch strings.ToLower(strings.TrimSpace(mode)) {
 	case "trunk", "dot1q-tunnel", "private-vlan":
 		return "trunk"
-	case "access", "hybrid":
+	case "access", "hybrid", "general":
+		// general (EdgeSwitch «No VLAN») — untagged PVID 1, без явного access VLAN.
 		return "access"
 	default:
 		if mode != "" {

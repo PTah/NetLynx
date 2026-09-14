@@ -1170,22 +1170,17 @@ func (s *Store) ListInterfacesByDevice(ctx context.Context, deviceID int64) ([]m
 	if err != nil {
 		return out, err
 	}
-	// Важно закрыть rows до второго Query — иначе при малом пуле PG возможен deadlock
-	// (все коннекты заняты открытыми курсорами, VLAN-запрос ждёт свободный).
-	// VLAN — доп. поле; сбой не должен ломать список портов.
-	vlans, err := s.DominantVLANsForDevice(ctx, deviceID)
-	if err != nil {
-		return out, nil
-	}
+	// VLAN в списке портов — только из CLI/конфига (cli_access_vlan), не из FDB.
 	for i := range out {
-		role := strings.ToLower(strings.TrimSpace(out[i].PortRole))
-		if role == "access" && out[i].CliAccessVlan != nil && *out[i].CliAccessVlan > 0 {
+		if out[i].CliAccessVlan != nil && *out[i].CliAccessVlan > 0 {
+			mode := ""
+			if out[i].CLIPortMode != nil {
+				mode = strings.ToLower(strings.TrimSpace(*out[i].CLIPortMode))
+			}
+			if mode == "trunk" || mode == "general" {
+				continue
+			}
 			vv := *out[i].CliAccessVlan
-			out[i].VlanID = &vv
-			continue
-		}
-		if v, ok := vlans[out[i].IfIndex]; ok {
-			vv := v
 			out[i].VlanID = &vv
 		}
 	}

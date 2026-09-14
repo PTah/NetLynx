@@ -29,6 +29,7 @@ type Server struct {
 	backupRun             *backup.Runner
 	wifiFilterInvalidator wifiFilterCacheInvalidator
 	runningConfigCache    sync.Map // int64 → deviceRunningConfigEntry
+	topoDirty             func(reason string)
 }
 
 // wifiFilterCacheInvalidator — poller сбрасывает кэш WiFi MAC после PATCH настроек.
@@ -120,6 +121,7 @@ func NewServer(st *store.Store, cfg config.Config, bi BuildInfo, hub *live.Hub, 
 		r.Get("/devices/{id}/config/snapshots/{snapId}", s.handleGetDeviceConfigSnapshot)
 		r.Get("/devices/{id}/config/diff", s.handleDeviceConfigDiff)
 		r.Get("/devices/{id}/vlans", s.handleGetDeviceVLANs)
+		r.Get("/devices/{id}/vlans/delete-impact", s.handleVLANDeleteImpact)
 		r.Get("/devices/{id}/fdb/snapshots", s.handleListDeviceFDBSnapshots)
 		r.Get("/events", s.handleListEvents)
 		r.Get("/system/stats", s.handleSystemStats)
@@ -151,6 +153,8 @@ func NewServer(st *store.Store, cfg config.Config, bi BuildInfo, hub *live.Hub, 
 		r.Patch("/investigate/mac/status", s.handlePatchMACInvestigationStatus)
 		r.Patch("/devices/{id}/interfaces/{ifIndex}/admin", s.handlePatchPortAdmin)
 		r.Patch("/devices/{id}/interfaces/{ifIndex}/poe", s.handlePatchPortPoE)
+		r.Post("/devices/{id}/interfaces/{ifIndex}/poe-reset", s.handlePostPortPoEReset)
+		r.Post("/devices/{id}/interfaces/bulk", s.handlePostBulkPorts)
 		r.Patch("/devices/{id}/interfaces/{ifIndex}/isolate", s.handlePatchPortIsolate)
 		r.Patch("/devices/{id}/interfaces/{ifIndex}/dhcp-snooping", s.handlePatchPortDHCPSnoop)
 		r.Patch("/devices/{id}/interfaces/{ifIndex}/flow-control", s.handlePatchPortFlowControl)
@@ -232,6 +236,21 @@ func NewServer(st *store.Store, cfg config.Config, bi BuildInfo, hub *live.Hub, 
 	s.mux = r
 	metricBuildInfo.WithLabelValues(s.bi.Version, s.bi.Commit).Set(1)
 	return s
+}
+
+// SetTopologyDirty — debounced rebuild topology blast cache (manual links / …).
+func (s *Server) SetTopologyDirty(fn func(reason string)) {
+	if s == nil {
+		return
+	}
+	s.topoDirty = fn
+}
+
+func (s *Server) notifyTopologyDirty(reason string) {
+	if s == nil || s.topoDirty == nil {
+		return
+	}
+	s.topoDirty(reason)
 }
 
 func (s *Server) Handler() http.Handler {

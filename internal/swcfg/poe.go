@@ -21,6 +21,14 @@ func NormalizePoEMode(raw string) (string, error) {
 	}
 }
 
+// NormalizePoEResetSeconds — длительность сброса PoE (EdgeSwitch: 1–60 с).
+func NormalizePoEResetSeconds(sec int) (int, error) {
+	if sec < 1 || sec > 60 {
+		return 0, fmt.Errorf("poe reset: длительность %d вне 1..60 с", sec)
+	}
+	return sec, nil
+}
+
 // UbiquitiPoEOpmodeCLI — команда EdgeSwitch Fastpath (не XP).
 func UbiquitiPoEOpmodeCLI(mode string) (string, error) {
 	m, err := NormalizePoEMode(mode)
@@ -36,5 +44,40 @@ func UbiquitiPoEOpmodeCLI(mode string) (string, error) {
 		return "poe opmode auto", nil
 	default:
 		return "", fmt.Errorf("poe_mode %q", m)
+	}
+}
+
+// UbiquitiPoEResetCLI — EdgeSwitch Fastpath: poe reset <1-60> (interface config).
+func UbiquitiPoEResetCLI(seconds int) (string, error) {
+	sec, err := NormalizePoEResetSeconds(seconds)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("poe reset %d", sec), nil
+}
+
+// PoEResetStrategy — как выполнять сброс PoE на вендоре.
+type PoEResetStrategy int
+
+const (
+	// PoEResetNative — одна CLI-команда на порту (EdgeSwitch poe reset N).
+	PoEResetNative PoEResetStrategy = iota
+	// PoEResetPowerCycle — выкл → пауза → вкл (Cisco/Eltex/SNR и т.п.).
+	PoEResetPowerCycle
+	// PoEResetMikrotik — /interface ethernet poe power-cycle.
+	PoEResetMikrotik
+)
+
+// PoEResetPlan — план сброса для вендора.
+func PoEResetPlan(v Vendor) PoEResetStrategy {
+	switch v {
+	case VendorMikrotik:
+		return PoEResetMikrotik
+	case VendorUbiquiti:
+		return PoEResetNative
+	case VendorAuto:
+		return PoEResetNative
+	default:
+		return PoEResetPowerCycle
 	}
 }

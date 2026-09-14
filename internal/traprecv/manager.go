@@ -14,12 +14,13 @@ import (
 
 // Manager — hot-reload SNMP trap UDP listener по настройкам из БД.
 type Manager struct {
-	log       *slog.Logger
-	st        *store.Store
-	hub       *live.Hub
-	hook      *notify.EventHook
-	onAction  LinkActionFunc
-	community string
+	log         *slog.Logger
+	st          *store.Store
+	hub         *live.Hub
+	hook        *notify.EventHook
+	onAction    LinkActionFunc
+	onAfterLink LinkActionFunc
+	community   string
 
 	mu     sync.Mutex
 	cancel context.CancelFunc
@@ -33,17 +34,19 @@ func NewManager(
 	community string,
 	hook *notify.EventHook,
 	onAction LinkActionFunc,
+	onAfterLink LinkActionFunc,
 ) *Manager {
 	if log == nil {
 		log = slog.Default()
 	}
 	return &Manager{
-		log:       log,
-		st:        st,
-		hub:       hub,
-		hook:      hook,
-		onAction:  onAction,
-		community: community,
+		log:         log,
+		st:          st,
+		hub:         hub,
+		hook:        hook,
+		onAction:    onAction,
+		onAfterLink: onAfterLink,
+		community:   community,
 	}
 }
 
@@ -82,7 +85,7 @@ func (m *Manager) Reload(parent context.Context) error {
 	runCtx, cancel := context.WithCancel(context.Background())
 	m.cancel = cancel
 	m.addr = wantAddr
-	recv := New(m.log, m.st, m.hub, wantAddr, m.community, m.hook, m.onAction)
+	recv := New(m.log, m.st, m.hub, wantAddr, m.community, m.hook, m.onAction, m.onAfterLink)
 	go func(addr string) {
 		if err := recv.Run(runCtx); err != nil && runCtx.Err() == nil {
 			m.log.Error("snmp trap receiver", "listen", addr, "err", err)

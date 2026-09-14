@@ -187,6 +187,83 @@ func (s *Store) HasMACEventSince(ctx context.Context, deviceID int64, eventType,
 	return okExists, err
 }
 
+// CountLinkEventsInWindow — число LINK_UP+LINK_DOWN на порту за since (для PORT_FLAP).
+func (s *Store) CountLinkEventsInWindow(ctx context.Context, deviceID int64, ifIndex int, since time.Time) (int, error) {
+	n, _, err := s.CountLinkEventsWithSources(ctx, deviceID, ifIndex, since)
+	return n, err
+}
+
+// CountLinkEventsWithSources — count + источники (poll/trap) по payload.
+func (s *Store) CountLinkEventsWithSources(ctx context.Context, deviceID int64, ifIndex int, since time.Time) (int, []string, error) {
+	if ifIndex <= 0 {
+		return 0, nil, nil
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT COALESCE(payload->>'source', ''), COALESCE(payload->>'trap_confirmed', 'false')
+		FROM events
+		WHERE device_id = $1 AND if_index = $2 AND created_at >= $3
+		  AND event_type IN ('LINK_UP','LINK_DOWN')`,
+		deviceID, ifIndex, since)
+	if err != nil {
+		return 0, nil, err
+	}
+	defer rows.Close()
+	n := 0
+	hasPoll, hasTrap := false, false
+	for rows.Next() {
+		var src, trapConf string
+		if err := rows.Scan(&src, &trapConf); err != nil {
+			return 0, nil, err
+		}
+		n++
+		if strings.EqualFold(src, "trap") || trapConf == "true" {
+			hasTrap = true
+		} else {
+			hasPoll = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return 0, nil, err
+	}
+	var sources []string
+	if hasPoll {
+		sources = append(sources, "poll")
+	}
+	if hasTrap {
+		sources = append(sources, "trap")
+	}
+	return n, sources, nil
+}
+
+// HasPortEventSince — debounce события на конкретном ifIndex.
+func (s *Store) HasPortEventSince(ctx context.Context, deviceID int64, ifIndex int, eventType string, since time.Time) (bool, error) {
+	if ifIndex <= 0 || eventType == "" {
+		return false, nil
+	}
+	var ok bool
+	err := s.pool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM events
+			WHERE device_id = $1 AND if_index = $2 AND event_type = $3 AND created_at >= $4
+		)`, deviceID, ifIndex, eventType, since).Scan(&ok)
+	return ok, err
+}
+
+// HasLoopCycleEventSince — debounce L2_LOOP_APPEARED по cycle_key в payload.
+func (s *Store) HasLoopCycleEventSince(ctx context.Context, eventType, cycleKey string, since time.Time) (bool, error) {
+	if eventType == "" || cycleKey == "" {
+		return false, nil
+	}
+	var ok bool
+	err := s.pool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM events
+			WHERE event_type = $1 AND created_at >= $2
+			  AND COALESCE(payload->>'cycle_key', '') = $3
+		)`, eventType, since, cycleKey).Scan(&ok)
+	return ok, err
+}
+
 // EventBrief — краткое событие для корреляции в отчёте.
 type EventBrief struct {
 	ID        int64                  `json:"id"`
@@ -414,7 +491,7 @@ func (s *Store) ListRecentDeviceEvents(ctx context.Context, deviceIDs []int64, e
 	return scanEventBriefs(rows)
 }
 
-// ListCorrelatedPortEvents — LINK_*/util на портах за окно.
+// ListCorrelatedPortEvents — LINK_*/util/flap/STP/storm на портах (и device-level STP/storm) за окно.
 func (s *Store) ListCorrelatedPortEvents(ctx context.Context, deviceID int64, ifIndexes []int, since time.Time, limit int) ([]EventBrief, error) {
 	if len(ifIndexes) == 0 {
 		return nil, nil
@@ -426,11 +503,20 @@ func (s *Store) ListCorrelatedPortEvents(ctx context.Context, deviceID int64, if
 		SELECT id, device_id, if_index, event_type, severity, created_at, payload
 		FROM events
 		WHERE device_id = $1
-		  AND if_index = ANY($2)
 		  AND created_at >= $3
-		  AND event_type IN (
-		    'LINK_UP','LINK_DOWN','PORT_UTILIZATION_HIGH','PORT_UTILIZATION_OK',
-		    'PORT_SPEED_DOWN','PORT_SPEED_OK','MAC_FLAPPING','MAC_MOVED','MAC_MULTI_ACCESS'
+		  AND (
+		    (
+		      if_index = ANY($2)
+		      AND event_type IN (
+		        'LINK_UP','LINK_DOWN','PORT_UTILIZATION_HIGH','PORT_UTILIZATION_OK',
+		        'PORT_SPEED_DOWN','PORT_SPEED_OK','MAC_FLAPPING','MAC_MOVED','MAC_MULTI_ACCESS',
+		        'PORT_FLAP'
+		      )
+		    )
+		    OR event_type IN (
+		      'STP_TOPOLOGY_CHANGE','STP_ROOT_CHANGED',
+		      'BROADCAST_STORM_SUSPECTED','BROADCAST_STORM_OK'
+		    )
 		  )
 		ORDER BY created_at DESC
 		LIMIT $4`, deviceID, ifIndexes, since, limit)

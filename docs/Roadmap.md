@@ -2,7 +2,7 @@
 
 Живой план развития. Эталон git — `example`, ветка `main`.
 
-**Текущая версия продукта:** **0.6.0** (см. `VERSION` в корне репозитория).
+**Текущая версия продукта:** **0.7.2** (см. `VERSION` в корне репозитория).
 
 Связанные документы: [Vendors.md](Vendors.md) · [To-Do.md](To-Do.md) · [TZ-snmp-switch-monitor.md](TZ-snmp-switch-monitor.md) · [Incident-Actions-Plan.md](Incident-Actions-Plan.md) · [MAC-Investigation.md](MAC-Investigation.md) · [Loop-Investigation.md](Loop-Investigation.md) · [Postmortem.md](Postmortem.md).
 
@@ -31,7 +31,7 @@ NetLynx — идейный продолжатель Invetor (переимено�
 
 ---
 
-## Сводка: что уже есть (0.6.0)
+## Сводка: что уже есть (0.7.0)
 
 | Область | Статус |
 |---------|--------|

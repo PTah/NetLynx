@@ -1,4 +1,5 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, Fragment, useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { apiDeleteJson, apiGet, apiPatch, apiPost } from "../api";
 
 export type VlanPortRef = {
@@ -31,6 +32,47 @@ type VlansPayload = {
   ok?: boolean;
 };
 
+type VlanDeleteImpactNeighbor = {
+  vlan_id: number;
+  local_if_index: number;
+  local_if_name?: string;
+  link_direction?: string;
+  reason?: string;
+  hop?: number;
+  redundant?: boolean;
+  neighbor_device_id: number;
+  neighbor_name: string;
+  neighbor_host?: string;
+  in_database: boolean;
+  on_ports: boolean;
+};
+
+type VlanDeleteImpact = {
+  summary?: string;
+  warnings?: string[];
+  neighbors?: VlanDeleteImpactNeighbor[];
+  skips?: {
+    vlan_id?: number;
+    if_index?: number;
+    if_name?: string;
+    reason: string;
+    neighbor_device_id?: number;
+    remote_sys_name?: string;
+  }[];
+  affected_device_ids?: number[];
+  toward_core_skipped?: number;
+  uplink_skipped?: number;
+  redundant_hit_count?: number;
+  fdb_clients?: { mac: string; vlan_id: number; if_index: number; if_name?: string }[];
+  mgmt_risks?: { vlan_id: number; host: string; svi_ip: string }[];
+  gateways?: { vlan_id: number; device_id: number; device_name: string; host?: string; svi_ip: string }[];
+  blocks_delete?: boolean;
+  root_device_id?: number;
+  root_source?: string;
+  topology_source?: string;
+  severity?: string;
+};
+
 type PortVlanOp = "set_access" | "trunk_allow" | "remove";
 type AllowedMode = "add" | "remove" | "all" | "except";
 
@@ -57,17 +99,12 @@ function inferVlansFromPorts(ports: PortHint[]): VlanRow[] {
   for (const p of ports) {
     if (!isSwitchPort(p)) continue;
     const role = (p.cli_port_mode ?? p.port_role ?? "").toLowerCase();
-    const access = p.cli_access_vlan && p.cli_access_vlan > 0 ? p.cli_access_vlan : role !== "trunk" && p.vlan_id && p.vlan_id > 0 ? p.vlan_id : null;
-    if (access) {
+    // Только CLI/конфиг — не подставлять VLAN из FDB (vlan_id).
+    const access = p.cli_access_vlan && p.cli_access_vlan > 0 ? p.cli_access_vlan : null;
+    if (access && role !== "trunk" && role !== "general") {
       const r = ensure(access);
       if (!r.access_ports.some((x) => x.if_index === p.if_index)) {
         r.access_ports.push({ if_index: p.if_index, if_name: portLabel(p), role: "access" });
-      }
-    } else if (p.vlan_id && p.vlan_id > 0) {
-      const r = ensure(p.vlan_id);
-      if (!r.fdb_ports) r.fdb_ports = [];
-      if (!r.fdb_ports.some((x) => x.if_index === p.if_index)) {
-        r.fdb_ports.push({ if_index: p.if_index, if_name: portLabel(p), role: role || undefined });
       }
     }
   }
@@ -96,6 +133,26 @@ function vlanNotInDbHint(r: VlanRow): { text: string; title: string } | null {
 
 function vlanConfiguredOnPorts(r: VlanRow): boolean {
   return (r.access_ports?.length ?? 0) > 0 || (r.tagged_ports?.length ?? 0) > 0;
+}
+
+/** Порты, на которых VLAN прописан (access/tagged) — для тултипа «удалить нельзя». */
+function vlanBoundPortLabels(r: VlanRow): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const p of [...(r.access_ports || []), ...(r.tagged_ports || [])]) {
+    const label = (p.if_name || "").trim() || String(p.if_index);
+    if (!label || seen.has(label)) continue;
+    seen.add(label);
+    out.push(label);
+  }
+  return out;
+}
+
+function vlanCannotDeleteTitle(r: VlanRow): string | null {
+  const ports = vlanBoundPortLabels(r);
+  if (!ports.length) return null;
+  const word = ports.length === 1 ? "порту" : "портах";
+  return `Удалить нельзя: прописан на ${word} ${ports.join(", ")}`;
 }
 
 /** Разбор «10,20-22» / «10;20» для проверки предупреждений в UI. */
@@ -156,6 +213,17 @@ function trunkAllowAccessWarning(mode: AllowedMode, listRaw: string): string | n
   return null;
 }
 
+type DeleteConfirmState = {
+  ids: number[];
+  listCsv: string;
+  headline: string;
+  cliHint?: string;
+  summary?: string;
+  warnings: string[];
+  skips: string[];
+  blocksDelete: boolean;
+};
+
 type Props = {
   deviceId: number;
   canWrite: boolean;
@@ -175,7 +243,7 @@ export function DeviceVlanTab({ deviceId, canWrite, settingsWritable, ports, rel
   const [busy, setBusy] = useState(false);
   const [busyNote, setBusyNote] = useState("");
   const [nameDraft, setNameDraft] = useState<Record<number, string>>({});
-  const [vlanId, setVlanId] = useState(0);
+  const [vlanId, setVlanId] = useState<number | null>(null);
   const [ifIndex, setIfIndex] = useState(0);
   const [op, setOp] = useState<PortVlanOp>("set_access");
   const [allowedMode, setAllowedMode] = useState<AllowedMode>("add");
@@ -183,6 +251,7 @@ export function DeviceVlanTab({ deviceId, canWrite, settingsWritable, ports, rel
   const [createId, setCreateId] = useState(0);
   const [createName, setCreateName] = useState("");
   const [selected, setSelected] = useState<Set<number>>(() => new Set());
+  const [deleteConfirm, setDeleteConfirm] = useState<DeleteConfirmState | null>(null);
 
   const physical = useMemo(() => ports.filter(isSwitchPort), [ports]);
   const selectedSorted = useMemo(
@@ -210,7 +279,7 @@ export function DeviceVlanTab({ deviceId, canWrite, settingsWritable, ports, rel
       }
       return keep;
     });
-    if (vlanId > 0 && !list.some((r) => r.vlan_id === vlanId) && list[0]) {
+    if (vlanId != null && vlanId > 0 && !list.some((r) => r.vlan_id === vlanId) && list[0]) {
       setVlanId(list[0].vlan_id);
     }
   };
@@ -256,12 +325,11 @@ export function DeviceVlanTab({ deviceId, canWrite, settingsWritable, ports, rel
   }, [deviceId, reloadToken]);
 
   useEffect(() => {
-    if (vlanId <= 0 && rows[0]) setVlanId(rows[0].vlan_id);
-  }, [rows, vlanId]);
-
-  useEffect(() => {
     if (ifIndex <= 0 && physical[0]) setIfIndex(physical[0].if_index);
   }, [physical, ifIndex]);
+
+  /** null = ещё не выбирали → первый VLAN из списка; 0 = No VLAN. */
+  const selectedVlanId = vlanId !== null ? vlanId : rows[0]?.vlan_id ?? 0;
 
   const sourceNote =
     source === "config_cache"
@@ -340,11 +408,22 @@ export function DeviceVlanTab({ deviceId, canWrite, settingsWritable, ports, rel
         .finally(endBusy);
       return;
     }
-    if (vlanId < 1 || vlanId > 4094) return;
+    if (vlanId === 0) {
+      beginBusy("Идёт очистка VLAN на порту (No VLAN)…");
+      apiPatch<VlansPayload>(`/api/v1/devices/${deviceId}/interfaces/${ifIndex}/vlan`, {
+        op: "no_vlan",
+      })
+        .then(afterWrite)
+        .catch((ex: Error) => setErr(ex.message))
+        .finally(endBusy);
+      return;
+    }
+    const id = selectedVlanId;
+    if (id < 1 || id > 4094) return;
     beginBusy("Идёт обновление конфига на свитче (VLAN на порту)…");
     apiPatch<VlansPayload>(`/api/v1/devices/${deviceId}/interfaces/${ifIndex}/vlan`, {
       op,
-      vlan_id: vlanId,
+      vlan_id: id,
     })
       .then(afterWrite)
       .catch((ex: Error) => setErr(ex.message))
@@ -386,8 +465,35 @@ export function DeviceVlanTab({ deviceId, canWrite, settingsWritable, ports, rel
     setSelected(new Set(selectableIds));
   };
 
-  const deleteVlans = (ids: number[]) => {
-    if (!w || busy) return;
+  const executeDeleteVlans = (clean: number[]) => {
+    const list = clean.join(", ");
+    beginBusy(`Идёт обновление конфига… удаляем VLAN ${list}`);
+    setRows((prev) => prev.filter((row) => !clean.includes(row.vlan_id)));
+    setNameDraft((prev) => {
+      const next = { ...prev };
+      for (const id of clean) delete next[id];
+      return next;
+    });
+    setSelected(new Set());
+    setDeleteConfirm(null);
+    const req =
+      clean.length === 1
+        ? apiDeleteJson<VlansPayload>(`/api/v1/devices/${deviceId}/vlans/${clean[0]}`)
+        : apiDeleteJson<VlansPayload>(`/api/v1/devices/${deviceId}/vlans`, {
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ vlan_ids: clean }),
+          });
+    req
+      .then(afterWrite)
+      .catch((ex: Error) => {
+        setErr(ex.message);
+        load();
+      })
+      .finally(endBusy);
+  };
+
+  const deleteVlans = async (ids: number[]) => {
+    if (!w || busy || deleteConfirm) return;
     const clean = [...new Set(ids)].filter((id) => id > 1 && id <= 4094).sort((a, b) => a - b);
     if (!clean.length) return;
     const blocked: string[] = [];
@@ -409,44 +515,89 @@ export function DeviceVlanTab({ deviceId, canWrite, settingsWritable, ports, rel
       );
       return;
     }
-    const list = clean.join(", ");
-    const title =
+    const listCsv = clean.join(", ");
+    const headline =
       clean.length === 1
-        ? `Удалить VLAN ${list} из vlan database свитча?`
-        : `Удалить ${clean.length} VLAN (${list}) из vlan database?\nНа свитч уйдёт: no vlan ${list}`;
-    if (!window.confirm(title)) return;
-    beginBusy(`Идёт обновление конфига… удаляем VLAN ${list}`);
-    setRows((prev) => prev.filter((row) => !clean.includes(row.vlan_id)));
-    setNameDraft((prev) => {
-      const next = { ...prev };
-      for (const id of clean) delete next[id];
-      return next;
+        ? `Удалить VLAN ${listCsv} из vlan database свитча?`
+        : `Удалить ${clean.length} VLAN из vlan database?`;
+    const cliHint =
+      clean.length === 1 ? undefined : `На свитч уйдёт: no vlan ${listCsv}`;
+    let summary: string | undefined;
+    let warnings: string[] = [];
+    let skips: string[] = [];
+    let blocksDelete = false;
+    try {
+      const impact = await apiGet<VlanDeleteImpact>(
+        `/api/v1/devices/${deviceId}/vlans/delete-impact?vlan_ids=${encodeURIComponent(listCsv)}`
+      );
+      blocksDelete = !!impact.blocks_delete;
+      if (impact.summary) {
+        summary = impact.summary;
+      }
+      if (impact.warnings && impact.warnings.length > 0) {
+        warnings = impact.warnings;
+      } else if (impact.neighbors?.length) {
+        warnings = impact.neighbors.map((n) => {
+          const port = n.local_if_name || `if${n.local_if_index}`;
+          const dir = n.link_direction ? ` [${n.link_direction}]` : "";
+          const hop =
+            n.reason === "descendant" && n.hop && n.hop > 1
+              ? ` нижестоящий hop=${n.hop}`
+              : "";
+          const where =
+            n.in_database && n.on_ports
+              ? "database + порты"
+              : n.in_database
+                ? "vlan database"
+                : "на портах";
+          const red = n.redundant ? " [обход]" : "";
+          return `VLAN ${n.vlan_id}: ${port}${dir} → ${n.neighbor_name}${hop}${red} (${where})`;
+        });
+      }
+      if (!summary && (impact.neighbors?.length || impact.mgmt_risks?.length || impact.gateways?.length)) {
+        summary =
+          impact.severity === "critical"
+            ? "Критичный риск при удалении VLAN (management / связность)."
+            : "Удаление может отрезать транзит вниз по топологии: эти VLAN есть у нижестоящих соседей.";
+      }
+      if ((!impact.neighbors || impact.neighbors.length === 0) && impact.skips?.length) {
+        const reasonRu: Record<string, string> = {
+          toward_core: "к ядру (вверх)",
+          vlan_not_on_link: "VLAN не идёт по линку",
+          neighbor_no_vlan: "у соседа нет VLAN",
+          unresolved_neighbor: "сосед не в inventory",
+          not_downward: "не вниз",
+        };
+        skips = impact.skips.slice(0, 5).map((s) => {
+          const port = s.if_name || (s.if_index ? `if${s.if_index}` : "?");
+          const why = reasonRu[s.reason] || s.reason;
+          const rem = s.remote_sys_name ? ` → ${s.remote_sys_name}` : "";
+          return `VLAN ${s.vlan_id ?? "?"}: ${port}${rem} — ${why}`;
+        });
+      }
+    } catch {
+      /* нет снимка соседей — обычное подтверждение */
+    }
+    setDeleteConfirm({
+      ids: clean,
+      listCsv,
+      headline,
+      cliHint,
+      summary,
+      warnings,
+      skips,
+      blocksDelete,
     });
-    setSelected(new Set());
-    const req =
-      clean.length === 1
-        ? apiDeleteJson<VlansPayload>(`/api/v1/devices/${deviceId}/vlans/${clean[0]}`)
-        : apiDeleteJson<VlansPayload>(`/api/v1/devices/${deviceId}/vlans`, {
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ vlan_ids: clean }),
-          });
-    req
-      .then(afterWrite)
-      .catch((ex: Error) => {
-        setErr(ex.message);
-        load();
-      })
-      .finally(endBusy);
   };
 
   const deleteVlan = (r: VlanRow) => {
     if (!w || busy || r.vlan_id === 1) return;
     // Помеченные + «Удалить» на любом из них → массовое удаление.
     if (selected.has(r.vlan_id) && selectedSorted.length > 1) {
-      deleteVlans(selectedSorted);
+      void deleteVlans(selectedSorted);
       return;
     }
-    deleteVlans([r.vlan_id]);
+    void deleteVlans([r.vlan_id]);
   };
 
   const portSubmitDisabled =
@@ -455,7 +606,7 @@ export function DeviceVlanTab({ deviceId, canWrite, settingsWritable, ports, rel
     !ifIndex ||
     (op === "trunk_allow"
       ? allowedMode !== "all" && !allowedList.trim()
-      : vlanId < 1);
+      : selectedVlanId < 0 || selectedVlanId > 4094);
 
   return (
     <div className="device-detail-vlan-stub">
@@ -463,7 +614,11 @@ export function DeviceVlanTab({ deviceId, canWrite, settingsWritable, ports, rel
       <p style={{ color: "#9aa3b5", fontSize: "0.9rem", marginTop: 0 }}>
         Список VLAN на свитче: <code>vlan database</code> из show run и привязки портов. Колонка FDB — MAC на уже
         известных VLAN (призраки удалённых VLAN из FDB в список не попадают). Удаление из vlan database запрещено, пока
-        VLAN висит на портах. VLAN 1 удалить нельзя.
+        VLAN висит на портах. Перед удалением — blast-radius: топология (STP), VLAN на trunk, потомки вниз,
+        обход к ядру (redundant), FDB, SVI/mgmt (host = IP на Vlan), шлюзы с SVI. Severity critical при management
+        VLAN — удаление <strong>блокируется</strong> (API 409). Обычный downlink-warning — advisory.{" "}
+        <code>UPLINK</code>/<code>DOWNLINK</code> — только
+        ручной override. VLAN 1 удалить нельзя.
       </p>
       {busy ? (
         <p style={{ color: "#9dd", fontSize: "0.9rem", marginTop: "-0.35rem" }} role="status" aria-live="polite">
@@ -518,7 +673,26 @@ export function DeviceVlanTab({ deviceId, canWrite, settingsWritable, ports, rel
       {w && selectedSorted.length > 0 && (
         <p style={{ margin: "0 0 0.5rem", display: "flex", flexWrap: "wrap", gap: "0.5rem", alignItems: "center" }}>
           <span style={{ color: "#9aa3b5", fontSize: "0.85rem" }}>
-            Выбрано: {selectedSorted.join(", ")}
+            Выбрано:{" "}
+            {selectedSorted.map((id, i) => {
+              const row = rows.find((r) => r.vlan_id === id);
+              const blockedTitle = row ? vlanCannotDeleteTitle(row) : null;
+              return (
+                <Fragment key={id}>
+                  {i > 0 ? ", " : null}
+                  <span
+                    style={
+                      blockedTitle
+                        ? { color: "#f66", fontWeight: 600, cursor: "help" }
+                        : undefined
+                    }
+                    title={blockedTitle ?? undefined}
+                  >
+                    {id}
+                  </span>
+                </Fragment>
+              );
+            })}
           </span>
           <button type="button" disabled={busy} onClick={() => deleteVlans(selectedSorted)}>
             Удалить выбранные ({selectedSorted.length})
@@ -684,15 +858,25 @@ export function DeviceVlanTab({ deviceId, canWrite, settingsWritable, ports, rel
           <label>
             VLAN ID
             <br />
-            <input
-              type="number"
-              min={1}
-              max={4094}
-              value={vlanId || ""}
+            <select
+              value={selectedVlanId}
               disabled={!w || busy}
-              onChange={(e) => setVlanId(Number(e.target.value) || 0)}
-              style={{ width: 88 }}
-            />
+              onChange={(e) => {
+                const next = Number(e.target.value);
+                setVlanId(next);
+                if (next === 0) setOp("set_access");
+              }}
+              style={{ minWidth: 120 }}
+              title="No VLAN — очистить порт от VLAN (EdgeSwitch general)"
+            >
+              <option value={0}>No VLAN</option>
+              {rows.map((r) => (
+                <option key={r.vlan_id} value={r.vlan_id}>
+                  {r.vlan_id}
+                  {r.name ? ` — ${r.name}` : ""}
+                </option>
+              ))}
+            </select>
           </label>
         )}
         <label>
@@ -720,8 +904,12 @@ export function DeviceVlanTab({ deviceId, canWrite, settingsWritable, ports, rel
             onChange={(e) => {
               const next = e.target.value as PortVlanOp;
               setOp(next);
-              if (next === "trunk_allow" && vlanId > 0 && !allowedList.trim()) {
-                setAllowedList(String(vlanId));
+              if (next === "trunk_allow") {
+                const id = selectedVlanId > 0 ? selectedVlanId : rows[0]?.vlan_id ?? 0;
+                if (selectedVlanId === 0 && rows[0]) setVlanId(rows[0].vlan_id);
+                if (id > 0 && !allowedList.trim()) {
+                  setAllowedList(String(id));
+                }
               }
             }}
             style={{ minWidth: 200 }}
@@ -770,6 +958,12 @@ export function DeviceVlanTab({ deviceId, canWrite, settingsWritable, ports, rel
           {busy ? "Пишем…" : "Применить на порт"}
         </button>
       </form>
+      {op !== "trunk_allow" && selectedVlanId === 0 && (
+        <p style={{ color: "#7a8499", fontSize: "0.8rem", marginTop: "0.35rem" }}>
+          No VLAN: на порту <code>vlan participation auto 2-4093</code>, <code>include 1</code>,{" "}
+          <code>switchport mode general</code>, <code>access vlan 1</code>.
+        </p>
+      )}
       {op === "trunk_allow" && (
         <>
           <p style={{ color: "#7a8499", fontSize: "0.8rem", marginTop: "0.35rem" }}>
@@ -788,6 +982,184 @@ export function DeviceVlanTab({ deviceId, canWrite, settingsWritable, ports, rel
           </p>
         </>
       )}
+      {deleteConfirm &&
+        createPortal(
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="vlan-delete-confirm-title"
+            style={{
+              position: "fixed",
+              inset: 0,
+              zIndex: 220,
+              background: "rgba(0,0,0,0.6)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: 16,
+            }}
+            onClick={(e) => {
+              if (e.target === e.currentTarget) setDeleteConfirm(null);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") {
+                e.stopPropagation();
+                setDeleteConfirm(null);
+              }
+            }}
+          >
+            <div
+              style={{
+                width: "min(560px, 100%)",
+                maxHeight: "min(85vh, 720px)",
+                display: "flex",
+                flexDirection: "column",
+                background: "#1a1f2b",
+                border: "1px solid #2e3648",
+                borderRadius: 10,
+                boxShadow: "0 12px 40px rgba(0,0,0,0.5)",
+                color: "#e8ecf4",
+                overflow: "hidden",
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div style={{ padding: "1rem 1.15rem 0.65rem", flexShrink: 0 }}>
+                <h2 id="vlan-delete-confirm-title" style={{ margin: 0, fontSize: "1.1rem", fontWeight: 650 }}>
+                  Подтверждение удаления
+                </h2>
+                <p style={{ margin: "0.65rem 0 0", fontSize: "0.92rem", lineHeight: 1.4 }}>
+                  {deleteConfirm.headline}
+                </p>
+                {deleteConfirm.cliHint ? (
+                  <p style={{ margin: "0.4rem 0 0", fontSize: "0.82rem", color: "#9aa3b5" }}>
+                    <code>{deleteConfirm.cliHint}</code>
+                  </p>
+                ) : null}
+                {deleteConfirm.ids.length > 1 ? (
+                  <p style={{ margin: "0.45rem 0 0", fontSize: "0.8rem", color: "#7a8499", wordBreak: "break-word" }}>
+                    VLAN: {deleteConfirm.listCsv}
+                  </p>
+                ) : null}
+              </div>
+              {(deleteConfirm.summary ||
+                deleteConfirm.warnings.length > 0 ||
+                deleteConfirm.skips.length > 0) && (
+                <div
+                  style={{
+                    flex: "1 1 auto",
+                    minHeight: 0,
+                    overflowY: "auto",
+                    margin: "0.35rem 0.85rem",
+                    padding: "0.65rem 0.75rem",
+                    background: "#12161f",
+                    border: deleteConfirm.blocksDelete ? "1px solid #7f1d1d" : "1px solid #3a2e1a",
+                    borderRadius: 8,
+                  }}
+                >
+                  {deleteConfirm.blocksDelete ? (
+                    <p style={{ margin: "0 0 0.55rem", fontSize: "0.88rem", color: "#fca5a5", lineHeight: 1.4, fontWeight: 600 }}>
+                      Удаление заблокировано: management SVI совпадает с host устройства.
+                    </p>
+                  ) : null}
+                  {deleteConfirm.summary ? (
+                    <p style={{ margin: "0 0 0.55rem", fontSize: "0.88rem", color: "#e8c07a", lineHeight: 1.4 }}>
+                      {deleteConfirm.summary}
+                    </p>
+                  ) : null}
+                  {deleteConfirm.warnings.length > 0 ? (
+                    <ul
+                      style={{
+                        margin: 0,
+                        paddingLeft: "1.15rem",
+                        fontSize: "0.8rem",
+                        color: "#c5cedd",
+                        lineHeight: 1.45,
+                      }}
+                    >
+                      {deleteConfirm.warnings.map((line, i) => (
+                        <li key={`${i}-${line.slice(0, 40)}`} style={{ marginBottom: 4 }}>
+                          {line}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                  {deleteConfirm.skips.length > 0 ? (
+                    <details style={{ marginTop: 8 }}>
+                      <summary style={{ fontSize: "0.78rem", color: "#7a8499", cursor: "pointer" }}>
+                        Почему нет предупреждения о транзите ({deleteConfirm.skips.length})
+                      </summary>
+                      <ul
+                        style={{
+                          margin: "0.4rem 0 0",
+                          paddingLeft: "1.15rem",
+                          fontSize: "0.75rem",
+                          color: "#8b95a8",
+                          lineHeight: 1.4,
+                        }}
+                      >
+                        {deleteConfirm.skips.map((line, i) => (
+                          <li key={`skip-${i}`}>{line}</li>
+                        ))}
+                      </ul>
+                    </details>
+                  ) : null}
+                </div>
+              )}
+              <div
+                style={{
+                  flexShrink: 0,
+                  display: "flex",
+                  justifyContent: "flex-end",
+                  gap: 8,
+                  padding: "0.75rem 1.15rem 1rem",
+                  borderTop: "1px solid #2a3040",
+                  background: "#1a1f2b",
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={() => setDeleteConfirm(null)}
+                  style={{
+                    background: "transparent",
+                    border: "1px solid #3a4558",
+                    borderRadius: 6,
+                    color: "#c8d0e0",
+                    padding: "8px 14px",
+                    cursor: "pointer",
+                  }}
+                >
+                  Отмена
+                </button>
+                <button
+                  type="button"
+                  autoFocus={!deleteConfirm.blocksDelete}
+                  disabled={deleteConfirm.blocksDelete}
+                  onClick={() => {
+                    if (deleteConfirm.blocksDelete) return;
+                    executeDeleteVlans(deleteConfirm.ids);
+                  }}
+                  style={{
+                    background: deleteConfirm.blocksDelete ? "#4a3030" : "#b4534a",
+                    border: "none",
+                    borderRadius: 6,
+                    color: deleteConfirm.blocksDelete ? "#9ca3af" : "#fff",
+                    padding: "8px 16px",
+                    fontWeight: 600,
+                    cursor: deleteConfirm.blocksDelete ? "not-allowed" : "pointer",
+                    opacity: deleteConfirm.blocksDelete ? 0.7 : 1,
+                  }}
+                >
+                  {deleteConfirm.blocksDelete
+                    ? "Удаление запрещено"
+                    : deleteConfirm.warnings.length
+                      ? "Всё равно удалить"
+                      : "Удалить"}
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }

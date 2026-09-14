@@ -47,9 +47,31 @@ type Baseline = {
   accessVlan: number;
 };
 
+export type PortSettingsSaveOpts = {
+  adminUp: boolean;
+  poeMode: PoEModeValue;
+  isolate: boolean;
+  dhcpTrusted: boolean;
+  flowControl: boolean;
+  stpEnabled: boolean;
+  edgePort: EdgePortValue;
+  portPriority: number;
+  pathCost: number;
+  enableDirty: boolean;
+  poeDirty: boolean;
+  isolateDirty: boolean;
+  dhcpTrustedDirty: boolean;
+  flowControlDirty: boolean;
+  stpDirty: boolean;
+  vlanDirty: boolean;
+  accessVlan: number;
+};
+
 type Props = {
   open: boolean;
   port: PortSettingsTarget | null;
+  /** Массовое редактирование (≥2 портов). Если задано — упрощённая форма. */
+  bulkPorts?: PortSettingsTarget[] | null;
   canWrite: boolean;
   settingsWritable?: boolean;
   poe24vSupported?: boolean;
@@ -57,25 +79,9 @@ type Props = {
   /** VLAN ID из vlan database свитча (in_database). null/undefined — проверка только на сервере. */
   loadKnownVlans?: () => Promise<number[]>;
   onClose: () => void;
-  onSave: (opts: {
-    adminUp: boolean;
-    poeMode: PoEModeValue;
-    isolate: boolean;
-    dhcpTrusted: boolean;
-    flowControl: boolean;
-    stpEnabled: boolean;
-    edgePort: EdgePortValue;
-    portPriority: number;
-    pathCost: number;
-    enableDirty: boolean;
-    poeDirty: boolean;
-    isolateDirty: boolean;
-    dhcpTrustedDirty: boolean;
-    flowControlDirty: boolean;
-    stpDirty: boolean;
-    vlanDirty: boolean;
-    accessVlan: number;
-  }) => Promise<void>;
+  onSave: (opts: PortSettingsSaveOpts) => Promise<void>;
+  /** Сброс PoE (EdgeSwitch: poe reset N). */
+  onPoEReset?: (seconds: number) => Promise<void>;
 };
 
 function normEdge(v: string | undefined | null): EdgePortValue {
@@ -84,6 +90,8 @@ function normEdge(v: string | undefined | null): EdgePortValue {
 }
 
 function baselineFromPort(port: PortSettingsTarget): Baseline {
+  const mode = (port.cli_port_mode ?? "").toLowerCase();
+  const noVlan = mode === "general";
   return {
     enable: port.admin_status === 1,
     isolate: port.isolate === true,
@@ -94,14 +102,22 @@ function baselineFromPort(port: PortSettingsTarget): Baseline {
     portPriority: 128,
     pathCost: 0,
     poeMode: port.poe_mode === "off" || port.poe_mode === "24v" || port.poe_mode === "poe+" ? port.poe_mode : "poe+",
-    accessVlan: port.cli_access_vlan && port.cli_access_vlan > 0 ? port.cli_access_vlan : 1,
+    // 0 = No VLAN (EdgeSwitch general); иначе access / PVID
+    accessVlan: noVlan ? 0 : port.cli_access_vlan && port.cli_access_vlan > 0 ? port.cli_access_vlan : 1,
   };
+}
+
+function formatBulkTitle(ports: PortSettingsTarget[]): string {
+  const names = ports.map((p) => p.if_name?.trim() || String(p.if_index));
+  if (names.length <= 4) return names.join(", ");
+  return `${names.slice(0, 3).join(", ")} … (+${names.length - 3})`;
 }
 
 /** Модалка настроек порта (UISP-like). EdgeSwitch / Eltex / SNR. */
 export function PortSettingsModal({
   open,
   port,
+  bulkPorts = null,
   canWrite,
   settingsWritable = true,
   poe24vSupported = true,
@@ -109,7 +125,10 @@ export function PortSettingsModal({
   loadKnownVlans,
   onClose,
   onSave,
+  onPoEReset,
 }: Props) {
+  const bulkMode = Array.isArray(bulkPorts) && bulkPorts.length >= 2;
+  const primary = bulkMode ? bulkPorts![0] : port;
   const [enable, setEnable] = useState(true);
   const [isolate, setIsolate] = useState(false);
   const [dhcpTrusted, setDhcpTrusted] = useState(false);
@@ -125,21 +144,25 @@ export function PortSettingsModal({
   const [loading, setLoading] = useState(false);
   const [loadNote, setLoadNote] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [resetting, setResetting] = useState(false);
+  const [poeResetSec, setPoeResetSec] = useState(10);
   const [err, setErr] = useState<string | null>(null);
   /** null = ещё не загрузили / нет данных; Set = известные VLAN из database */
   const [knownVlans, setKnownVlans] = useState<Set<number> | null>(null);
   const loadLiveRef = useRef(loadLiveSettings);
   const loadKnownVlansRef = useRef(loadKnownVlans);
-  const vlanInputRef = useRef<HTMLInputElement | null>(null);
+  const vlanInputRef = useRef<HTMLSelectElement | null>(null);
   /** Закрывать по клику на фон только если pointerdown тоже был на фоне (не drag-выделение из input). */
   const backdropPtrDownRef = useRef(false);
   loadLiveRef.current = loadLiveSettings;
   loadKnownVlansRef.current = loadKnownVlans;
 
+  const bulkKey = bulkMode ? bulkPorts!.map((p) => p.if_index).join(",") : "";
+
   useEffect(() => {
-    if (!open || !port) return;
+    if (!open || !primary) return;
     let cancelled = false;
-    const poll = baselineFromPort(port);
+    const poll = baselineFromPort(primary);
     setBaseline(poll);
     setEnable(poll.enable);
     setIsolate(poll.isolate);
@@ -152,9 +175,11 @@ export function PortSettingsModal({
     setPoeMode(poll.poeMode);
     setAccessVlan(poll.accessVlan);
     setPoe24v(poe24vSupported);
+    setPoeResetSec(10);
     setErr(null);
     setSaving(false);
-    setLoadNote(null);
+    setResetting(false);
+    setLoadNote(bulkMode ? `Массовая настройка: ${bulkPorts!.length} портов` : null);
     setKnownVlans(null);
     backdropPtrDownRef.current = false;
 
@@ -169,6 +194,13 @@ export function PortSettingsModal({
         .catch(() => {
           if (!cancelled) setKnownVlans(null);
         });
+    }
+
+    if (bulkMode) {
+      setLoading(false);
+      return () => {
+        cancelled = true;
+      };
     }
 
     const loadFn = loadLiveRef.current;
@@ -192,7 +224,12 @@ export function PortSettingsModal({
           portPriority: typeof live.port_priority === "number" ? live.port_priority : 128,
           pathCost: typeof live.path_cost === "number" ? live.path_cost : 0,
           poeMode: live.poe_mode === "off" || live.poe_mode === "24v" || live.poe_mode === "poe+" ? live.poe_mode : "poe+",
-          accessVlan: live.access_vlan && live.access_vlan > 0 ? live.access_vlan : poll.accessVlan,
+          accessVlan:
+            (live.port_mode ?? "").toLowerCase() === "general"
+              ? 0
+              : live.access_vlan && live.access_vlan > 0
+                ? live.access_vlan
+                : poll.accessVlan,
         };
         if (live.poe_24v === false && next.poeMode === "24v") next.poeMode = "poe+";
         setBaseline(next);
@@ -231,7 +268,7 @@ export function PortSettingsModal({
     return () => {
       cancelled = true;
     };
-  }, [open, port?.if_index, port?.admin_status, poe24vSupported]);
+  }, [open, primary?.if_index, primary?.admin_status, poe24vSupported, bulkMode, bulkKey]);
 
   useEffect(() => {
     if (!open || loading || !settingsWritable) return;
@@ -243,20 +280,21 @@ export function PortSettingsModal({
       vlanInputRef.current?.focus();
     }, 0);
     return () => window.clearTimeout(t);
-  }, [open, loading, settingsWritable, port?.if_index]);
+  }, [open, loading, settingsWritable, primary?.if_index, bulkKey]);
 
-  if (!open || !port) return null;
+  if (!open || !primary) return null;
 
   const w = settingsWritable;
   const enableDirty = enable !== baseline.enable;
-  const isolateDirty = w && isolate !== baseline.isolate;
-  const dhcpTrustedDirty = w && dhcpTrusted !== baseline.dhcpTrusted;
-  const flowControlDirty = w && flowControl !== baseline.flowControl;
+  const isolateDirty = !bulkMode && w && isolate !== baseline.isolate;
+  const dhcpTrustedDirty = !bulkMode && w && dhcpTrusted !== baseline.dhcpTrusted;
+  const flowControlDirty = !bulkMode && w && flowControl !== baseline.flowControl;
   const poeDirty = w && poeMode !== baseline.poeMode;
-  const vlanDirty = w && accessVlan > 0 && accessVlan !== baseline.accessVlan;
+  const vlanDirty = w && accessVlan !== baseline.accessVlan;
   const vlanNotInDb =
     vlanDirty && knownVlans != null && accessVlan > 0 && accessVlan !== 1 && !knownVlans.has(accessVlan);
   const stpDirty =
+    !bulkMode &&
     w &&
     (stpEnabled !== baseline.stpEnabled ||
       edgePort !== baseline.edgePort ||
@@ -264,8 +302,10 @@ export function PortSettingsModal({
       pathCost !== baseline.pathCost);
   const dirty = enableDirty || isolateDirty || dhcpTrustedDirty || flowControlDirty || poeDirty || stpDirty || vlanDirty;
   const canSubmit = dirty && !vlanNotInDb;
-  const portTitle = (port.if_name?.trim() || `ifIndex ${port.if_index}`) + (port.label ? ` — ${port.label}` : "");
-  const controlsDisabled = !canWrite || saving || loading;
+  const portTitle = bulkMode
+    ? `${bulkPorts!.length} портов: ${formatBulkTitle(bulkPorts!)}`
+    : (primary.if_name?.trim() || `ifIndex ${primary.if_index}`) + (primary.label ? ` — ${primary.label}` : "");
+  const controlsDisabled = !canWrite || saving || loading || resetting;
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -289,10 +329,10 @@ export function PortSettingsModal({
         pathCost,
         enableDirty,
         poeDirty,
-        isolateDirty,
-        dhcpTrustedDirty,
-        flowControlDirty,
-        stpDirty,
+        isolateDirty: !!isolateDirty,
+        dhcpTrustedDirty: !!dhcpTrustedDirty,
+        flowControlDirty: !!flowControlDirty,
+        stpDirty: !!stpDirty,
         vlanDirty,
         accessVlan,
       });
@@ -301,6 +341,25 @@ export function PortSettingsModal({
       setErr(ex instanceof Error ? ex.message : "Ошибка сохранения");
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function doPoEReset() {
+    if (!onPoEReset || !canWrite || resetting || saving) return;
+    const sec = Math.min(60, Math.max(1, Math.round(poeResetSec) || 10));
+    const label = bulkMode ? `${bulkPorts!.length} портах` : `порту ${primary.if_name?.trim() || primary.if_index}`;
+    if (!window.confirm(`Сбросить PoE на ${label} на ${sec} с? Питание PD будет кратковременно отключено.`)) {
+      return;
+    }
+    setResetting(true);
+    setErr(null);
+    try {
+      await onPoEReset(sec);
+      onClose();
+    } catch (ex) {
+      setErr(ex instanceof Error ? ex.message : "Ошибка PoE reset");
+    } finally {
+      setResetting(false);
     }
   }
 
@@ -355,7 +414,7 @@ export function PortSettingsModal({
       >
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: "1rem" }}>
           <h2 id="port-settings-title" style={{ margin: 0, fontSize: "1.15rem", fontWeight: 650 }}>
-            Расширенные настройки
+            {bulkMode ? "Массовая настройка портов" : "Расширенные настройки"}
           </h2>
           <button type="button" onClick={onClose} aria-label="Закрыть" style={closeBtn}>
             ×
@@ -373,32 +432,55 @@ export function PortSettingsModal({
         <label style={{ ...rowStyle, opacity: loading ? 0.55 : 1 }}>
           <input type="checkbox" checked={enable} disabled={controlsDisabled} onChange={(e) => setEnable(e.target.checked)} />
           <span>
-            Включить порт <strong>{port.if_name?.trim() || port.if_index}</strong>
+            {bulkMode ? "Включить выбранные порты" : (
+              <>
+                Включить порт <strong>{primary.if_name?.trim() || primary.if_index}</strong>
+              </>
+            )}
           </span>
         </label>
 
         <label style={{ ...fieldLabel, opacity: w && !loading ? 1 : 0.55, margin: "0.35rem 0 0.85rem" }}>
           Access VLAN / PVID
-          <input
+          <select
             ref={vlanInputRef}
-            type="number"
-            min={1}
-            max={4094}
-            value={accessVlan || ""}
+            value={accessVlan}
             disabled={controlsDisabled || !w}
-            onChange={(e) => setAccessVlan(Number(e.target.value) || 0)}
+            onChange={(e) => setAccessVlan(Number(e.target.value))}
             onKeyDown={(e) => {
-              // Не отдавать Enter форме (случайный submit) — только кнопка «Сохранить».
               if (e.key === "Enter") e.preventDefault();
             }}
             style={{
               ...inputStyle,
               borderColor: vlanNotInDb ? "#c45c5c" : "#2e3648",
             }}
-          />
+          >
+            <option value={0}>No VLAN</option>
+            {(() => {
+              const ids = new Set<number>([1]);
+              if (knownVlans) {
+                for (const id of knownVlans) {
+                  if (id >= 1 && id <= 4094) ids.add(id);
+                }
+              }
+              if (baseline.accessVlan > 0) ids.add(baseline.accessVlan);
+              if (accessVlan > 0) ids.add(accessVlan);
+              return [...ids]
+                .sort((a, b) => a - b)
+                .map((id) => (
+                  <option key={id} value={id}>
+                    {id}
+                  </option>
+                ));
+            })()}
+          </select>
           {vlanNotInDb ? (
             <span style={{ fontSize: "0.75rem", color: "#f88", fontWeight: 500 }} role="alert">
               VLAN {accessVlan} нет в vlan database — сначала создайте на вкладке VLAN
+            </span>
+          ) : accessVlan === 0 ? (
+            <span style={{ fontSize: "0.75rem", color: "#7a8499", fontWeight: 400 }}>
+              Очистка порта: participation auto 2–4093, mode general, access vlan 1 (как EdgeSwitch).
             </span>
           ) : (
             <span style={{ fontSize: "0.75rem", color: "#7a8499", fontWeight: 400 }}>
@@ -407,98 +489,102 @@ export function PortSettingsModal({
           )}
         </label>
 
-        <FeatureCheck
-          label="Изолировать порт"
-          checked={isolate}
-          disabled={controlsDisabled || !w}
-          writable={w}
-          loading={loading}
-          onChange={setIsolate}
-          hint="Не видит другие изолированные порты; до uplink и шлюза — может."
-        />
-        <FeatureCheck
-          label="DHCP Snooping (Trusted)"
-          checked={dhcpTrusted}
-          disabled={controlsDisabled || !w}
-          writable={w}
-          loading={loading}
-          onChange={setDhcpTrusted}
-          hint="Trusted — только туда, откуда должны приходить ответы DHCP. Всё остальное — untrusted. Trust включает глобальный ip dhcp snooping; если trust нигде нет — глобальный снимается."
-        />
-        <FeatureCheck
-          label="Flow Control"
-          checked={flowControl}
-          disabled={controlsDisabled || !w}
-          writable={w}
-          loading={loading}
-          onChange={setFlowControl}
-          hint="PAUSE-кадры при переполнении буфера. На uplink часто лучше выкл."
-        />
+        {!bulkMode && (
+          <>
+            <FeatureCheck
+              label="Изолировать порт"
+              checked={isolate}
+              disabled={controlsDisabled || !w}
+              writable={w}
+              loading={loading}
+              onChange={setIsolate}
+              hint="Не видит другие изолированные порты; до uplink и шлюза — может."
+            />
+            <FeatureCheck
+              label="DHCP Snooping (Trusted)"
+              checked={dhcpTrusted}
+              disabled={controlsDisabled || !w}
+              writable={w}
+              loading={loading}
+              onChange={setDhcpTrusted}
+              hint="Trusted — только туда, откуда должны приходить ответы DHCP. Всё остальное — untrusted. Trust включает глобальный ip dhcp snooping; если trust нигде нет — глобальный снимается."
+            />
+            <FeatureCheck
+              label="Flow Control"
+              checked={flowControl}
+              disabled={controlsDisabled || !w}
+              writable={w}
+              loading={loading}
+              onChange={setFlowControl}
+              hint="PAUSE-кадры при переполнении буфера. На uplink часто лучше выкл."
+            />
 
-        <label style={{ ...rowStyle, opacity: w && !loading ? 1 : 0.55, marginBottom: "0.25rem" }}>
-          <input
-            type="checkbox"
-            checked={stpEnabled}
-            disabled={controlsDisabled || !w}
-            onChange={(e) => setStpEnabled(e.target.checked)}
-          />
-          <span>
-            Spanning Tree Protocol
-            {!w && <em style={soonStyle}> (недоступно)</em>}
-          </span>
-        </label>
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr)",
-            gap: 8,
-            margin: "0.35rem 0 0.85rem 0",
-            paddingLeft: "1.6rem",
-            maxWidth: "100%",
-            boxSizing: "border-box",
-            opacity: w && stpEnabled && !loading ? 1 : 0.45,
-            pointerEvents: w && stpEnabled && !loading && !controlsDisabled ? "auto" : "none",
-          }}
-        >
-          <label style={fieldLabel}>
-            Edge Port
-            <select
-              value={edgePort}
-              disabled={controlsDisabled || !w || !stpEnabled}
-              onChange={(e) => setEdgePort(e.target.value as EdgePortValue)}
-              style={inputStyle}
+            <label style={{ ...rowStyle, opacity: w && !loading ? 1 : 0.55, marginBottom: "0.25rem" }}>
+              <input
+                type="checkbox"
+                checked={stpEnabled}
+                disabled={controlsDisabled || !w}
+                onChange={(e) => setStpEnabled(e.target.checked)}
+              />
+              <span>
+                Spanning Tree Protocol
+                {!w && <em style={soonStyle}> (недоступно)</em>}
+              </span>
+            </label>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr)",
+                gap: 8,
+                margin: "0.35rem 0 0.85rem 0",
+                paddingLeft: "1.6rem",
+                maxWidth: "100%",
+                boxSizing: "border-box",
+                opacity: w && stpEnabled && !loading ? 1 : 0.45,
+                pointerEvents: w && stpEnabled && !loading && !controlsDisabled ? "auto" : "none",
+              }}
             >
-              <option value="auto">Auto</option>
-              <option value="enable">Enable</option>
-              <option value="disable">Disable</option>
-            </select>
-          </label>
-          <label style={fieldLabel}>
-            Port Priority
-            <input
-              type="number"
-              min={0}
-              max={240}
-              step={16}
-              value={portPriority}
-              disabled={controlsDisabled || !w || !stpEnabled}
-              onChange={(e) => setPortPriority(Number(e.target.value) || 0)}
-              style={inputStyle}
-            />
-          </label>
-          <label style={fieldLabel}>
-            Path Cost
-            <input
-              type="number"
-              min={0}
-              value={pathCost}
-              disabled={controlsDisabled || !w || !stpEnabled}
-              onChange={(e) => setPathCost(Number(e.target.value) || 0)}
-              style={inputStyle}
-              title="0 = auto"
-            />
-          </label>
-        </div>
+              <label style={fieldLabel}>
+                Edge Port
+                <select
+                  value={edgePort}
+                  disabled={controlsDisabled || !w || !stpEnabled}
+                  onChange={(e) => setEdgePort(e.target.value as EdgePortValue)}
+                  style={inputStyle}
+                >
+                  <option value="auto">Auto</option>
+                  <option value="enable">Enable</option>
+                  <option value="disable">Disable</option>
+                </select>
+              </label>
+              <label style={fieldLabel}>
+                Port Priority
+                <input
+                  type="number"
+                  min={0}
+                  max={240}
+                  step={16}
+                  value={portPriority}
+                  disabled={controlsDisabled || !w || !stpEnabled}
+                  onChange={(e) => setPortPriority(Number(e.target.value) || 0)}
+                  style={inputStyle}
+                />
+              </label>
+              <label style={fieldLabel}>
+                Path Cost
+                <input
+                  type="number"
+                  min={0}
+                  value={pathCost}
+                  disabled={controlsDisabled || !w || !stpEnabled}
+                  onChange={(e) => setPathCost(Number(e.target.value) || 0)}
+                  style={inputStyle}
+                  title="0 = auto"
+                />
+              </label>
+            </div>
+          </>
+        )}
 
         <div style={{ marginBottom: "1rem", opacity: w && !loading ? 1 : 0.55 }}>
           <div style={{ fontSize: "0.8rem", color: "#9aa3b5", marginBottom: 4 }}>PoE Mode</div>
@@ -519,6 +605,53 @@ export function PortSettingsModal({
           </div>
         </div>
 
+        {onPoEReset && w && (
+          <div
+            style={{
+              marginBottom: "1rem",
+              padding: "0.65rem 0.75rem",
+              borderRadius: 8,
+              border: "1px solid #2e3648",
+              background: "#141822",
+              opacity: loading ? 0.55 : 1,
+            }}
+          >
+            <div style={{ fontSize: "0.8rem", color: "#9aa3b5", marginBottom: 6 }}>Сброс PoE (power cycle)</div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+              <label style={{ ...fieldLabel, flex: "0 0 auto", width: 88 }}>
+                Секунд
+                <input
+                  type="number"
+                  min={1}
+                  max={60}
+                  value={poeResetSec}
+                  disabled={controlsDisabled}
+                  onChange={(e) => setPoeResetSec(Number(e.target.value) || 10)}
+                  style={inputStyle}
+                />
+              </label>
+              <button
+                type="button"
+                disabled={controlsDisabled}
+                onClick={() => void doPoEReset()}
+                style={{
+                  ...btnSecondary,
+                  marginTop: 14,
+                  borderColor: "#8a5a2b",
+                  color: "#f0c090",
+                  opacity: controlsDisabled ? 0.45 : 1,
+                }}
+              >
+                {resetting ? "Сброс…" : "PoE Reset"}
+              </button>
+            </div>
+            <p style={{ margin: "0.45rem 0 0", fontSize: "0.72rem", color: "#7a8499", lineHeight: 1.35 }}>
+              EdgeSwitch: <code>poe reset N</code> (1–60 с). MikroTik: power-cycle. Cisco/Eltex/SNR и др.: краткий
+              power-cycle (off → пауза → on).
+            </p>
+          </div>
+        )}
+
         {err && (
           <p style={{ color: "#f88", fontSize: "0.85rem", margin: "0 0 0.75rem" }} role="alert">
             {err}
@@ -531,14 +664,14 @@ export function PortSettingsModal({
           </button>
           <button
             type="submit"
-            disabled={!canWrite || !canSubmit || saving || loading}
+            disabled={!canWrite || !canSubmit || saving || loading || resetting}
             style={{
               ...btnPrimary,
-              opacity: !canWrite || !canSubmit || saving || loading ? 0.45 : 1,
-              cursor: !canWrite || !canSubmit || saving || loading ? "not-allowed" : "pointer",
+              opacity: !canWrite || !canSubmit || saving || loading || resetting ? 0.45 : 1,
+              cursor: !canWrite || !canSubmit || saving || loading || resetting ? "not-allowed" : "pointer",
             }}
           >
-            {saving ? "Сохранение…" : "Сохранить"}
+            {saving ? "Сохранение…" : bulkMode ? `Применить к ${bulkPorts!.length}` : "Сохранить"}
           </button>
         </div>
       </form>

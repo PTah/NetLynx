@@ -20,13 +20,14 @@ import (
 type LinkActionFunc func(ctx context.Context, deviceID int64, ifIndex int, eventType string)
 
 type Receiver struct {
-	log       *slog.Logger
-	st        *store.Store
-	hub       *live.Hub
-	hook      *notify.EventHook
-	onAction  LinkActionFunc
-	listen    string
-	community string
+	log         *slog.Logger
+	st          *store.Store
+	hub         *live.Hub
+	hook        *notify.EventHook
+	onAction    LinkActionFunc
+	onAfterLink LinkActionFunc
+	listen      string
+	community   string
 }
 
 func New(
@@ -36,18 +37,20 @@ func New(
 	listenAddr, community string,
 	hook *notify.EventHook,
 	onAction LinkActionFunc,
+	onAfterLink LinkActionFunc,
 ) *Receiver {
 	if log == nil {
 		log = slog.Default()
 	}
 	return &Receiver{
-		log:       log,
-		st:        st,
-		hub:       hub,
-		hook:      hook,
-		onAction:  onAction,
-		listen:    strings.TrimSpace(listenAddr),
-		community: strings.TrimSpace(community),
+		log:         log,
+		st:          st,
+		hub:         hub,
+		hook:        hook,
+		onAction:    onAction,
+		onAfterLink: onAfterLink,
+		listen:      strings.TrimSpace(listenAddr),
+		community:   strings.TrimSpace(community),
 	}
 }
 
@@ -305,6 +308,13 @@ func (r *Receiver) maybeEmitLinkFromTrap(
 		go func() {
 			defer cancel()
 			r.onAction(actCtx, deviceID, *ifIndex, typ)
+		}()
+	}
+	if r.onAfterLink != nil && ifIndex != nil {
+		linkCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		go func() {
+			defer cancel()
+			r.onAfterLink(linkCtx, deviceID, *ifIndex, typ)
 		}()
 	}
 }

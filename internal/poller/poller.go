@@ -43,6 +43,7 @@ type Engine struct {
 	cfg             config.Config
 	hook            *notify.EventHook // может быть nil
 	hub             *live.Hub
+	topoDirty       func(reason string) // optional: topology blast cache NotifyDirty
 	pollInflight    sync.Map // device id -> struct{}: опрос уже выполняется
 	offlineStreak          sync.Map // device id -> int: подряд «оффлайн» после опроса
 	neighborEmptyStreak    sync.Map // "deviceID:protocol" -> int: подряд пустой neighbor walk
@@ -61,6 +62,21 @@ func New(log *slog.Logger, st *store.Store, cfg config.Config, hook *notify.Even
 		log = slog.Default()
 	}
 	return &Engine{log: log, st: st, cfg: cfg, hook: hook, hub: hub}
+}
+
+// SetTopologyDirty — callback для debounced rebuild topology blast cache.
+func (e *Engine) SetTopologyDirty(fn func(reason string)) {
+	if e == nil {
+		return
+	}
+	e.topoDirty = fn
+}
+
+func (e *Engine) notifyTopologyDirty(reason string) {
+	if e == nil || e.topoDirty == nil {
+		return
+	}
+	e.topoDirty(reason)
 }
 
 // ifaceEventPayload поля интерфейса для событий: ifAlias перекрывает SNMP ifDescr; ручная подпись порта — ещё выше.
@@ -182,6 +198,11 @@ func (e *Engine) TrapLinkIncidentAction(ctx context.Context, deviceID int64, ifI
 		return
 	}
 	e.maybeIncidentAction(ctx, *pd, &ifIndex, typ)
+}
+
+// TrapLinkPortFlap — после trap LINK_UP/DOWN: кандидат на PORT_FLAP.
+func (e *Engine) TrapLinkPortFlap(ctx context.Context, deviceID int64, ifIndex int, _ string) {
+	e.NotifyPortFlapAfterLink(ctx, deviceID, ifIndex)
 }
 
 func deviceReachabilityPayload(dev *models.Device) map[string]interface{} {
@@ -718,6 +739,7 @@ func (e *Engine) pollOne(ctx context.Context, d store.PollDevice) error {
 				if !e.annotateLinkFromTrap(ctx, d.ID, ifIdx, 1, "LINK_UP", pl) {
 					e.emit(ctx, ignoreMap, d, &ifIdx, "LINK_UP", "info", pl)
 				}
+				e.maybeEmitPortFlap(ctx, ignoreMap, d, ifIdx, prev, time.Now())
 			}
 			if newAdmin == 1 && *old.OperStatus == 1 && newOper != 1 {
 				pl := ifaceEventPayload(row, old)
@@ -725,6 +747,7 @@ func (e *Engine) pollOne(ctx context.Context, d store.PollDevice) error {
 				if !e.annotateLinkFromTrap(ctx, d.ID, ifIdx, 2, "LINK_DOWN", pl) {
 					e.emit(ctx, ignoreMap, d, &ifIdx, "LINK_DOWN", "warning", pl)
 				}
+				e.maybeEmitPortFlap(ctx, ignoreMap, d, ifIdx, prev, time.Now())
 			}
 		}
 
@@ -1117,6 +1140,9 @@ func (e *Engine) persistNeighbors(ctx context.Context, d store.PollDevice, proto
 		} else if err := e.st.SyncDiscoveredFromNeighbors(ctx, d.ID, rows); err != nil {
 			e.log.Warn("discovered sync", "device_id", d.ID, "protocol", protocol, "err", err)
 		}
+		if protocol == "lldp" || protocol == "cdp" {
+			e.notifyTopologyDirty(protocol)
+		}
 	}
 }
 
@@ -1307,14 +1333,16 @@ func inferRoleFromSnapshot(s store.InterfaceSnapshot) string {
 		switch strings.ToLower(strings.TrimSpace(*s.CLIPortMode)) {
 		case "trunk":
 			return "trunk"
-		case "access":
+		case "access", "general":
+			// general = EdgeSwitch «No VLAN» → operational access
 			return "access"
 		}
 	}
-	switch strings.ToLower(strings.TrimSpace(s.PortRole)) {
-	case "trunk", "ignore", "access":
-		return strings.ToLower(strings.TrimSpace(s.PortRole))
+	pr := strings.ToLower(strings.TrimSpace(s.PortRole))
+	if pr == "ignore" {
+		return "ignore"
 	}
+	// Без cli_port_mode не держим залипший trunk после очистки show run (нет switchport в блоке).
 	return inferPortRole(strOr(s.IfName), strOr(s.IfDescr), 0, store.InterfaceSnapshot{})
 }
 

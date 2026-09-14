@@ -43,3 +43,24 @@ func (s *Store) UpsertDeviceSTPState(ctx context.Context, deviceID int64, topCha
 	`, deviceID, topChanges, root, rootPort)
 	return err
 }
+
+// ListDeviceSTPStates — все известные STP-снимки (для выбора корня топологии).
+func (s *Store) ListDeviceSTPStates(ctx context.Context) ([]DeviceSTPState, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT device_id, top_changes, designated_root, root_port, updated_at
+		FROM device_stp_state
+		ORDER BY device_id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []DeviceSTPState
+	for rows.Next() {
+		var st DeviceSTPState
+		if err := rows.Scan(&st.DeviceID, &st.TopChanges, &st.DesignatedRoot, &st.RootPort, &st.UpdatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, st)
+	}
+	return out, rows.Err()
+}

@@ -126,11 +126,15 @@ func TestFdbAPLinkScore(t *testing.T) {
 func TestResolveInterfacePortRoleCLIPriority(t *testing.T) {
 	trunk := "trunk"
 	access := "access"
+	general := "general"
 	if got := ResolveInterfacePortRole("access", &trunk); got != "trunk" {
 		t.Fatalf("cli_port_mode trunk wins, got %q", got)
 	}
 	if got := ResolveInterfacePortRole("trunk", &access); got != "access" {
 		t.Fatalf("cli_port_mode access wins, got %q", got)
+	}
+	if got := ResolveInterfacePortRole("trunk", &general); got != "access" {
+		t.Fatalf("cli_port_mode general → access, got %q", got)
 	}
 	if got := ResolveInterfacePortRole("trunk", nil); got != "trunk" {
 		t.Fatalf("port_role trunk, got %q", got)

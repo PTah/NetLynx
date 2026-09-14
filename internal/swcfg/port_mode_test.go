@@ -86,6 +86,9 @@ func TestPortRoleFromCLIMode(t *testing.T) {
 	if PortRoleFromCLIMode("access") != "access" {
 		t.Fatal("access")
 	}
+	if PortRoleFromCLIMode("general") != "access" {
+		t.Fatal("general")
+	}
 }
 
 func TestNormalizeIfaceKey(t *testing.T) {

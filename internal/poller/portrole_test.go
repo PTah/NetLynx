@@ -14,9 +14,19 @@ func TestInferRoleFromSnapshotCLIPortMode(t *testing.T) {
 	if got := inferRoleFromSnapshot(snap); got != "trunk" {
 		t.Fatalf("expected trunk from cli_port_mode, got %q", got)
 	}
-	snap2 := store.InterfaceSnapshot{IfName: strPtr("0/8"), PortRole: "trunk"}
-	if got := inferRoleFromSnapshot(snap2); got != "trunk" {
-		t.Fatalf("expected trunk from port_role, got %q", got)
+	general := "general"
+	snapG := store.InterfaceSnapshot{IfName: strPtr("0/8"), PortRole: "trunk", CLIPortMode: &general}
+	if got := inferRoleFromSnapshot(snapG); got != "access" {
+		t.Fatalf("expected access from cli_port_mode general, got %q", got)
+	}
+	// Без CLI: не залипать на старом trunk (после очистки EdgeSwitch в show run нет switchport).
+	snap2 := store.InterfaceSnapshot{IfName: strPtr("0/8"), IfDescr: strPtr("port 8:"), PortRole: "trunk"}
+	if got := inferRoleFromSnapshot(snap2); got != "access" {
+		t.Fatalf("expected re-infer access without cli_port_mode, got %q", got)
+	}
+	snap3 := store.InterfaceSnapshot{IfName: strPtr("0/8"), IfDescr: strPtr("TO-EdgeSwitch uplink"), PortRole: "access"}
+	if got := inferRoleFromSnapshot(snap3); got != "trunk" {
+		t.Fatalf("expected trunk from descr without cli, got %q", got)
 	}
 }
 

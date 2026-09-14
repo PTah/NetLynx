@@ -60,6 +60,10 @@ export type ManualTopologyLink = {
 export type TopologyGraph = {
   nodes: TopologyNode[];
   edges: TopologyEdge[];
+  /** Запрошенный VLAN для подсветки по vlan database. */
+  vlan_filter_id?: number | null;
+  /** Устройства, у которых этот VLAN есть в show run vlan database. */
+  vlan_match_device_ids?: number[];
 };
 
 export type PortSearchHit = {

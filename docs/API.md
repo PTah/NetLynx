@@ -67,6 +67,7 @@ http://<IP_или_имя_сервера>:8080
 | GET | `/api/v1/devices/{id}/config/snapshots/{snapId}` | один снимок |
 | GET | `/api/v1/devices/{id}/config/diff?from=&to=` | diff (можно опустить — последний) |
 | GET | `/api/v1/devices/{id}/vlans` | VLAN database + членство портов (show run / порты); FDB только для уже известных VLAN (не создаёт строки-призраки) |
+| GET | `/api/v1/devices/{id}/vlans/delete-impact?vlan_ids=` | blast-radius удаления VLAN: топология (STP/heuristic), VLAN на trunk, вниз/redundant, FDB; SVI/mgmt (`mgmt_risks`, severity `critical`); шлюзы с SVI (`gateways`); `blocks_delete` пока false (advisory); override UPLINK/DOWNLINK |
 | GET | `/api/v1/devices/{id}/fdb/snapshots` | ежедневные снимки FDB |
 | GET | `/api/v1/ports/search?q=` | поиск порта |
 
@@ -101,15 +102,17 @@ http://<IP_или_имя_сервера>:8080
 | PATCH | `.../interfaces/{ifIndex}/descr` | подпись |
 | PATCH | `.../interfaces/{ifIndex}/admin` | admin up/down |
 | PATCH | `.../interfaces/{ifIndex}/poe` | PoE |
+| POST | `.../interfaces/{ifIndex}/poe-reset` | сброс PoE (`{ seconds: 1..60 }`, по умолчанию 10); EdgeSwitch: `poe reset N`; иначе power-cycle |
+| POST | `.../interfaces/bulk` | массово ≥2 портов: `{ if_indexes, admin_up?, poe_mode?, vlan?: {op,vlan_id}, poe_reset_seconds? }`; на EdgeSwitch подряд — `interface 0/4-0/7` |
 | PATCH | `.../interfaces/{ifIndex}/isolate` | изоляция |
 | PATCH | `.../interfaces/{ifIndex}/dhcp-snooping` | DHCP snooping |
 | PATCH | `.../interfaces/{ifIndex}/flow-control` | flow control |
 | PATCH | `.../interfaces/{ifIndex}/stp` | STP |
-| PATCH | `.../interfaces/{ifIndex}/vlan` | `{ op, vlan_id?, allowed_mode?, allowed_vlans? }` — `set_access` / `remove` / `trunk_allow` (`add`\|`remove`\|`all`\|`except`); legacy `add_tagged`; ответ: `vlans[]`. UI предупреждает, если в allowed нет VLAN 1 (риск потери SSH/Web) |
+| PATCH | `.../interfaces/{ifIndex}/vlan` | `{ op, vlan_id?, allowed_mode?, allowed_vlans? }` — `set_access` / `remove` / `trunk_allow` (`add`\|`remove`\|`all`\|`except`) / `no_vlan` (очистка: EdgeSwitch general + participation auto); legacy `add_tagged`; ответ: `vlans[]`. UI предупреждает, если в allowed нет VLAN 1 (риск потери SSH/Web) |
 | POST | `/api/v1/devices/{id}/vlans` | `{ "vlan_id": N, "name"? }` — создать в vlan database; ответ: `vlans[]` + `source` |
-| DELETE | `/api/v1/devices/{id}/vlans` | `{ "vlan_ids": [167,30,31] }` — массовое удаление (`no vlan …`); **409**, если VLAN ещё на портах (access/tagged) |
+| DELETE | `/api/v1/devices/{id}/vlans` | `{ "vlan_ids": [167,30,31] }` — массовое удаление (`no vlan …`); **409**, если VLAN ещё на портах (access/tagged); UI перед confirm дергает delete-impact (blast-radius вниз по топологии) |
 | PATCH | `/api/v1/devices/{id}/vlans/{vlanId}` | `{ "name": "..." }` — имя в vlan database; ответ: `vlans[]` + `source` для UI |
-| DELETE | `/api/v1/devices/{id}/vlans/{vlanId}` | удалить один VLAN; **409**, если прописан на портах; ответ: `vlans[]` + `source` |
+| DELETE | `/api/v1/devices/{id}/vlans/{vlanId}` | удалить один VLAN; **409**, если прописан на портах; ответ: `vlans[]` + `source`; UI — delete-impact (топология, не костыль UPLINK) |
 | PATCH | `.../interfaces/{ifIndex}/thresholds` | util |
 | PUT/DELETE | `.../interfaces/{ifIndex}/ignore` | ignore |
 | GET | `/api/v1/devices/{id}/port-ignores` | список (operator); на detail viewer видит флаги |
@@ -146,7 +149,7 @@ http://<IP_или_имя_сервера>:8080
 
 | Метод | Путь | Описание |
 |-------|------|----------|
-| GET | `/api/v1/topology` | граф LLDP/CDP/FDB/manual |
+| GET | `/api/v1/topology` | граф LLDP/CDP/FDB/manual; `vlan_id` — подсветка: `vlan_filter_id` + `vlan_match_device_ids` (VLAN в show run vlan database), граф не режется |
 | GET/PATCH | `/api/v1/settings/topology` | настройки карты (viewer get / operator patch) |
 | GET | `/api/v1/discovered` | кандидаты LLDP/CDP |
 | POST | `/api/v1/discovered/{id}/preview\|promote\|ignore\|reopen` | operator |

@@ -17,6 +17,8 @@ import (
 	"git.kalinamall.ru/PapaTramp/netlynx/internal/configsnapshot"
 	"git.kalinamall.ru/PapaTramp/netlynx/internal/fdbsnapshot"
 	"git.kalinamall.ru/PapaTramp/netlynx/internal/live"
+	"git.kalinamall.ru/PapaTramp/netlynx/internal/loopwatch"
+	"git.kalinamall.ru/PapaTramp/netlynx/internal/topologycache"
 	ddb "git.kalinamall.ru/PapaTramp/netlynx/internal/db"
 	"git.kalinamall.ru/PapaTramp/netlynx/internal/notify"
 	"git.kalinamall.ru/PapaTramp/netlynx/internal/poller"
@@ -82,6 +84,9 @@ func main() {
 	})
 	eng := poller.New(slog.Default(), st, cfg, hook, hub)
 
+	topoHub := topologycache.NewHub(slog.Default(), st, cfg)
+	eng.SetTopologyDirty(topoHub.NotifyDirty)
+
 	var workers sync.WaitGroup
 	workers.Add(1)
 	go func() {
@@ -89,7 +94,7 @@ func main() {
 		eng.Run(ctx)
 	}()
 
-	trapMgr := traprecv.NewManager(slog.Default(), st, hub, cfg.SNMPTrapCommunity, hook, eng.TrapLinkIncidentAction)
+	trapMgr := traprecv.NewManager(slog.Default(), st, hub, cfg.SNMPTrapCommunity, hook, eng.TrapLinkIncidentAction, eng.TrapLinkPortFlap)
 	if err := trapMgr.Reload(ctx); err != nil {
 		slog.Error("snmp trap receiver start", "err", err)
 		os.Exit(1)
@@ -111,6 +116,7 @@ func main() {
 		Commit:  commit,
 		BuiltAt: builtAt,
 	}, hub, trapMgr, eng)
+	apiSrv.SetTopologyDirty(topoHub.NotifyDirty)
 	workers.Add(1)
 	go func() {
 		defer workers.Done()
@@ -129,6 +135,19 @@ func main() {
 	go func() {
 		defer workers.Done()
 		fdbSnapSched.Run(ctx)
+	}()
+
+	workers.Add(1)
+	go func() {
+		defer workers.Done()
+		topoHub.Run(ctx)
+	}()
+
+	loopHub := loopwatch.NewHub(slog.Default(), st, cfg, hub, hook)
+	workers.Add(1)
+	go func() {
+		defer workers.Done()
+		loopHub.Run(ctx)
 	}()
 
 	httpSrv := &http.Server{

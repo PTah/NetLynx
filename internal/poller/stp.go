@@ -40,6 +40,7 @@ func (e *Engine) pollSTP(ctx context.Context, d store.PollDevice, g *gosnmp.GoSN
 				"root_port":          cur.RootPort,
 			}
 			e.emit(ctx, nil, d, nil, "STP_TOPOLOGY_CHANGE", "warning", pl)
+			e.notifyTopologyDirty("stp")
 		} else {
 			rootChanged := !strPtrEqual(prev.DesignatedRoot, rootPtr)
 			portChanged := !intPtrEqual(prev.RootPort, rootPortPtr)
@@ -51,6 +52,7 @@ func (e *Engine) pollSTP(ctx context.Context, d store.PollDevice, g *gosnmp.GoSN
 					"prev_root_port":       derefInt(prev.RootPort),
 				}
 				e.emit(ctx, nil, d, nil, "STP_ROOT_CHANGED", "warning", pl)
+				e.notifyTopologyDirty("stp")
 			}
 		}
 	}

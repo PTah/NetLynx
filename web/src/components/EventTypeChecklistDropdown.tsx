@@ -15,12 +15,18 @@ export const NOTIFY_EVENT_TYPE_OPTIONS: { value: string; label: string }[] = [
   { value: "UNKNOWN_MAC_ON_ACCESS_PORT", label: formatEventTypeLabel("UNKNOWN_MAC_ON_ACCESS_PORT") },
   { value: "MAC_MOVED", label: formatEventTypeLabel("MAC_MOVED") },
   { value: "MAC_FLAPPING", label: formatEventTypeLabel("MAC_FLAPPING") },
+  { value: "PORT_FLAP", label: formatEventTypeLabel("PORT_FLAP") },
+  { value: "L2_LOOP_APPEARED", label: formatEventTypeLabel("L2_LOOP_APPEARED") },
   { value: "MAC_MULTI_ACCESS", label: formatEventTypeLabel("MAC_MULTI_ACCESS") },
+  { value: "STP_TOPOLOGY_CHANGE", label: formatEventTypeLabel("STP_TOPOLOGY_CHANGE") },
+  { value: "STP_ROOT_CHANGED", label: formatEventTypeLabel("STP_ROOT_CHANGED") },
+  { value: "BROADCAST_STORM_SUSPECTED", label: formatEventTypeLabel("BROADCAST_STORM_SUSPECTED") },
   { value: "MAC_REMOVED", label: formatEventTypeLabel("MAC_REMOVED") },
   { value: "ACCESS_PORT_MAC_SUBSTITUTED", label: formatEventTypeLabel("ACCESS_PORT_MAC_SUBSTITUTED") },
   { value: "ACCESS_PORT_LONG_IDLE_DEVICE", label: formatEventTypeLabel("ACCESS_PORT_LONG_IDLE_DEVICE") },
   { value: "SNMP_TRAP", label: formatEventTypeLabel("SNMP_TRAP") },
   { value: "MANUAL_LINK_SUPERSEDED", label: formatEventTypeLabel("MANUAL_LINK_SUPERSEDED") },
+  { value: "CONFIG_EDIT", label: formatEventTypeLabel("CONFIG_EDIT") },
 ];
 
 export function parseEventTypesCSV(raw: string): string[] {

@@ -82,6 +82,24 @@ func TestIsSSHSessionEOF(t *testing.T) {
 	}
 }
 
+func TestPortConfigBodyPoEReset(t *testing.T) {
+	sec := 10
+	steps, err := portConfigBody(VendorUbiquiti, "0/4-0/7", PortChange{
+		Interface:       "0/4-0/7",
+		PoEResetSeconds: &sec,
+		Write:           true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(steps, "\n")
+	for _, want := range []string{"interface 0/4-0/7", "poe reset 10", "exit", "write memory"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("missing %q in %v", want, steps)
+		}
+	}
+}
+
 func TestInterpretPortCLIDescriptionEcho(t *testing.T) {
 	out := "(UBNT) #\nen\nconfigure\n(UBNT) (Config)#\ninterface 0/3\n(Interface 0/3)#\ndescription Test Description for NetLynx\n"
 	if err := interpretPortCLI(out); err != nil {

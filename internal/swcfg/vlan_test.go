@@ -189,6 +189,32 @@ func TestVLANCLILines_ciscoThenIEEE(t *testing.T) {
 	}
 }
 
+func TestVLANCLILines_noVLAN(t *testing.T) {
+	ch := PortVLANChange{Op: VLANOpNoVLAN}
+	if err := ch.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	cisco := strings.Join(VLANCLILines(vlanStyleCisco, ch), "\n")
+	wantCisco := strings.Join([]string{
+		"vlan participation auto 2-4093",
+		"vlan participation include 1",
+		"switchport mode general",
+		"switchport access vlan 1",
+	}, "\n")
+	if cisco != wantCisco {
+		t.Fatalf("cisco no_vlan:\n%s", cisco)
+	}
+	ieee := strings.Join(VLANCLILines(vlanStyleIEEE, ch), "\n")
+	wantIEEE := strings.Join([]string{
+		"vlan participation auto 2-4093",
+		"vlan participation include 1",
+		"vlan pvid 1",
+	}, "\n")
+	if ieee != wantIEEE {
+		t.Fatalf("ieee no_vlan:\n%s", ieee)
+	}
+}
+
 func TestVLANCLILines_trunkAllow(t *testing.T) {
 	add := VLANCLILines(vlanStyleCisco, PortVLANChange{
 		Op: VLANOpTrunkAllow, AllowedMode: TrunkAllowAdd, AllowedList: "10;20-22",
@@ -371,3 +397,59 @@ func TestInterpretVLANDBCLI(t *testing.T) {
 }
 
 func intPtr(n int) *int { return &n }
+
+func TestVLANCarriedOnPortAllowedAll(t *testing.T) {
+	cfg := `
+interface 0/5
+ description DOWNLINK to edge
+ switchport mode trunk
+ switchport trunk allowed vlan all
+!
+`
+	modes := ParseRunningConfigPortModes(cfg)
+	inv := []VLANInventoryRow{{VLANID: 17, InDatabase: true}}
+	if InventoryVLANOnPort(inv, 17, 5) {
+		t.Fatal("inventory should not have port")
+	}
+	if !VLANCarriedOnPort(inv, 17, 5, "0/5", modes) {
+		t.Fatal("allowed vlan all must carry VLAN 17")
+	}
+	if VLANCarriedOnPort(inv, 17, 6, "0/6", modes) {
+		t.Fatal("other port")
+	}
+}
+
+// EdgeSwitch: trunk без «allowed vlan …» = все VLAN (как на Vyhod 3.600 0/14).
+func TestVLANCarriedOnPortBareTrunk(t *testing.T) {
+	cfg := `
+interface 0/14
+ description 'port 14: Link to ES-16 #27 port 16'
+ switchport mode trunk
+ exit
+interface 0/8
+ switchport mode access
+ switchport access vlan 17
+ exit
+`
+	modes := ParseRunningConfigPortModes(cfg)
+	inv := []VLANInventoryRow{{VLANID: 17, InDatabase: true}}
+	if !VLANCarriedOnPort(inv, 17, 14, "0/14", modes) {
+		t.Fatal("bare trunk must carry VLAN 17")
+	}
+	if !VLANCarriedOnPort(inv, 17, 8, "0/8", modes) {
+		t.Fatal("access vlan 17 must carry")
+	}
+	cfgRestrict := `
+interface 0/14
+ switchport mode trunk
+ switchport trunk allowed vlan 10,20
+ exit
+`
+	modes2 := ParseRunningConfigPortModes(cfgRestrict)
+	if VLANCarriedOnPort(inv, 17, 14, "0/14", modes2) {
+		t.Fatal("explicit allowed list must not carry 17")
+	}
+	if !VLANCarriedOnPort(inv, 10, 14, "0/14", modes2) {
+		t.Fatal("explicit allowed 10 must carry")
+	}
+}
