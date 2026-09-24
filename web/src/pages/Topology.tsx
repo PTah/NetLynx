@@ -1,6 +1,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { apiDelete, apiGet, apiPatch, apiPost } from "../api";
+import { alertDeviceCreateError } from "../apiError";
 import { formatTopologyStaleAt } from "../dateFormat";
 import { deviceLinkState } from "../navigation";
 import { CARD_H, computeEdgeBends, edgeLabelPos, edgePath, edgeRenderable, estimateCardWidth, layoutTopology, type LayoutMode, type Pos } from "../topologyLayout";
@@ -41,6 +42,10 @@ import {
 } from "../topologyDots";
 
 function suggestPromoteCategory(n?: TopologyNode | null): DeviceCategory {
+  // kind=virtual — только метка топологии («не в Узлах»), не тип inventory.
+  if (n?.virtual || (n?.kind ?? "").trim().toLowerCase() === "virtual") {
+    return "other";
+  }
   const k = (n?.kind ?? "").trim().toLowerCase();
   if (/^[a-z][a-z0-9_]{0,31}$/.test(k)) return normalizeDeviceCategory(k);
   return "other";
@@ -246,6 +251,9 @@ export default function Topology() {
   const [deviceId, setDeviceId] = useState(params.get("device_id") || "");
   const [pathA, setPathA] = useState<number | null>(() => id(params.get("pathA")));
   const [pathB, setPathB] = useState<number | null>(() => id(params.get("pathB")));
+  const [blastPathSummary, setBlastPathSummary] = useState<string | null>(null);
+  const [blastPathHops, setBlastPathHops] = useState<number[]>([]);
+  const [blastPathErr, setBlastPathErr] = useState<string | null>(null);
   const [showLabels, setShowLabels] = useState(params.get("labels") === "1");
   const [showSwitches, setShowSwitches] = useState(true);
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilterState>(() => readTopologyCategoryFilter());
@@ -363,8 +371,19 @@ export default function Topology() {
     qs.set("include_stale", serverQuery.includeStale ? "1" : "0");
     if (serverQuery.deviceId) qs.set("device_id", serverQuery.deviceId);
     if (serverQuery.depth) qs.set("depth", serverQuery.depth);
-    if (serverQuery.vlan) qs.set("vlan_id", serverQuery.vlan);
     if (serverQuery.location) qs.set("location", serverQuery.location);
+    if (serverQuery.vlan) {
+      const n = Number(serverQuery.vlan);
+      if (!Number.isInteger(n) || n < 1 || n > 4094) {
+        if (!quiet) {
+          window.alert(n === 0 ? "VLAN 0 не существует!" : "Неверный VLAN: допустимы номера 1–4094.");
+          setVlan("");
+          setLoading(false);
+        }
+        return;
+      }
+      qs.set("vlan_id", String(n));
+    }
     try {
       const g = await apiGet<TopologyGraph>(`/api/v1/topology?${qs}`, signal ? { signal } : undefined);
       if (seq !== loadSeq.current) return;
@@ -379,7 +398,15 @@ export default function Topology() {
         /* баннер необязателен */
       }
     } catch (e) {
-      if ((e as Error).name !== "AbortError" && !quiet) setError(e instanceof Error ? e.message : String(e));
+      if ((e as Error).name === "AbortError" || quiet) return;
+      const msg = e instanceof Error ? e.message : String(e);
+      if (/неверный vlan_id/i.test(msg)) {
+        window.alert(serverQuery.vlan === "0" ? "VLAN 0 не существует!" : "Неверный VLAN: допустимы номера 1–4094.");
+        setVlan("");
+        setError(null);
+        return;
+      }
+      setError(msg);
     } finally {
       if (!quiet && seq === loadSeq.current) setLoading(false);
     }
@@ -629,8 +656,54 @@ export default function Topology() {
     () => (!isLocView && pathA && pathB ? findShortestPath(edges, pathA, pathB) : null),
     [isLocView, edges, pathA, pathB],
   );
-  const pathNodes = useMemo(() => new Set(path ? [pathA!, ...path.map((h) => h.toId)] : []), [path, pathA]);
-  const pathEdges = useMemo(() => new Set(path?.map((h) => `${h.fromId}:${h.toId}`) ?? []), [path]);
+  useEffect(() => {
+    if (isLocView || !pathA || !pathB) {
+      setBlastPathSummary(null);
+      setBlastPathHops([]);
+      setBlastPathErr(null);
+      return;
+    }
+    let cancelled = false;
+    setBlastPathErr(null);
+    void apiGet<{
+      summary?: string;
+      hops?: { device_id: number }[];
+      length?: number;
+      source?: string;
+    }>(`/api/v1/topology/path?from=${pathA}&to=${pathB}`)
+      .then((rep) => {
+        if (cancelled) return;
+        setBlastPathSummary(rep.summary || (rep.length != null ? `${rep.length} hop(s)` : null));
+        setBlastPathHops((rep.hops || []).map((h) => h.device_id));
+        setBlastPathErr(null);
+      })
+      .catch((e: unknown) => {
+        if (cancelled) return;
+        setBlastPathSummary(null);
+        setBlastPathHops([]);
+        setBlastPathErr(e instanceof Error ? e.message : "blast path недоступен");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isLocView, pathA, pathB]);
+  const pathNodes = useMemo(() => {
+    const s = new Set<number>();
+    if (path && pathA) {
+      s.add(pathA);
+      path.forEach((h) => s.add(h.toId));
+    }
+    blastPathHops.forEach((id) => s.add(id));
+    return s;
+  }, [path, pathA, blastPathHops]);
+  const pathEdges = useMemo(() => {
+    const s = new Set(path?.map((h) => `${h.fromId}:${h.toId}`) ?? []);
+    for (let i = 0; i + 1 < blastPathHops.length; i++) {
+      s.add(`${blastPathHops[i]}:${blastPathHops[i + 1]}`);
+      s.add(`${blastPathHops[i + 1]}:${blastPathHops[i]}`);
+    }
+    return s;
+  }, [path, blastPathHops]);
   const selected =
     focus == null
       ? null
@@ -1025,6 +1098,7 @@ export default function Topology() {
       setFocus(r.id);
       await load(false);
     } catch (err) {
+      alertDeviceCreateError(err);
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setPromote((v) => ({ ...v, busy: false }));
@@ -1134,7 +1208,7 @@ export default function Topology() {
           onChange={(e) => setVlan(e.target.value.replace(/[^\d]/g, "").slice(0, 4))}
           placeholder="VLAN"
           inputMode="numeric"
-          title="Подсветить устройства, у которых VLAN есть в vlan database (show run)"
+          title="Подсветить устройства с VLAN в vlan database (show run). VLAN 1 — default: подсветка даже если вендор не пишет vlan 1 в конфиг."
           style={{ width: 64 }}
         />
         {vlanFilterActive ? (
@@ -1334,7 +1408,16 @@ export default function Topology() {
         <button type="button" onClick={() => setPathA(focus)} disabled={!focus}>Выбрать A {pathA ? `#${pathA}` : ""}</button>
         <button type="button" onClick={() => setPathB(focus)} disabled={!focus}>Выбрать B {pathB ? `#${pathB}` : ""}</button>
         <button type="button" onClick={() => { setPathA(null); setPathB(null); }}>Сбросить</button>
-        {pathA && pathB && <span style={{ color: path ? "#9bd08b" : "#f88" }}>{path ? `${path.length} переходов` : "Путь не найден"}</span>}
+        {pathA && pathB && (
+          <span style={{ color: path || blastPathHops.length > 1 ? "#9bd08b" : "#f88" }}>
+            {path
+              ? `карта: ${path.length} переходов`
+              : blastPathHops.length > 1
+                ? "на карте рёбер нет"
+                : "Путь не найден"}
+            {blastPathSummary ? ` · blast: ${blastPathSummary}` : blastPathErr ? ` · blast: ${blastPathErr}` : ""}
+          </span>
+        )}
       </div>
       )}
       {error && <p style={{ color: "#f88", margin: 0 }}>{error}</p>}
@@ -2270,7 +2353,7 @@ export default function Topology() {
           )}
           {path && (
             <>
-              <h3 style={{ fontSize: ".95rem", margin: "14px 0 6px" }}>Путь</h3>
+              <h3 style={{ fontSize: ".95rem", margin: "14px 0 6px" }}>Путь (карта)</h3>
               {path.map((h, i) => (
                 <div key={`${h.fromId}-${h.toId}-${i}`} style={{ borderTop: "1px solid #242a38", padding: "6px 0" }}>
                   <button type="button" style={{ padding: 0, border: 0, background: "none", color: "#6cb6ff", cursor: "pointer" }} onClick={() => select(h.fromId, false)}>
@@ -2283,6 +2366,22 @@ export default function Topology() {
                   <div style={{ color: "#9aa3b5", fontSize: ".8rem" }}>{h.fromPort} → {h.toPort} · {h.protocol}</div>
                 </div>
               ))}
+            </>
+          )}
+          {blastPathHops.length > 1 && (
+            <>
+              <h3 style={{ fontSize: ".95rem", margin: "14px 0 6px" }}>Путь (blast-cache)</h3>
+              {blastPathSummary ? <p style={{ color: "#9aa3b5", fontSize: ".85rem", marginTop: 0 }}>{blastPathSummary}</p> : null}
+              <div style={{ fontSize: ".85rem" }}>
+                {blastPathHops.map((hid, i) => (
+                  <span key={`${hid}-${i}`}>
+                    {i > 0 ? " → " : null}
+                    <button type="button" style={{ padding: 0, border: 0, background: "none", color: "#6cb6ff", cursor: "pointer" }} onClick={() => select(hid, false)}>
+                      {label(nodeById.get(hid)) || `#${hid}`}
+                    </button>
+                  </span>
+                ))}
+              </div>
             </>
           )}
         </aside>

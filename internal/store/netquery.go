@@ -99,6 +99,19 @@ func FormatFullMAC(raw string) (string, bool) {
 	return mac, true
 }
 
+// SplitHostOrMAC: в поле «Host / IP» часто вставляют MAC. Полный 48-bit MAC
+// возвращается отдельно и не должен становиться hostname для SNMP.
+func SplitHostOrMAC(raw string) (host, mac string) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", ""
+	}
+	if m, ok := FormatFullMAC(raw); ok {
+		return "", m
+	}
+	return raw, ""
+}
+
 // macHexDigits — только hex-цифры из строки (для стабильного identity).
 func macHexDigits(raw string) string {
 	return strings.Map(func(r rune) rune {

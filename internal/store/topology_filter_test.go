@@ -131,6 +131,35 @@ func TestDedupeTopologyEdgesKeepsTwoCables(t *testing.T) {
 	}
 }
 
+func TestDedupeTopologyEdgesCollapsesFDBGhost(t *testing.T) {
+	// LLDP на 0/6 + FDB ghost того же EAP на 0/8 → одно ребро.
+	a, b := int64(1), int64(3)
+	p6, p8 := "0/6", "0/8"
+	in := []TopologyEdge{
+		{LocalDeviceID: a, LocalIfIndex: 6, LocalIfName: &p6, RemoteDeviceID: &b, Protocol: "lldp", Protocols: []string{"lldp", "fdb"}},
+		{LocalDeviceID: a, LocalIfIndex: 8, LocalIfName: &p8, RemoteDeviceID: &b, Protocol: "fdb", Protocols: []string{"fdb"}},
+	}
+	out := dedupeTopologyEdges(in)
+	if len(out) != 1 {
+		t.Fatalf("expected 1 edge after FDB ghost collapse, got %d: %+v", len(out), out)
+	}
+	if out[0].LocalIfIndex != 6 {
+		t.Fatalf("expected keep LLDP port 6, got if %d", out[0].LocalIfIndex)
+	}
+	hasFDB, hasLLDP := false, false
+	for _, p := range out[0].Protocols {
+		if p == "fdb" {
+			hasFDB = true
+		}
+		if p == "lldp" {
+			hasLLDP = true
+		}
+	}
+	if !hasFDB || !hasLLDP {
+		t.Fatalf("expected fdb+lldp protocols, got %v", out[0].Protocols)
+	}
+}
+
 func TestApplyTopologyFilterProtocolAndStale(t *testing.T) {
 	rid := int64(2)
 	g := &TopologyGraph{

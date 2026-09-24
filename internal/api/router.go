@@ -1,4 +1,4 @@
-﻿package api
+package api
 
 import (
 	"context"
@@ -126,6 +126,8 @@ func NewServer(st *store.Store, cfg config.Config, bi BuildInfo, hub *live.Hub, 
 		r.Get("/events", s.handleListEvents)
 		r.Get("/system/stats", s.handleSystemStats)
 		r.Get("/topology", s.handleGetTopology)
+		r.Get("/topology/path", s.handleGetTopologyPath)
+		r.Get("/topology/reachability", s.handleGetTopologyReachability)
 		r.Get("/discovered", s.handleListDiscovered)
 		r.Get("/manual-links", s.handleListManualLinks)
 		r.Get("/settings/topology", s.handleGetTopologySettings)
@@ -218,6 +220,8 @@ func NewServer(st *store.Store, cfg config.Config, bi BuildInfo, hub *live.Hub, 
 		r.Post("/backup/import", s.handleImportBackup)
 		r.Get("/settings/journal", s.handleJournalMeta)
 		r.Get("/settings/journal/lines", s.handleJournalLines)
+		r.Get("/system/secrets", s.handleGetSecretsStatus)
+		r.Post("/system/secrets/rewrap", s.handleRewrapSecrets)
 	})
 
 	r.Mount("/api/v1", ar)

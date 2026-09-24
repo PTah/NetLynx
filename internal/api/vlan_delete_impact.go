@@ -250,7 +250,7 @@ func (s *Server) handleVLANDeleteImpact(w http.ResponseWriter, r *http.Request) 
 			_, inv, _ := s.deviceVLANInventory(r.Context(), id)
 			return investigate.DeviceVLANInv{Name: nd.Name, Host: nd.Host, Inv: inv}, true
 		},
-		MaxDepth:        investigate.VLANBlastMaxDepth,
+		MaxDepth:        s.cfg.VLANBlastMaxDepth,
 		LocalPortRoles:  portRoles,
 		LocalIfNames:    ifNames,
 		LocalFDB:        localFDB,

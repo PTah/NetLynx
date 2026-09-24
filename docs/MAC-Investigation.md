@@ -56,6 +56,8 @@ WiFi-MAC из списка «не трекать» → **404** `ErrWiFiMACNotTra
 
 Без syslog секундный flapping часто не попадает в FDB-снимок.
 
+> **0.9.1:** QEMU/KVM MAC (`52:54:…`, locally administered) больше не отбрасываются только из‑за отсутствия ARP — иначе syslog `MAC_FLAPPING` с Eltex не попадал в события.
+
 ### Syslog (пример Eltex)
 
 ```bash

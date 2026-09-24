@@ -337,6 +337,10 @@ var ErrInvalidMAC = errString("invalid mac")
 // ErrWiFiMACNotTracked — MAC WiFi-клиента при выключенном track_wifi_clients.
 var ErrWiFiMACNotTracked = errString("wifi mac not tracked")
 
+var ErrBlastCacheEmpty = errString("topology blast cache empty")
+
+var ErrNoTopologyPath = errString("no path between devices")
+
 func looksLikeVirtualMAC(mac string) bool {
 	h := strings.ReplaceAll(strings.ToLower(mac), ":", "")
 	if len(h) < 6 {

@@ -1,4 +1,4 @@
-﻿package store
+package store
 
 import (
 	"context"
@@ -9,12 +9,14 @@ import (
 	"time"
 
 	"git.kalinamall.ru/PapaTramp/netlynx/internal/models"
+	"git.kalinamall.ru/PapaTramp/netlynx/internal/secrets"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type Store struct {
 	pool *pgxpool.Pool
+	sec  *secrets.Box // optional at-rest encryption
 }
 
 func New(pool *pgxpool.Pool) *Store {
@@ -23,24 +25,24 @@ func New(pool *pgxpool.Pool) *Store {
 
 // PollDevice — учётные данные и адрес для SNMP (не использовать в REST).
 type PollDevice struct {
-	ID                  int64
-	Name                string
-	Host                string
-	SNMPVersion         string
-	Community           *string
-	V3User              *string
-	V3AuthProtocol      *string
-	V3AuthPass          *string
-	V3PrivProtocol      *string
-	V3PrivPass          *string
-	V3EngineID          *string
-	PollIntervalSeconds      int
-	UtilHighPct              *float32
-	UtilOkPct                *float32
-	FDBPollIntervalSeconds   *int
-	LastPollAt               *time.Time
-	LastFDBPollAt            *time.Time
-	FDBBaselineAt            *time.Time
+	ID                     int64
+	Name                   string
+	Host                   string
+	SNMPVersion            string
+	Community              *string
+	V3User                 *string
+	V3AuthProtocol         *string
+	V3AuthPass             *string
+	V3PrivProtocol         *string
+	V3PrivPass             *string
+	V3EngineID             *string
+	PollIntervalSeconds    int
+	UtilHighPct            *float32
+	UtilOkPct              *float32
+	FDBPollIntervalSeconds *int
+	LastPollAt             *time.Time
+	LastFDBPollAt          *time.Time
+	FDBBaselineAt          *time.Time
 }
 
 func (s *Store) GetPollDevice(ctx context.Context, id int64) (*PollDevice, error) {
@@ -61,6 +63,9 @@ func (s *Store) GetPollDevice(ctx context.Context, id int64) (*PollDevice, error
 		return nil, nil
 	}
 	if err != nil {
+		return nil, err
+	}
+	if err := s.openPollDeviceSecrets(&d); err != nil {
 		return nil, err
 	}
 	return &d, nil
@@ -104,6 +109,9 @@ func (s *Store) ListPollDevices(ctx context.Context) ([]PollDevice, error) {
 		); err != nil {
 			return nil, err
 		}
+		if err := s.openPollDeviceSecrets(&d); err != nil {
+			return nil, err
+		}
 		out = append(out, d)
 	}
 	return out, rows.Err()
@@ -116,7 +124,8 @@ func (s *Store) ListDevices(ctx context.Context) ([]models.Device, error) {
 		       poll_interval_seconds, util_high_pct, util_ok_pct, fdb_poll_interval_seconds,
 		       created_at, updated_at, last_poll_at, last_snmp_ok, last_snmp_error,
 		       last_ping_ok, last_ping_at, last_ping_rtt_ms, online_override, offline_since,
-		       sys_name, sys_descr, chassis_mac, cpu_profile, device_category, last_cpu_pct, last_cpu_at, last_sys_uptime_cs, fdb_monitoring_status,
+		       sys_name, sys_descr, chassis_mac, cpu_profile, device_category, last_cpu_pct, last_cpu_at, last_sys_uptime_cs,
+		       last_page_count, last_toners, fdb_monitoring_status,
 		       ssh_user, ssh_password, ssh_port, ssh_enable_password, COALESCE(NULLIF(btrim(ssh_vendor), ''), 'auto'),
 		       COALESCE(trust_link_traps, false)
 		FROM devices ORDER BY id`)
@@ -127,18 +136,21 @@ func (s *Store) ListDevices(ctx context.Context) ([]models.Device, error) {
 	var out []models.Device
 	for rows.Next() {
 		var d models.Device
+		var tonerRaw []byte
 		if err := rows.Scan(
 			&d.ID, &d.Name, &d.Host, &d.Location, &d.UISPDeviceID, &d.UISPOverviewStatus, &d.SNMPVersion, &d.Community,
 			&d.V3User, &d.V3AuthProtocol, &d.V3PrivProtocol, &d.V3EngineID,
 			&d.PollIntervalSeconds, &d.UtilHighPct, &d.UtilOkPct, &d.FDBPollIntervalSeconds,
 			&d.CreatedAt, &d.UpdatedAt, &d.LastPollAt, &d.LastSNMPOK, &d.LastSNMPError,
 			&d.LastPingOK, &d.LastPingAt, &d.LastPingRTTMs, &d.OnlineOverride, &d.OfflineSince,
-			&d.SysName, &d.SysDescr, &d.ChassisMAC, &d.CPUProfile, &d.DeviceCategory, &d.LastCPUPct, &d.LastCPUAt, &d.LastSysUptimeCs, &d.FDBMonitoringStatus,
+			&d.SysName, &d.SysDescr, &d.ChassisMAC, &d.CPUProfile, &d.DeviceCategory, &d.LastCPUPct, &d.LastCPUAt, &d.LastSysUptimeCs,
+			&d.LastPageCount, &tonerRaw, &d.FDBMonitoringStatus,
 			&d.SSHUser, &d.SSHPassword, &d.SSHPort, &d.SSHEnablePassword, &d.SSHVendor,
 			&d.TrustLinkTraps,
 		); err != nil {
 			return nil, err
 		}
+		d.LastToners = decodePrinterToners(tonerRaw)
 		if d.DeviceCategory == "" {
 			d.DeviceCategory = DeviceCategorySwitch
 		}
@@ -155,13 +167,15 @@ func (s *Store) CountDevices(ctx context.Context) (int, error) {
 
 func (s *Store) GetDevice(ctx context.Context, id int64) (*models.Device, error) {
 	var d models.Device
+	var tonerRaw []byte
 	err := s.pool.QueryRow(ctx, `
 		SELECT id, name, COALESCE(host, '') AS host, location, uisp_device_id, uisp_overview_status, snmp_version, community,
 		       v3_user, v3_auth_protocol, v3_priv_protocol, v3_engine_id,
 		       poll_interval_seconds, util_high_pct, util_ok_pct, fdb_poll_interval_seconds,
 		       created_at, updated_at, last_poll_at, last_snmp_ok, last_snmp_error,
 		       last_ping_ok, last_ping_at, last_ping_rtt_ms, online_override, offline_since,
-		       sys_name, sys_descr, chassis_mac, cpu_profile, device_category, last_cpu_pct, last_cpu_at, last_sys_uptime_cs, fdb_monitoring_status,
+		       sys_name, sys_descr, chassis_mac, cpu_profile, device_category, last_cpu_pct, last_cpu_at, last_sys_uptime_cs,
+		       last_page_count, last_toners, fdb_monitoring_status,
 		       ssh_user, ssh_password, ssh_port, ssh_enable_password, COALESCE(NULLIF(btrim(ssh_vendor), ''), 'auto'),
 		       COALESCE(trust_link_traps, false)
 		FROM devices WHERE id = $1`, id).Scan(
@@ -170,7 +184,8 @@ func (s *Store) GetDevice(ctx context.Context, id int64) (*models.Device, error)
 		&d.PollIntervalSeconds, &d.UtilHighPct, &d.UtilOkPct, &d.FDBPollIntervalSeconds,
 		&d.CreatedAt, &d.UpdatedAt, &d.LastPollAt, &d.LastSNMPOK, &d.LastSNMPError,
 		&d.LastPingOK, &d.LastPingAt, &d.LastPingRTTMs, &d.OnlineOverride, &d.OfflineSince,
-		&d.SysName, &d.SysDescr, &d.ChassisMAC, &d.CPUProfile, &d.DeviceCategory, &d.LastCPUPct, &d.LastCPUAt, &d.LastSysUptimeCs, &d.FDBMonitoringStatus,
+		&d.SysName, &d.SysDescr, &d.ChassisMAC, &d.CPUProfile, &d.DeviceCategory, &d.LastCPUPct, &d.LastCPUAt, &d.LastSysUptimeCs,
+		&d.LastPageCount, &tonerRaw, &d.FDBMonitoringStatus,
 		&d.SSHUser, &d.SSHPassword, &d.SSHPort, &d.SSHEnablePassword, &d.SSHVendor,
 		&d.TrustLinkTraps,
 	)
@@ -180,8 +195,12 @@ func (s *Store) GetDevice(ctx context.Context, id int64) (*models.Device, error)
 	if err != nil {
 		return nil, err
 	}
+	d.LastToners = decodePrinterToners(tonerRaw)
 	if d.DeviceCategory == "" {
 		d.DeviceCategory = DeviceCategorySwitch
+	}
+	if err := s.openDeviceModelSecrets(&d); err != nil {
+		return nil, err
 	}
 	return &d, nil
 }
@@ -209,7 +228,13 @@ func (s *Store) CreateDevice(ctx context.Context, in CreateDeviceInput) (int64, 
 		in.PollIntervalSeconds = 60
 	}
 	in.Host = strings.TrimSpace(in.Host)
-	// Пустой host допустим (узел без адреса: другой офис / склад / только LLDP).
+	if macHost, macFromHost := SplitHostOrMAC(in.Host); macFromHost != "" {
+		in.Host = macHost
+		if in.ChassisMAC == nil {
+			in.ChassisMAC = &macFromHost
+		}
+	}
+	// Пустой host допустим (узел без адреса: другой офис / склад / нет ARP).
 	cat := NormalizeDeviceCategory(in.DeviceCategory)
 	ok, err := s.DeviceCategoryExists(ctx, cat)
 	if err != nil {
@@ -225,7 +250,11 @@ func (s *Store) CreateDevice(ctx context.Context, in CreateDeviceInput) (int64, 
 		}
 	}
 	if in.Host == "" && chassis == nil {
-		return 0, errors.New("нужен host или chassis MAC")
+		if strings.TrimSpace(in.Name) == "" {
+			return 0, errors.New("укажите имя узла")
+		}
+		// Инвентарь без IP и без MAC: FDB/ARP/LLDP не дали идентификатор.
+		// SNMP/ping появятся после заполнения адреса в карточке.
 	}
 	if err := s.CheckDeviceIdentity(ctx, in.Host, chassis, 0); err != nil {
 		return 0, err
@@ -235,6 +264,9 @@ func (s *Store) CreateDevice(ctx context.Context, in CreateDeviceInput) (int64, 
 		hostVal = nil
 	} else {
 		hostVal = in.Host
+	}
+	if err := s.sealCreateDeviceSecrets(&in); err != nil {
+		return 0, err
 	}
 	var id int64
 	err = s.pool.QueryRow(ctx, `
@@ -262,6 +294,9 @@ func (s *Store) UpdateDevice(ctx context.Context, id int64, in CreateDeviceInput
 		if err := s.CheckDeviceIdentity(ctx, in.Host, nil, id); err != nil {
 			return err
 		}
+	}
+	if err := s.sealCreateDeviceSecrets(&in); err != nil {
+		return err
 	}
 	// Пустой host → NULL через NULLIF; ::text нужен, иначе PG не выводит тип параметра (42P08).
 	tag, err := s.pool.Exec(ctx, `
@@ -319,6 +354,38 @@ func (s *Store) UpdateDevicePollMeta(ctx context.Context, id int64, ok bool, err
 		id, ok, errMsg, sysName, sysDescr, cpuProfile, cpuPct, chassisMAC, sysUptimeCs,
 	)
 	return mapUniqueViolation(err)
+}
+
+func decodePrinterToners(raw []byte) []models.PrinterToner {
+	if len(raw) == 0 {
+		return nil
+	}
+	var t []models.PrinterToner
+	if err := json.Unmarshal(raw, &t); err != nil {
+		return nil
+	}
+	return t
+}
+
+func (s *Store) UpdateDevicePrinterSnapshot(ctx context.Context, id int64, pageCount *int64, toners []models.PrinterToner) error {
+	var tonerJSON []byte
+	if toners != nil {
+		b, err := json.Marshal(toners)
+		if err != nil {
+			return err
+		}
+		tonerJSON = b
+	}
+	_, err := s.pool.Exec(ctx, `
+		UPDATE devices SET
+			last_page_count = COALESCE($2, last_page_count),
+			last_toners = COALESCE($3::jsonb, last_toners),
+			last_printer_at = now(),
+			updated_at = now()
+		WHERE id = $1`,
+		id, pageCount, tonerJSON,
+	)
+	return err
 }
 
 func (s *Store) UpdateDevicePing(ctx context.Context, id int64, ok bool, rttMs *int) error {
@@ -551,26 +618,26 @@ func (s *Store) UpsertInterfaces(ctx context.Context, deviceID int64, rows []Int
 }
 
 type InterfaceUpsert struct {
-	IfIndex            int
-	IfDescr            *string
-	IfName             *string
-	IfType             *int64
-	AdminStatus        *int
-	OperStatus         *int
-	IfSpeed            *int64
-	IfHighSpeed        *int64
-	PortRole           *string
-	HCInOctets         *int64
-	HCOutOctets        *int64
-	CountersPolledAt   *time.Time
-	UtilInPct          *float32
-	UtilOutPct         *float32
-	UtilMaxPct         *float32
-	UtilHighActive     bool
+	IfIndex          int
+	IfDescr          *string
+	IfName           *string
+	IfType           *int64
+	AdminStatus      *int
+	OperStatus       *int
+	IfSpeed          *int64
+	IfHighSpeed      *int64
+	PortRole         *string
+	HCInOctets       *int64
+	HCOutOctets      *int64
+	CountersPolledAt *time.Time
+	UtilInPct        *float32
+	UtilOutPct       *float32
+	UtilMaxPct       *float32
+	UtilHighActive   bool
 	/** nil — не обновлять поле poe_active (MIB недоступен). */
-	PoeActive          *bool
+	PoeActive *bool
 	/** nil — не обновлять поле poe_power_w (метрика недоступна). */
-	PoePowerW          *float32
+	PoePowerW *float32
 }
 
 func (s *Store) InsertEvent(ctx context.Context, deviceID int64, ifIndex *int, eventType, severity string, payload map[string]interface{}) (int64, error) {
@@ -690,30 +757,30 @@ func (s *Store) ListEvents(ctx context.Context, limit int, deviceID *int64, even
 
 // NotificationSettings — глобальные настройки уведомлений (одна строка id=1).
 type NotificationSettings struct {
-	WebhookURL          *string `json:"webhook_url"`
-	WebhookEnabled      bool    `json:"webhook_enabled"`
-	WebhookEventTypes   *string `json:"webhook_event_types"`
-	WebhookSeverities   *string `json:"webhook_severities"`
-	EmailEnabled        bool    `json:"email_enabled"`
-	EmailFrom           *string `json:"email_from"`
-	EmailTo             *string `json:"email_to"`
-	EmailEventTypes     *string `json:"email_event_types"`
-	EmailSeverities     *string `json:"email_severities"`
-	SMTPHost            *string `json:"smtp_host"`
-	SMTPPort            int     `json:"smtp_port"`
-	SMTPUsername        *string `json:"smtp_username"`
-	SMTPPassword        *string `json:"-"`
-	SMTPTLSSkipVerify  bool    `json:"smtp_tls_skip_verify"`
-	TelegramBotToken    *string `json:"-"`
-	TelegramChatID      *string `json:"telegram_chat_id"`
-	TelegramEnabled     bool    `json:"telegram_enabled"`
-	TelegramEventTypes  *string `json:"telegram_event_types"`
-	TelegramSeverities  *string `json:"telegram_severities"`
-	NotifyMaxRetries           int     `json:"notify_max_retries"`
-	NotifyRetryBackoffMs       int     `json:"notify_retry_backoff_ms"`
-	IncidentActionEnabled          bool    `json:"incident_action_enabled"`
-	IncidentActionEventTypes       *string `json:"incident_action_event_types"`
-	IncidentActionDryRun           bool    `json:"incident_action_dry_run"`
+	WebhookURL                    *string `json:"webhook_url"`
+	WebhookEnabled                bool    `json:"webhook_enabled"`
+	WebhookEventTypes             *string `json:"webhook_event_types"`
+	WebhookSeverities             *string `json:"webhook_severities"`
+	EmailEnabled                  bool    `json:"email_enabled"`
+	EmailFrom                     *string `json:"email_from"`
+	EmailTo                       *string `json:"email_to"`
+	EmailEventTypes               *string `json:"email_event_types"`
+	EmailSeverities               *string `json:"email_severities"`
+	SMTPHost                      *string `json:"smtp_host"`
+	SMTPPort                      int     `json:"smtp_port"`
+	SMTPUsername                  *string `json:"smtp_username"`
+	SMTPPassword                  *string `json:"-"`
+	SMTPTLSSkipVerify             bool    `json:"smtp_tls_skip_verify"`
+	TelegramBotToken              *string `json:"-"`
+	TelegramChatID                *string `json:"telegram_chat_id"`
+	TelegramEnabled               bool    `json:"telegram_enabled"`
+	TelegramEventTypes            *string `json:"telegram_event_types"`
+	TelegramSeverities            *string `json:"telegram_severities"`
+	NotifyMaxRetries              int     `json:"notify_max_retries"`
+	NotifyRetryBackoffMs          int     `json:"notify_retry_backoff_ms"`
+	IncidentActionEnabled         bool    `json:"incident_action_enabled"`
+	IncidentActionEventTypes      *string `json:"incident_action_event_types"`
+	IncidentActionDryRun          bool    `json:"incident_action_dry_run"`
 	IncidentActionCooldownSeconds int     `json:"incident_action_cooldown_seconds"`
 }
 
@@ -742,12 +809,28 @@ func (s *Store) GetNotificationSettings(ctx context.Context) (NotificationSettin
 	if err == pgx.ErrNoRows {
 		return NotificationSettings{}, nil
 	}
-	return ns, err
+	if err != nil {
+		return ns, err
+	}
+	if ns.SMTPPassword, err = s.openPtr(ns.SMTPPassword); err != nil {
+		return ns, err
+	}
+	if ns.TelegramBotToken, err = s.openPtr(ns.TelegramBotToken); err != nil {
+		return ns, err
+	}
+	return ns, nil
 }
 
 // UpsertNotificationSettings записывает полную строку настроек (после слияния в обработчике API).
 func (s *Store) UpsertNotificationSettings(ctx context.Context, ns NotificationSettings) error {
-	_, err := s.pool.Exec(ctx, `
+	var err error
+	if ns.SMTPPassword, err = s.sealPtr(ns.SMTPPassword); err != nil {
+		return err
+	}
+	if ns.TelegramBotToken, err = s.sealPtr(ns.TelegramBotToken); err != nil {
+		return err
+	}
+	_, err = s.pool.Exec(ctx, `
 		INSERT INTO notification_settings (
 			id, webhook_url, webhook_enabled,
 			webhook_event_types, webhook_severities,
@@ -816,14 +899,24 @@ func (s *Store) GetUISPSettings(ctx context.Context) (UISPSettingsRow, error) {
 	if err == pgx.ErrNoRows {
 		return UISPSettingsRow{ImportCommunity: "public"}, nil
 	}
-	return r, err
+	if err != nil {
+		return r, err
+	}
+	if r.APIToken, err = s.openPtr(r.APIToken); err != nil {
+		return r, err
+	}
+	return r, nil
 }
 
 func (s *Store) UpsertUISPSettings(ctx context.Context, enabled bool, baseURL, apiToken *string, importCommunity string) error {
 	if strings.TrimSpace(importCommunity) == "" {
 		importCommunity = "public"
 	}
-	_, err := s.pool.Exec(ctx, `
+	var err error
+	if apiToken, err = s.sealPtr(apiToken); err != nil {
+		return err
+	}
+	_, err = s.pool.Exec(ctx, `
 		INSERT INTO uisp_settings (id, enabled, base_url, api_token, import_community, updated_at)
 		VALUES (1, $1, $2, $3, $4, now())
 		ON CONFLICT (id) DO UPDATE SET
@@ -881,6 +974,11 @@ func (s *Store) UpsertSwitchFromUISP(ctx context.Context, name, host, location, 
 	comm := strings.TrimSpace(community)
 	if comm == "" {
 		comm = "public"
+	}
+	if sealed, serr := secrets.MaybeSeal(s.secretsBox(), comm); serr != nil {
+		return false, serr
+	} else {
+		comm = sealed
 	}
 	host = strings.TrimSpace(host)
 	name = strings.TrimSpace(name)
@@ -1378,4 +1476,3 @@ func (s *Store) DeleteAllDevices(ctx context.Context) (int64, error) {
 	}
 	return tag.RowsAffected(), nil
 }
-

@@ -20,7 +20,7 @@ SNMP-мониторинг коммутаторов, веб-UI.
 | **Linux, уровень Ctrl-C/Ctrl-V** *(админ с Habr)* | [Чеклист](docs/Runbook-Linux.md#краткий-чеклист-копируйте-блоками) — копируйте **весь блок** (пакеты → docker → clone → `bash docs/deploy.sh`). [deploy.sh](docs/deploy.sh) **ставит всё сам** (сборка, Postgres, systemd, health). [Шаг 5](docs/Runbook-Linux.md#шаг-5-первый-вход-в-браузере) — войти в UI. Runbook — если пропустили перelogin после `usermod docker` *(спойлер: `permission denied` — это не баг NetLynx)*. |
 | **Windows Server** | [docs/Windows-Server-Setup.md](docs/Windows-Server-Setup.md) |
 
-После установки: SNMP community — [docs/SNMP-Community.md](docs/SNMP-Community.md); автообнаружение (нужны **SNMP + LLDP** на свитчах) — [docs/Autodiscover.md](docs/Autodiscover.md); вендоры — [docs/Vendors.md](docs/Vendors.md).
+После установки: SNMP community — [docs/SNMP-Community.md](docs/SNMP-Community.md); автообнаружение (нужны **SNMP + LLDP** на свитчах) — [docs/Autodiscover.md](docs/Autodiscover.md); опросы и кэш топологии (поллер, «ночной» blast-rebuild) — [docs/Polling-and-Topology-Cache.md](docs/Polling-and-Topology-Cache.md); вендоры — [docs/Vendors.md](docs/Vendors.md); МФУ/принтеры (страницы, тонер) — [docs/Printer-MIB.md](docs/Printer-MIB.md).
 
 Эталонный репозиторий git: [https://github.com/PTah/NetLynx](https://github.com/PTah/NetLynx) (ветка `main`).
 
@@ -29,6 +29,8 @@ SNMP-мониторинг коммутаторов, веб-UI.
 - PoE и SNMP (диагностика): [docs/PoE-detection.md](docs/PoE-detection.md)
 - **SNMP RO/RW** (управление портами): [docs/SNMP-Community.md](docs/SNMP-Community.md) — мониторинг работает с **RO**; **управлять** коммутатором (shutdown, alias, incident actions) можно только с **RW** community на свитче — иначе NetLynx лишь смотрит, и в этом страшном мире крутым не быть.
 - **Автообнаружение / топология LLDP:** [docs/Autodiscover.md](docs/Autodiscover.md) — на свитчах должны быть включены **SNMP** и **LLDP** (NetLynx их не включает).
+- **Опросы и кэш топологии:** [docs/Polling-and-Topology-Cache.md](docs/Polling-and-Topology-Cache.md) — непрерывный SNMP-poll, ночной/часовой blast-rebuild, FDB/config snapshots (без ping-sweep LAN).
+- **Секреты at-rest:** [docs/Secrets.md](docs/Secrets.md) — AES-GCM для community/SSH/SMTP/токенов (`NETLYNX_SECRETS_KEY`, `secrets-rewrap`).
 - Производители коммутаторов: [docs/Vendors.md](docs/Vendors.md)
 - Расследование MAC / flapping: [docs/MAC-Investigation.md](docs/MAC-Investigation.md)
 - Петли LLDP: [docs/Loop-Investigation.md](docs/Loop-Investigation.md)

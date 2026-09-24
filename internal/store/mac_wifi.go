@@ -98,15 +98,8 @@ func (s *Store) ShouldSkipWiFiMACTracking(ctx context.Context, mac string) (bool
 	} else if match {
 		return true, nil
 	}
-	if IsLocallyAdministeredMAC(mac) {
-		hasARP, err := s.MACHasARP(ctx, mac)
-		if err != nil {
-			return true, err
-		}
-		if !hasARP {
-			return true, nil
-		}
-	}
+	// LAA без ARP не отсекаем: иначе QEMU/KVM (52:54:…) и syslog MAC_FLAPPING
+	// не попадают в events (moves уже пишутся через poller.shouldTrackMAC).
 	return false, nil
 }
 

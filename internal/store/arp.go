@@ -2,8 +2,11 @@ package store
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 )
 
 // ARPEntry снимок ARP на узле.
@@ -42,6 +45,50 @@ func (s *Store) ReplaceARPSnapshot(ctx context.Context, deviceID int64, entries 
 		}
 	}
 	return tx.Commit(ctx)
+}
+
+// BackfillEmptyChassisFromARP заполняет пустой devices.chassis_mac по однозначному
+// IP→MAC из свежего ARP (свитч/роутер видит ПК без LLDP-MIB на самом хосте).
+func (s *Store) BackfillEmptyChassisFromARP(ctx context.Context, entries []ARPEntry) (int, error) {
+	byIP := make(map[string]map[string]struct{})
+	for _, e := range entries {
+		ip := strings.ToLower(strings.TrimSpace(e.IP))
+		mac, ok := FormatFullMAC(e.MAC)
+		if !ok || ip == "" {
+			continue
+		}
+		if byIP[ip] == nil {
+			byIP[ip] = make(map[string]struct{})
+		}
+		byIP[ip][mac] = struct{}{}
+	}
+	n := 0
+	for ip, macs := range byIP {
+		if len(macs) != 1 {
+			continue
+		}
+		var mac string
+		for m := range macs {
+			mac = m
+		}
+		var id int64
+		err := s.pool.QueryRow(ctx, `
+			SELECT id FROM devices
+			WHERE lower(btrim(host)) = $1
+			  AND (chassis_mac IS NULL OR btrim(chassis_mac) = '')
+			LIMIT 1`, ip).Scan(&id)
+		if errors.Is(err, pgx.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return n, err
+		}
+		if err := s.backfillDeviceChassisMAC(ctx, id, mac); err != nil {
+			return n, err
+		}
+		n++
+	}
+	return n, nil
 }
 
 // ListDistinctARPMACsForHost — уникальные MAC из ARP-снимков L3-узлов по IP/host inventory.

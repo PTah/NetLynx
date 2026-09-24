@@ -15,6 +15,7 @@ import { formatPortSpeedFromRow, linkMbps } from "../linkSpeedFormat";
 import { DEVICE_BACK_DEFAULT, type DeviceBackRef, deviceLinkState } from "../navigation";
 import {
   type DeviceCategory,
+  isPrinterCategory,
   normalizeDeviceCategory,
 } from "../deviceCategories";
 import {
@@ -31,8 +32,10 @@ import {
   type OnlineOverrideMode,
 } from "../deviceOnline";
 import { formatSysUptime } from "../uptimeFormat";
-import { formatMacDisplay, macVendorLabel } from "../macUtil";
-import type { Device, EventRow } from "../types";
+import { formatMacDisplay, looksLikeMac, macVendorLabel } from "../macUtil";
+import { formatPageCount, formatTonerPct, tonerLetter, tonerMetricType, tonerSwatch } from "../printerMetrics";
+import { alertDeviceCreateError } from "../apiError";
+import type { Device, EventRow, PrinterToner } from "../types";
 import type { ManualTopologyLink } from "../topologyTypes";
 import { requestTopologyRefresh } from "../topologyRefresh";
 import { PromoteDiscoveredForm, type PromoteFormValues, type PromotePreview } from "../components/PromoteDiscoveredForm";
@@ -174,9 +177,20 @@ type Neighbor = {
   remote_sys_name?: string | null;
   remote_port_id?: string | null;
   remote_chassis_id?: string | null;
+  remote_mgmt_addr?: string | null;
   remote_device_id?: number | null;
   stale?: boolean;
 };
+
+/** Chassis/IP из LLDP — часто есть имя, но нет записи в FDB/ARP. */
+function neighborIdentityHint(n: Neighbor): string {
+  const bits: string[] = [];
+  const ch = (n.remote_chassis_id || "").trim();
+  const ip = (n.remote_mgmt_addr || "").trim();
+  if (ch) bits.push(looksLikeMac(ch) ? formatMacDisplay(ch) : ch);
+  if (ip && ip.toLowerCase() !== ch.toLowerCase()) bits.push(ip);
+  return bits.join(" · ");
+}
 
 type PortClient = {
   mac: string;
@@ -192,6 +206,31 @@ type PortClient = {
 type PortPromoteTarget = {
   ifIndex: number;
   mac: string;
+};
+
+type ShutImpactPreview = {
+  summary: string;
+  severity?: string;
+  uplink_suspected?: boolean;
+  warnings?: string[];
+  downstream?: {
+    device_id: number;
+    device_name: string;
+    device_host?: string;
+    hop: number;
+    redundant?: boolean;
+  }[];
+  downstream_count?: number;
+  macs_on_port?: number;
+  neighbors?: { remote_sys_name?: string; remote_device_name?: string; looks_like_infra?: boolean }[];
+};
+
+type ShutConfirmState = {
+  label: string;
+  impacts: ShutImpactPreview[];
+  loading: boolean;
+  ackUplink: boolean;
+  apply: () => Promise<void>;
 };
 
 const emptyPortPromote: PromoteFormValues = {
@@ -419,6 +458,9 @@ export default function DeviceDetail() {
   const [hoveredPortIfIndex, setHoveredPortIfIndex] = useState<number | null>(null);
   const [cpuSamples, setCpuSamples] = useState<{ value: number; sampled_at: string }[]>([]);
   const [utilSamples, setUtilSamples] = useState<{ value: number; sampled_at: string }[]>([]);
+  const [pageSamples, setPageSamples] = useState<{ value: number; sampled_at: string }[]>([]);
+  const [tonerSeries, setTonerSeries] = useState<Record<string, { value: number; sampled_at: string }[]>>({});
+  const [printerChart, setPrinterChart] = useState<string | null>(null);
   const [devUtilHigh, setDevUtilHigh] = useState("");
   const [devUtilOk, setDevUtilOk] = useState("");
   const [devFdbPoll, setDevFdbPoll] = useState("");
@@ -442,6 +484,8 @@ export default function DeviceDetail() {
   const [descrMsg, setDescrMsg] = useState<string | null>(null);
   const [portSettings, setPortSettings] = useState<PortSettingsTarget | null>(null);
   const [portBulkOpen, setPortBulkOpen] = useState(false);
+  const [shutConfirm, setShutConfirm] = useState<ShutConfirmState | null>(null);
+  const [shutConfirmBusy, setShutConfirmBusy] = useState(false);
   const [selectedPortIndexes, setSelectedPortIndexes] = useState<number[]>([]);
   const [trafficByIf, setTrafficByIf] = useState<
     Record<number, { rx: { t: string; v: number }[]; tx: { t: string; v: number }[] }>
@@ -591,6 +635,11 @@ export default function DeviceDetail() {
       .catch((e: Error) => {
         if (e.name !== "AbortError") setCpuSamples([]);
       });
+    apiGet<{ samples: { value: number; sampled_at: string }[] }>(`/api/v1/devices/${id}/metrics?metric_type=page_count&${q}`, { signal: ac.signal })
+      .then((r) => setPageSamples(r.samples ?? []))
+      .catch((e: Error) => {
+        if (e.name !== "AbortError") setPageSamples([]);
+      });
     apiGet<{ samples: { value: number; sampled_at: string }[] }>(
       `/api/v1/devices/${id}/metrics?metric_type=util_max_pct&if_index=1&${q}`,
       { signal: ac.signal },
@@ -617,11 +666,52 @@ export default function DeviceDetail() {
     return () => ac.abort();
   }, [id]);
 
+  const tonerMetricKeys = (data?.device.last_toners ?? [])
+    .map((t) => tonerMetricType(t))
+    .filter(Boolean)
+    .join(",");
+
+  useEffect(() => {
+    if (!id || !tonerMetricKeys) {
+      setTonerSeries({});
+      return;
+    }
+    const ac = new AbortController();
+    const from = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+    const to = new Date().toISOString();
+    const q = `from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
+    const types = tonerMetricKeys.split(",");
+    Promise.all(
+      types.map((mt) =>
+        apiGet<{ samples: { value: number; sampled_at: string }[] }>(
+          `/api/v1/devices/${id}/metrics?metric_type=${encodeURIComponent(mt)}&${q}`,
+          { signal: ac.signal },
+        )
+          .then((r) => [mt, r.samples ?? []] as const)
+          .catch((e: Error) => {
+            if (e.name === "AbortError") throw e;
+            return [mt, []] as const;
+          }),
+      ),
+    )
+      .then((pairs) => {
+        const next: Record<string, { value: number; sampled_at: string }[]> = {};
+        for (const [mt, samples] of pairs) next[mt] = [...samples];
+        setTonerSeries(next);
+      })
+      .catch((e: Error) => {
+        if (e.name !== "AbortError") setTonerSeries({});
+      });
+    return () => ac.abort();
+  }, [id, tonerMetricKeys]);
+
   useEffect(() => {
     formSyncedId.current = null;
     setSelectedPortIndexes([]);
     setPortBulkOpen(false);
     setPortSettings(null);
+    setPrinterChart(null);
+    setTonerSeries({});
   }, [id]);
 
   useEffect(() => {
@@ -692,12 +782,17 @@ export default function DeviceDetail() {
         n.remote_sys_name || "",
         n.remote_port_id || "",
         n.remote_chassis_id || "",
+        n.remote_mgmt_addr || "",
       ].join("\0");
       const prevIdx = list.findIndex(
         (x) =>
-          [x.protocol || "lldp", x.remote_sys_name || "", x.remote_port_id || "", x.remote_chassis_id || ""].join(
-            "\0",
-          ) === idKey,
+          [
+            x.protocol || "lldp",
+            x.remote_sys_name || "",
+            x.remote_port_id || "",
+            x.remote_chassis_id || "",
+            x.remote_mgmt_addr || "",
+          ].join("\0") === idKey,
       );
       if (prevIdx < 0) {
         list.push(n);
@@ -809,6 +904,34 @@ export default function DeviceDetail() {
     setPortPromoteMsg(null);
   }
 
+  function openPlaceholderPromote(ifIndex: number) {
+    const list = neighborsByIf.get(ifIndex) ?? [];
+    const n =
+      list.find((x) => !(x.remote_device_id != null && x.remote_device_id > 0)) ??
+      list[0];
+    const chassis = (n?.remote_chassis_id || "").trim();
+    const mgmt = (n?.remote_mgmt_addr || "").trim();
+    const mac = looksLikeMac(chassis) ? chassis : "";
+    const host = mgmt || (looksLikeMac(chassis) ? chassis : "");
+    const name = (n?.remote_sys_name || "").trim() || "Устройство без адреса";
+    if (portPromote != null && portPromote.ifIndex === ifIndex) {
+      setPortPromote(null);
+      setPortPromoteForm(emptyPortPromote);
+      setPortPromotePreview(null);
+      return;
+    }
+    setPortPromote({ ifIndex, mac });
+    setPortPromoteForm({
+      host,
+      name,
+      location: (data?.device.location ?? "").trim(),
+      category: "other",
+      community: "public",
+    });
+    setPortPromotePreview(null);
+    setPortPromoteMsg(null);
+  }
+
   async function previewPortClient() {
     if (!id || !portPromote) return;
     if (!portPromoteForm.host.trim()) {
@@ -858,10 +981,15 @@ export default function DeviceDetail() {
           community: portPromoteForm.community,
         },
       );
+      const linked = Boolean(res.linked);
       setPortPromoteMsg(
         res.already
-          ? `Узел уже в списке (id=${res.id}). Связь на топологии записана.`
-          : `Узел создан: id=${res.id}. На топологии появится линк с этого порта.`,
+          ? linked
+            ? `Узел уже в списке (id=${res.id}). Связь на топологии записана.`
+            : `Узел уже в списке (id=${res.id}). Линк на топологии появится, когда MAC будет виден в FDB.`
+          : linked
+            ? `Узел создан: id=${res.id}. На топологии появится линк с этого порта.`
+            : `Узел создан: id=${res.id}. На порту не было MAC в FDB — линк на топологии появится после опроса, IP/MAC можно дописать в карточке.`,
       );
       requestTopologyRefresh();
       setPortPromote(null);
@@ -870,6 +998,7 @@ export default function DeviceDetail() {
       refreshPortClients(portPromote.ifIndex);
       load();
     } catch (err) {
+      alertDeviceCreateError(err);
       setPortPromotePreview({ ok: false, error: err instanceof Error ? err.message : String(err) });
     } finally {
       setPortPromoteBusy(false);
@@ -894,6 +1023,7 @@ export default function DeviceDetail() {
       refreshPortClients(ifIndex);
       load();
     } catch (err) {
+      alertDeviceCreateError(err);
       setPortPromoteMsg(err instanceof Error ? err.message : String(err));
     } finally {
       setPortPromoteBusy(false);
@@ -952,22 +1082,98 @@ export default function DeviceDetail() {
     }
   }
 
-  async function setPortAdmin(p: IfRow, up: boolean, opts?: { skipConfirm?: boolean }) {
+  async function applyPortAdmin(p: IfRow, up: boolean) {
     if (!id || !canWrite) return;
     const portLabel = p.if_name?.trim() || String(p.if_index);
-    const action = up ? "включить (no shutdown)" : "выключить (shutdown)";
-    if (!opts?.skipConfirm && !window.confirm(`Порт ${portLabel}: ${action} на коммутаторе?`)) return;
+    const res = await apiPatch<{ ok: boolean; via?: string }>(
+      `/api/v1/devices/${id}/interfaces/${p.if_index}/admin`,
+      { admin_up: up },
+    );
+    const via = res.via ? ` (${res.via})` : "";
+    setDescrMsg(`Порт ${portLabel}: ${up ? "включён" : "выключен"}${via}`);
+    load();
+  }
+
+  async function openShutConfirm(
+    ports: IfRow[],
+    apply: () => Promise<void>,
+  ) {
+    if (!id || ports.length === 0) return;
+    const label =
+      ports.length === 1
+        ? ports[0].if_name?.trim() || `if${ports[0].if_index}`
+        : `${ports.length} портов`;
+    setShutConfirm({
+      label,
+      impacts: [],
+      loading: true,
+      ackUplink: false,
+      apply,
+    });
     try {
-      const res = await apiPatch<{ ok: boolean; via?: string }>(
-        `/api/v1/devices/${id}/interfaces/${p.if_index}/admin`,
-        { admin_up: up },
+      const impacts = await Promise.all(
+        ports.map((p) =>
+          apiGet<ShutImpactPreview>(
+            `/api/v1/devices/${id}/interfaces/${p.if_index}/shut-impact`,
+          ).catch(() => ({
+            summary: "Не удалось загрузить превью риска — проверьте blast-cache / LLDP.",
+            warnings: [] as string[],
+            downstream: [],
+          })),
+        ),
       );
-      const via = res.via ? ` (${res.via})` : "";
-      setDescrMsg(`Порт ${portLabel}: ${up ? "включён" : "выключен"}${via}`);
-      load();
+      setShutConfirm((prev) =>
+        prev
+          ? {
+              ...prev,
+              impacts,
+              loading: false,
+            }
+          : null,
+      );
+    } catch {
+      setShutConfirm((prev) =>
+        prev
+          ? {
+              ...prev,
+              impacts: [{ summary: "Не удалось загрузить превью риска." }],
+              loading: false,
+            }
+          : null,
+      );
+    }
+  }
+
+  async function setPortAdmin(p: IfRow, up: boolean, opts?: { skipConfirm?: boolean }) {
+    if (!id || !canWrite) return;
+    if (!up && !opts?.skipConfirm) {
+      await openShutConfirm([p], async () => {
+        await applyPortAdmin(p, false);
+      });
+      return;
+    }
+    try {
+      await applyPortAdmin(p, up);
     } catch (err) {
       setErr(err instanceof Error ? err.message : "Ошибка admin status порта");
       throw err;
+    }
+  }
+
+  async function confirmShutApply() {
+    if (!shutConfirm) return;
+    const needsAck = shutConfirm.impacts.some(
+      (i) => i.uplink_suspected || (i.downstream_count ?? i.downstream?.length ?? 0) > 0,
+    );
+    if (needsAck && !shutConfirm.ackUplink) return;
+    setShutConfirmBusy(true);
+    try {
+      await shutConfirm.apply();
+      setShutConfirm(null);
+    } catch (err) {
+      setErr(err instanceof Error ? err.message : "Ошибка shutdown порта");
+    } finally {
+      setShutConfirmBusy(false);
     }
   }
 
@@ -1850,6 +2056,46 @@ export default function DeviceDetail() {
             {data.device.last_cpu_pct == null
               ? "N/A"
               : `${data.device.last_cpu_pct.toFixed(1)}%${data.device.cpu_profile ? ` (${data.device.cpu_profile})` : ""}`}
+            {(isPrinterCategory(data.device.device_category) ||
+              data.device.last_page_count != null ||
+              (data.device.last_toners && data.device.last_toners.length > 0)) && (
+              <>
+                {" "}
+                · <strong>Страниц всего:</strong>{" "}
+                <button
+                  type="button"
+                  className={`metric-chip${printerChart === "pages" ? " is-active" : ""}`}
+                  title="Показать график"
+                  onClick={() => setPrinterChart((k) => (k === "pages" ? null : "pages"))}
+                >
+                  {formatPageCount(data.device.last_page_count)}
+                </button>
+                {(data.device.last_toners?.length ?? 0) > 0 && (
+                  <>
+                    {" "}
+                    · <strong>Тонер:</strong>{" "}
+                    {(data.device.last_toners as PrinterToner[]).map((t, i) => {
+                      const mt = tonerMetricType(t);
+                      const low = t.pct != null && t.pct < 10;
+                      return (
+                        <span key={`${mt}-${i}`}>
+                          {i > 0 ? " " : null}
+                          <button
+                            type="button"
+                            className={`metric-chip${printerChart === mt ? " is-active" : ""}`}
+                            title={`${t.description || t.label}: график за 24 ч`}
+                            onClick={() => setPrinterChart((k) => (k === mt ? null : mt))}
+                            style={{ color: low ? "#f88" : tonerSwatch(t.key) }}
+                          >
+                            {tonerLetter(t.key)} {formatTonerPct(t)}
+                          </button>
+                        </span>
+                      );
+                    })}
+                  </>
+                )}
+              </>
+            )}
             {data.device.last_sys_uptime_cs != null && data.device.last_poll_at && (
               <>
                 {" "}
@@ -1869,6 +2115,15 @@ export default function DeviceDetail() {
           </p>
           <MetricChart title="CPU (24 ч)" samples={cpuSamples} />
           {utilSamples.length > 0 && <MetricChart title="Макс. утилизация порта ifIndex=1 (24 ч)" samples={utilSamples} />}
+          {printerChart === "pages" && (
+            <MetricChart title="Страниц всего (24 ч)" samples={pageSamples} unit="" maxY={0} digits={0} />
+          )}
+          {printerChart && printerChart !== "pages" && (
+            <MetricChart
+              title={`${(data.device.last_toners ?? []).find((t) => tonerMetricType(t) === printerChart)?.label ?? "Тонер"} (24 ч)`}
+              samples={tonerSeries[printerChart] ?? []}
+            />
+          )}
           <p style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem", alignItems: "center" }}>
             <button type="button" onClick={runSnmpTest} disabled={!canWrite}>
               Проверить SNMP сейчас
@@ -2354,84 +2609,222 @@ export default function DeviceDetail() {
                     if (body.admin_up == null && body.poe_mode == null && body.vlan == null) {
                       throw new Error("Нет изменений для применения");
                     }
-                    await apiPost(`/api/v1/devices/${id}/interfaces/bulk`, body);
-                    const bits: string[] = [];
-                    if (enableDirty) bits.push(adminUp ? "admin up" : "shutdown");
-                    if (poeDirty) bits.push(`PoE ${poeMode}`);
-                    if (vlanDirty) bits.push(accessVlan === 0 ? "No VLAN" : `VLAN ${accessVlan}`);
-                    setDescrMsg(`Массово (${idxs.length}): ${bits.join("; ")}`);
-                    clearPortSelection();
-                    load();
+                    const doBulk = async () => {
+                      await apiPost(`/api/v1/devices/${id}/interfaces/bulk`, body);
+                      const bits: string[] = [];
+                      if (enableDirty) bits.push(adminUp ? "admin up" : "shutdown");
+                      if (poeDirty) bits.push(`PoE ${poeMode}`);
+                      if (vlanDirty) bits.push(accessVlan === 0 ? "No VLAN" : `VLAN ${accessVlan}`);
+                      setDescrMsg(`Массово (${idxs.length}): ${bits.join("; ")}`);
+                      clearPortSelection();
+                      setPortBulkOpen(false);
+                      load();
+                    };
+                    if (enableDirty && !adminUp) {
+                      await openShutConfirm(selectedPorts, doBulk);
+                      return;
+                    }
+                    await doBulk();
                     return;
                   }
                   const p = shownInterfaces.find((x) => x.if_index === portSettings?.if_index);
                   if (!p) throw new Error("Порт не найден");
                   const portLabel = p.if_name?.trim() || String(p.if_index);
                   const notes: string[] = [];
-                  if (enableDirty) {
-                    await setPortAdmin(p, adminUp, { skipConfirm: true });
-                  }
-                  if (isolateDirty) {
-                    const res = await apiPatch<{ ok: boolean; via?: string }>(
-                      `/api/v1/devices/${id}/interfaces/${p.if_index}/isolate`,
-                      { isolate },
-                    );
-                    notes.push(`Isolate → ${isolate ? "on" : "off"}${res.via ? ` (${res.via})` : ""}`);
-                  }
-                  if (dhcpTrustedDirty) {
-                    const res = await apiPatch<{ ok: boolean; via?: string }>(
-                      `/api/v1/devices/${id}/interfaces/${p.if_index}/dhcp-snooping`,
-                      { trusted: dhcpTrusted },
-                    );
-                    notes.push(`DHCP Trusted → ${dhcpTrusted ? "on" : "off"}${res.via ? ` (${res.via})` : ""}`);
-                  }
-                  if (flowControlDirty) {
-                    const res = await apiPatch<{ ok: boolean; via?: string }>(
-                      `/api/v1/devices/${id}/interfaces/${p.if_index}/flow-control`,
-                      { flow_control: flowControl },
-                    );
-                    notes.push(`Flow Control → ${flowControl ? "on" : "off"}${res.via ? ` (${res.via})` : ""}`);
-                  }
-                  if (stpDirty) {
-                    const res = await apiPatch<{ ok: boolean; via?: string }>(
-                      `/api/v1/devices/${id}/interfaces/${p.if_index}/stp`,
-                      {
-                        enabled: stpEnabled,
-                        edge_port: edgePort,
-                        port_priority: portPriority,
-                        path_cost: pathCost,
-                      },
-                    );
-                    notes.push(`STP → ${stpEnabled ? "on" : "off"}${res.via ? ` (${res.via})` : ""}`);
-                  }
-                  if (vlanDirty) {
-                    if (accessVlan === 0) {
-                      const res = await apiPatch<{ ok: boolean; via?: string }>(
-                        `/api/v1/devices/${id}/interfaces/${p.if_index}/vlan`,
-                        { op: "no_vlan" },
-                      );
-                      notes.push(`VLAN → No VLAN${res.via ? ` (${res.via})` : ""}`);
-                    } else {
-                      const res = await apiPatch<{ ok: boolean; via?: string; vlan_id?: number }>(
-                        `/api/v1/devices/${id}/interfaces/${p.if_index}/vlan`,
-                        { op: "set_access", vlan_id: accessVlan },
-                      );
-                      notes.push(`VLAN access → ${res.vlan_id ?? accessVlan}${res.via ? ` (${res.via})` : ""}`);
+                  const runRest = async () => {
+                    if (enableDirty) {
+                      await applyPortAdmin(p, adminUp);
+                      notes.push(adminUp ? "admin up" : "shutdown");
                     }
+                    if (isolateDirty) {
+                      const res = await apiPatch<{ ok: boolean; via?: string }>(
+                        `/api/v1/devices/${id}/interfaces/${p.if_index}/isolate`,
+                        { isolate },
+                      );
+                      notes.push(`Isolate → ${isolate ? "on" : "off"}${res.via ? ` (${res.via})` : ""}`);
+                    }
+                    if (dhcpTrustedDirty) {
+                      const res = await apiPatch<{ ok: boolean; via?: string }>(
+                        `/api/v1/devices/${id}/interfaces/${p.if_index}/dhcp-snooping`,
+                        { trusted: dhcpTrusted },
+                      );
+                      notes.push(`DHCP Trusted → ${dhcpTrusted ? "on" : "off"}${res.via ? ` (${res.via})` : ""}`);
+                    }
+                    if (flowControlDirty) {
+                      const res = await apiPatch<{ ok: boolean; via?: string }>(
+                        `/api/v1/devices/${id}/interfaces/${p.if_index}/flow-control`,
+                        { flow_control: flowControl },
+                      );
+                      notes.push(`Flow Control → ${flowControl ? "on" : "off"}${res.via ? ` (${res.via})` : ""}`);
+                    }
+                    if (stpDirty) {
+                      const res = await apiPatch<{ ok: boolean; via?: string }>(
+                        `/api/v1/devices/${id}/interfaces/${p.if_index}/stp`,
+                        {
+                          enabled: stpEnabled,
+                          edge_port: edgePort,
+                          port_priority: portPriority,
+                          path_cost: pathCost,
+                        },
+                      );
+                      notes.push(`STP → ${stpEnabled ? "on" : "off"}${res.via ? ` (${res.via})` : ""}`);
+                    }
+                    if (vlanDirty) {
+                      if (accessVlan === 0) {
+                        const res = await apiPatch<{ ok: boolean; via?: string }>(
+                          `/api/v1/devices/${id}/interfaces/${p.if_index}/vlan`,
+                          { op: "no_vlan" },
+                        );
+                        notes.push(`VLAN → No VLAN${res.via ? ` (${res.via})` : ""}`);
+                      } else {
+                        const res = await apiPatch<{ ok: boolean; via?: string; vlan_id?: number }>(
+                          `/api/v1/devices/${id}/interfaces/${p.if_index}/vlan`,
+                          { op: "set_access", vlan_id: accessVlan },
+                        );
+                        notes.push(`VLAN access → ${res.vlan_id ?? accessVlan}${res.via ? ` (${res.via})` : ""}`);
+                      }
+                    }
+                    if (poeDirty) {
+                      const res = await apiPatch<{ ok: boolean; via?: string; poe_mode?: string }>(
+                        `/api/v1/devices/${id}/interfaces/${p.if_index}/poe`,
+                        { poe_mode: poeMode },
+                      );
+                      notes.push(`PoE Mode → ${res.poe_mode ?? poeMode}${res.via ? ` (${res.via})` : ""}`);
+                    }
+                    if (notes.length) {
+                      setDescrMsg(`Порт ${portLabel}: ${notes.join("; ")}`);
+                      setPortSettings(null);
+                      load();
+                    }
+                  };
+                  if (enableDirty && !adminUp) {
+                    await openShutConfirm([p], runRest);
+                    return;
                   }
-                  if (poeDirty) {
-                    const res = await apiPatch<{ ok: boolean; via?: string; poe_mode?: string }>(
-                      `/api/v1/devices/${id}/interfaces/${p.if_index}/poe`,
-                      { poe_mode: poeMode },
-                    );
-                    notes.push(`PoE Mode → ${res.poe_mode ?? poeMode}${res.via ? ` (${res.via})` : ""}`);
-                  }
-                  if (notes.length) {
-                    setDescrMsg(`Порт ${portLabel}: ${notes.join("; ")}`);
-                    load();
-                  }
+                  await runRest();
                 }}
               />
+              {shutConfirm ? (
+                <div
+                  role="dialog"
+                  aria-modal="true"
+                  style={{
+                    position: "fixed",
+                    inset: 0,
+                    zIndex: 80,
+                    background: "rgba(0,0,0,0.55)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    padding: 16,
+                  }}
+                  onClick={() => !shutConfirmBusy && setShutConfirm(null)}
+                >
+                  <div
+                    style={{
+                      width: "min(560px, 100%)",
+                      maxHeight: "90vh",
+                      overflow: "auto",
+                      background: "#151922",
+                      border: "1px solid #3a2e1a",
+                      borderRadius: 10,
+                      padding: "1rem 1.1rem",
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <h3 style={{ margin: "0 0 0.5rem", fontSize: "1.05rem" }}>
+                      Выключить порт {shutConfirm.label}?
+                    </h3>
+                    {shutConfirm.loading ? (
+                      <p style={{ color: "#9aa3b5" }}>Считаем, кого отрежет…</p>
+                    ) : (
+                      <>
+                        {shutConfirm.impacts.map((imp, i) => (
+                          <div key={i} style={{ marginBottom: 10 }}>
+                            <p style={{ margin: "0 0 6px", color: "#e8c07a", lineHeight: 1.4 }}>
+                              {imp.summary}
+                            </p>
+                            {imp.warnings?.length ? (
+                              <ul style={{ margin: 0, paddingLeft: "1.1rem", color: "#f0b4b4", fontSize: "0.85rem" }}>
+                                {imp.warnings.map((w, wi) => (
+                                  <li key={wi}>{w}</li>
+                                ))}
+                              </ul>
+                            ) : null}
+                            {imp.downstream && imp.downstream.length > 0 ? (
+                              <ul
+                                style={{
+                                  margin: "6px 0 0",
+                                  paddingLeft: "1.1rem",
+                                  maxHeight: 140,
+                                  overflow: "auto",
+                                  fontSize: "0.85rem",
+                                  color: "#c5cedd",
+                                }}
+                              >
+                                {imp.downstream.slice(0, 40).map((d) => (
+                                  <li key={d.device_id}>
+                                    hop {d.hop}: {d.device_name}
+                                    {d.device_host ? ` (${d.device_host})` : ""}
+                                    {d.redundant ? " · есть обход" : ""}
+                                  </li>
+                                ))}
+                              </ul>
+                            ) : null}
+                          </div>
+                        ))}
+                        {shutConfirm.impacts.some(
+                          (i) => i.uplink_suspected || (i.downstream_count ?? i.downstream?.length ?? 0) > 0,
+                        ) ? (
+                          <label
+                            style={{
+                              display: "flex",
+                              gap: 8,
+                              alignItems: "flex-start",
+                              margin: "10px 0",
+                              color: "#f0b4b4",
+                              fontSize: "0.9rem",
+                            }}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={shutConfirm.ackUplink}
+                              onChange={(e) =>
+                                setShutConfirm((prev) =>
+                                  prev ? { ...prev, ackUplink: e.target.checked } : prev,
+                                )
+                              }
+                            />
+                            <span>
+                              Понимаю риск: могу отрезать нижестоящие свичи и/или доступ к сегменту.
+                            </span>
+                          </label>
+                        ) : null}
+                      </>
+                    )}
+                    <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 12 }}>
+                      <button type="button" disabled={shutConfirmBusy} onClick={() => setShutConfirm(null)}>
+                        Отмена
+                      </button>
+                      <button
+                        type="button"
+                        disabled={
+                          shutConfirmBusy ||
+                          shutConfirm.loading ||
+                          (shutConfirm.impacts.some(
+                            (i) => i.uplink_suspected || (i.downstream_count ?? i.downstream?.length ?? 0) > 0,
+                          ) &&
+                            !shutConfirm.ackUplink)
+                        }
+                        style={{ background: "#6a2020", color: "#fff" }}
+                        onClick={() => void confirmShutApply()}
+                      >
+                        {shutConfirmBusy ? "Выключаю…" : "Выключить"}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
               {(ignoreMsg || descrMsg) && (
                 <p
                   ref={portStatusMsgRef}
@@ -2707,6 +3100,9 @@ export default function DeviceDetail() {
                                     </>
                                   )}
                                   {stale}
+                                  {neighborIdentityHint(n) ? (
+                                    <span style={{ color: "#9aa3b5" }}> · {neighborIdentityHint(n)}</span>
+                                  ) : null}
                                 </span>
                               );
                             });
@@ -2736,9 +3132,49 @@ export default function DeviceDetail() {
                                 <p style={{ margin: "0.5rem 0.75rem", color: "#f88" }}>{clientsErr}</p>
                               )}
                               {!loadingClients && !clientsErr && clients != null && clients.length === 0 && (
-                                <p style={{ margin: "0.5rem 0.75rem", color: "#9aa3b5", fontSize: "0.9rem" }}>
-                                  На порту нет записей FDB. Проверьте опрос MAC/FDB или это uplink/trunk.
-                                </p>
+                                <div style={{ margin: "0.5rem 0.75rem", fontSize: "0.9rem" }}>
+                                  <p style={{ margin: "0 0 0.4rem", color: "#9aa3b5" }}>
+                                    На порту нет записей FDB (MAC) и часто нет ARP (IP). Камеры, МФУ, ПК за VLAN
+                                    часто так выглядят: коммутатор знает имя по LLDP, но не таблицу MAC/IP.
+                                    Узел можно добавить по имени; адрес допишете в карточке.
+                                  </p>
+                                  {(neighborsByIf.get(p.if_index) ?? []).length > 0 ? (
+                                    <p style={{ margin: "0 0 0.4rem", color: "#c5cedd" }}>
+                                      LLDP/CDP на порту:{" "}
+                                      {(neighborsByIf.get(p.if_index) ?? []).map((n, i) => {
+                                        const hint = neighborIdentityHint(n);
+                                        return (
+                                          <span key={`${n.protocol}-${n.remote_sys_name}-${i}`}>
+                                            {i > 0 ? "; " : null}
+                                            {n.remote_sys_name || "—"}
+                                            {n.remote_port_id ? ` / ${n.remote_port_id}` : ""}
+                                            {hint ? ` · ${hint}` : " · нет MAC/IP"}
+                                          </span>
+                                        );
+                                      })}
+                                    </p>
+                                  ) : (
+                                    <p style={{ margin: "0 0 0.4rem", color: "#9aa3b5" }}>
+                                      Сосед LLDP тоже без MAC/IP (chassis ID не Ethernet-адрес).
+                                    </p>
+                                  )}
+                                  {portPromoteMsg && expandedIfIndex === p.if_index && (
+                                    <p style={{ margin: "0 0 0.4rem", color: "#9bd08b" }} role="status">
+                                      {portPromoteMsg}
+                                    </p>
+                                  )}
+                                  {canWrite ? (
+                                    <button
+                                      type="button"
+                                      disabled={portPromoteBusy}
+                                      onClick={() => openPlaceholderPromote(p.if_index)}
+                                    >
+                                      {portPromote != null && portPromote.ifIndex === p.if_index
+                                        ? "Скрыть форму"
+                                        : "Добавить устройство"}
+                                    </button>
+                                  ) : null}
+                                </div>
                               )}
                               {!loadingClients && !clientsErr && clients != null && clients.length > 0 && (
                                 <>
@@ -2839,10 +3275,16 @@ export default function DeviceDetail() {
                                     })}
                                   </tbody>
                                 </table>
-                                {portPromote != null && portPromote.ifIndex === p.if_index && (
+                                </>
+                              )}
+                              {!loadingClients && !clientsErr && clients != null && portPromote != null && portPromote.ifIndex === p.if_index && (
                                   <div style={{ margin: "0.5rem 0.75rem 0.75rem", maxWidth: 560 }}>
                                     <PromoteDiscoveredForm
-                                      title={`Добавление в список Узлы — ${formatMacDisplay(portPromote.mac)}`}
+                                      title={
+                                        portPromote.mac
+                                          ? `Добавление в список Узлы — ${formatMacDisplay(portPromote.mac)}`
+                                          : "Добавление в список Узлы — без MAC/IP на порту"
+                                      }
                                       values={portPromoteForm}
                                       locations={existingLocations}
                                       preview={portPromotePreview}
@@ -2857,8 +3299,6 @@ export default function DeviceDetail() {
                                       }}
                                     />
                                   </div>
-                                )}
-                                </>
                               )}
                             </div>
                           </td>

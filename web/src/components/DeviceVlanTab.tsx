@@ -558,7 +558,7 @@ export function DeviceVlanTab({ deviceId, canWrite, settingsWritable, ports, rel
         summary =
           impact.severity === "critical"
             ? "Критичный риск при удалении VLAN (management / связность)."
-            : "Удаление может отрезать транзит вниз по топологии: эти VLAN есть у нижестоящих соседей.";
+            : "Удаление VLAN на этом свитче может отключить нижестоящие свичи от этих VLAN.";
       }
       if ((!impact.neighbors || impact.neighbors.length === 0) && impact.skips?.length) {
         const reasonRu: Record<string, string> = {

@@ -671,6 +671,101 @@ func dedupeTopologyEdges(edges []TopologyEdge) []TopologyEdge {
 		out = append(out, mergeUndirectedDevicePair(groups[pk])...)
 	}
 	out = append(out, passthrough...)
+	return collapseFDBGhostEdges(out)
+}
+
+// edgeHasDiscoveryProto — LLDP/CDP/manual (не чистый FDB).
+func edgeHasDiscoveryProto(e TopologyEdge) bool {
+	check := func(p string) bool {
+		p = strings.ToLower(strings.TrimSpace(p))
+		return p == "lldp" || p == "cdp" || p == "manual"
+	}
+	if check(e.Protocol) {
+		return true
+	}
+	for _, p := range e.Protocols {
+		if check(p) {
+			return true
+		}
+	}
+	return false
+}
+
+func edgeIsPureFDB(e TopologyEdge) bool {
+	if edgeHasDiscoveryProto(e) {
+		return false
+	}
+	check := func(p string) bool {
+		return strings.ToLower(strings.TrimSpace(p)) == "fdb"
+	}
+	if check(e.Protocol) {
+		return true
+	}
+	for _, p := range e.Protocols {
+		if check(p) {
+			return true
+		}
+	}
+	return false
+}
+
+// collapseFDBGhostEdges: между одной парой устройств оставить discovery-ребро,
+// а чистые FDB на других ifIndex влить в него (типично: LLDP на 0/6 + FDB ghost на 0/8).
+// Два LLDP-кабеля не трогаем.
+func collapseFDBGhostEdges(edges []TopologyEdge) []TopologyEdge {
+	groups := map[string][]TopologyEdge{}
+	order := make([]string, 0)
+	passthrough := make([]TopologyEdge, 0)
+	for _, e := range edges {
+		pk := devicePairKey(e)
+		if pk == "" {
+			passthrough = append(passthrough, e)
+			continue
+		}
+		if _, ok := groups[pk]; !ok {
+			order = append(order, pk)
+		}
+		groups[pk] = append(groups[pk], e)
+	}
+	out := make([]TopologyEdge, 0, len(edges))
+	for _, pk := range order {
+		list := groups[pk]
+		if len(list) < 2 {
+			out = append(out, list...)
+			continue
+		}
+		var discovery, fdbOnly, other []TopologyEdge
+		for _, e := range list {
+			switch {
+			case edgeHasDiscoveryProto(e):
+				discovery = append(discovery, e)
+			case edgeIsPureFDB(e):
+				fdbOnly = append(fdbOnly, e)
+			default:
+				other = append(other, e)
+			}
+		}
+		if len(discovery) == 0 || len(fdbOnly) == 0 {
+			out = append(out, list...)
+			continue
+		}
+		best := discovery[0]
+		for _, e := range discovery[1:] {
+			if topologyEdgeOrientationBetter(best, e) {
+				best = e
+			}
+		}
+		merged := append([]TopologyEdge{best}, fdbOnly...)
+		out = append(out, mergeEdgeGroup(merged))
+		for _, e := range discovery {
+			if e.LocalDeviceID == best.LocalDeviceID && e.LocalIfIndex == best.LocalIfIndex {
+				continue
+			}
+			out = append(out, e)
+		}
+		out = append(out, other...)
+	}
+	out = append(out, passthrough...)
 	return out
 }
 

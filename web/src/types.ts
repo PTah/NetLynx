@@ -1,4 +1,4 @@
-export type Device = {
+﻿export type Device = {
   id: number;
   name: string;
   host: string;
@@ -42,10 +42,26 @@ export type Device = {
   last_cpu_at?: string | null;
   /** sysUpTime (SNMP TimeTicks, сотые доли секунды) при last_poll_at */
   last_sys_uptime_cs?: number | null;
+  /** Printer-MIB prtMarkerLifeCount */
+  last_page_count?: number | null;
+  last_toners?: PrinterToner[] | null;
   fdb_monitoring_status?: string | null;
   util_high_pct?: number | null;
   util_ok_pct?: number | null;
   fdb_poll_interval_seconds?: number | null;
+};
+
+export type PrinterToner = {
+  key: string;
+  label: string;
+  description?: string;
+  level?: number | null;
+  max?: number | null;
+  pct?: number | null;
+  unit?: number;
+  unknown?: boolean;
+  remaining_ok?: boolean;
+  metric_type?: string;
 };
 
 export type EventRow = {

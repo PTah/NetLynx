@@ -1,6 +1,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { apiGet, apiPost } from "../api";
+import { alertDeviceCreateError } from "../apiError";
 import { deviceLinkState } from "../navigation";
 import { PromoteDiscoveredForm, type PromoteFormValues, type PromotePreview } from "../components/PromoteDiscoveredForm";
 import type { DeviceCategory } from "../deviceCategories";
@@ -349,6 +350,7 @@ export default function Discovered() {
       load();
       nav(`/devices/${res.id}`, { state: deviceLinkState({ path: "/discovered", label: "Обнаружено" }) });
     } catch (err) {
+      alertDeviceCreateError(err);
       setErr(err instanceof Error ? err.message : String(err));
     } finally {
       setBusy(false);

@@ -4,6 +4,8 @@ services:
   # PostgreSQL: роль/БД invetor — историческое имя, при миграции с Invetor не переименовываем.
   postgres:
     image: postgres:16-alpine
+    # После reboot хоста Docker поднимает контейнер сам (policy=no → Exited → 502).
+    restart: unless-stopped
     environment:
       POSTGRES_USER: invetor
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-invetor}

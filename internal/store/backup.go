@@ -7,35 +7,36 @@ import (
 	"strings"
 	"time"
 
+	"git.kalinamall.ru/PapaTramp/netlynx/internal/secrets"
 	"github.com/jackc/pgx/v5"
 )
 
 type BackupSettings struct {
-	ScheduleEnabled    bool
-	ScheduleHour       int
-	ScheduleMinute     int
-	LocalEnabled       bool
-	LocalDir           string
-	LocalRetainDays    int
-	EmailEnabled       bool
-	EmailTo            *string
-	ShareEnabled       bool
-	ShareKind          string
-	ShareURL           *string
-	ShareUsername      *string
-	SharePassword      *string
-	ShareDomain        *string
-	ShareRetainDays    int
-	SwitchCfgEnabled   bool
-	SSHUser            *string
-	SSHPassword        *string
-	SSHPort            int
-	SSHEnablePassword  *string
-	SSHTimeoutSeconds  int
-	LastRunAt          *time.Time
-	LastStatus         *string
-	LastError          *string
-	LastLog            *string
+	ScheduleEnabled   bool
+	ScheduleHour      int
+	ScheduleMinute    int
+	LocalEnabled      bool
+	LocalDir          string
+	LocalRetainDays   int
+	EmailEnabled      bool
+	EmailTo           *string
+	ShareEnabled      bool
+	ShareKind         string
+	ShareURL          *string
+	ShareUsername     *string
+	SharePassword     *string
+	ShareDomain       *string
+	ShareRetainDays   int
+	SwitchCfgEnabled  bool
+	SSHUser           *string
+	SSHPassword       *string
+	SSHPort           int
+	SSHEnablePassword *string
+	SSHTimeoutSeconds int
+	LastRunAt         *time.Time
+	LastStatus        *string
+	LastError         *string
+	LastLog           *string
 }
 
 func defaultBackupSettings() BackupSettings {
@@ -76,7 +77,17 @@ func (s *Store) GetBackupSettings(ctx context.Context) (BackupSettings, error) {
 	if err != nil {
 		return r, err
 	}
-	return normalizeBackupSettings(r), nil
+	r = normalizeBackupSettings(r)
+	if r.SharePassword, err = s.openPtr(r.SharePassword); err != nil {
+		return r, err
+	}
+	if r.SSHPassword, err = s.openPtr(r.SSHPassword); err != nil {
+		return r, err
+	}
+	if r.SSHEnablePassword, err = s.openPtr(r.SSHEnablePassword); err != nil {
+		return r, err
+	}
+	return r, nil
 }
 
 func normalizeBackupSettings(r BackupSettings) BackupSettings {
@@ -115,7 +126,17 @@ func normalizeBackupSettings(r BackupSettings) BackupSettings {
 
 func (s *Store) UpsertBackupSettings(ctx context.Context, in BackupSettings) error {
 	in = normalizeBackupSettings(in)
-	_, err := s.pool.Exec(ctx, `
+	var err error
+	if in.SharePassword, err = s.sealPtr(in.SharePassword); err != nil {
+		return err
+	}
+	if in.SSHPassword, err = s.sealPtr(in.SSHPassword); err != nil {
+		return err
+	}
+	if in.SSHEnablePassword, err = s.sealPtr(in.SSHEnablePassword); err != nil {
+		return err
+	}
+	_, err = s.pool.Exec(ctx, `
 		INSERT INTO backup_settings (
 			id, schedule_enabled, schedule_hour, schedule_minute,
 			local_enabled, local_dir, local_retain_days,
@@ -223,6 +244,22 @@ func (s *Store) UpdateDeviceSSH(ctx context.Context, id int64, in DeviceSSHInput
 			port = p
 		}
 	}
+	sshPass := derefStr(in.SSHPassword)
+	sshEn := derefStr(in.SSHEnablePassword)
+	if in.SSHPassword != nil {
+		sealed, err := secrets.MaybeSeal(s.secretsBox(), sshPass)
+		if err != nil {
+			return fmt.Errorf("seal ssh_password: %w", err)
+		}
+		sshPass = sealed
+	}
+	if in.SSHEnablePassword != nil {
+		sealed, err := secrets.MaybeSeal(s.secretsBox(), sshEn)
+		if err != nil {
+			return fmt.Errorf("seal ssh_enable_password: %w", err)
+		}
+		sshEn = sealed
+	}
 	tag, err := s.pool.Exec(ctx, `
 		UPDATE devices SET
 			ssh_user = CASE WHEN $2::boolean THEN NULLIF(btrim($3::text), '') ELSE ssh_user END,
@@ -240,9 +277,9 @@ func (s *Store) UpdateDeviceSSH(ctx context.Context, id int64, in DeviceSSHInput
 		WHERE id = $1`,
 		id,
 		in.SSHUser != nil, derefStr(in.SSHUser),
-		in.SSHPassword != nil, derefStr(in.SSHPassword),
+		in.SSHPassword != nil, sshPass,
 		in.SSHPort != nil, port,
-		in.SSHEnablePassword != nil, derefStr(in.SSHEnablePassword),
+		in.SSHEnablePassword != nil, sshEn,
 		in.SSHVendor != "", vendor,
 	)
 	if err != nil {
@@ -253,4 +290,3 @@ func (s *Store) UpdateDeviceSSH(ctx context.Context, id int64, in DeviceSSHInput
 	}
 	return nil
 }
-

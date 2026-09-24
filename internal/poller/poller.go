@@ -1,4 +1,4 @@
-﻿package poller
+package poller
 
 import (
 	"context"
@@ -38,23 +38,23 @@ const neighborEmptyConfirmPolls = 2
 const onlineRecoverMinOffline = 3 * time.Minute
 
 type Engine struct {
-	log             *slog.Logger
-	st              *store.Store
-	cfg             config.Config
-	hook            *notify.EventHook // может быть nil
-	hub             *live.Hub
-	topoDirty       func(reason string) // optional: topology blast cache NotifyDirty
-	pollInflight    sync.Map // device id -> struct{}: опрос уже выполняется
-	offlineStreak          sync.Map // device id -> int: подряд «оффлайн» после опроса
-	neighborEmptyStreak    sync.Map // "deviceID:protocol" -> int: подряд пустой neighbor walk
-	broadcastStormActive   sync.Map // device id -> bool: эвристика broadcast storm активна
-	macMultiAccessLastEmit sync.Map // mac -> time.Time: глобальный дедуп MAC_MULTI_ACCESS
+	log                    *slog.Logger
+	st                     *store.Store
+	cfg                    config.Config
+	hook                   *notify.EventHook // может быть nil
+	hub                    *live.Hub
+	topoDirty              func(reason string) // optional: topology blast cache NotifyDirty
+	pollInflight           sync.Map            // device id -> struct{}: опрос уже выполняется
+	offlineStreak          sync.Map            // device id -> int: подряд «оффлайн» после опроса
+	neighborEmptyStreak    sync.Map            // "deviceID:protocol" -> int: подряд пустой neighbor walk
+	broadcastStormActive   sync.Map            // device id -> bool: эвристика broadcast storm активна
+	macMultiAccessLastEmit sync.Map            // mac -> time.Time: глобальный дедуп MAC_MULTI_ACCESS
 	wifiFilterMu           sync.Mutex
 	wifiFilterCache        wifiFilterCache
 	bg                     sync.WaitGroup
-	bgMu            sync.Mutex
-	bgStopping      bool
-	pollPaused      atomic.Bool
+	bgMu                   sync.Mutex
+	bgStopping             bool
+	pollPaused             atomic.Bool
 }
 
 func New(log *slog.Logger, st *store.Store, cfg config.Config, hook *notify.EventHook, hub *live.Hub) *Engine {
@@ -599,8 +599,27 @@ func (e *Engine) pollOne(ctx context.Context, d store.PollDevice) error {
 		cpuProfile = &cp
 	}
 
+	cat := ""
+	if prevDev != nil {
+		cat = prevDev.DeviceCategory
+	}
+	var printer *snmp.PrinterReading
+	if snmp.LooksLikePrinter(cat, sysDescr) {
+		p, pErr := snmp.ReadPrinter(g, sysDescr)
+		if pErr != nil {
+			e.log.Debug("printer mib", "device_id", d.ID, "err", pErr)
+		} else {
+			printer = p
+		}
+	}
+	if printer != nil && printer.HasData() {
+		if err := e.st.UpdateDevicePrinterSnapshot(ctx, d.ID, printer.PageCount, printer.Toners); err != nil {
+			e.log.Warn("printer snapshot", "device_id", d.ID, "err", err)
+		}
+	}
+
 	var chassisMAC *string
-	if mac, macErr := snmp.ReadLocalChassisMAC(g); macErr != nil {
+	if mac, macErr := snmp.ReadLocalChassisMAC(g, d.Host); macErr != nil {
 		e.log.Debug("local chassis mac", "device_id", d.ID, "err", macErr)
 	} else if mac != "" {
 		chassisMAC = &mac
@@ -912,7 +931,7 @@ func (e *Engine) pollOne(ctx context.Context, d store.PollDevice) error {
 	e.persistNeighbors(ctx, d, "cdp", now, func() ([]snmp.NeighborInfo, error) {
 		return snmp.WalkCDPNeighbors(g)
 	})
-	e.recordMetrics(ctx, d.ID, cpuPct, upserts, rateByIf, now)
+	e.recordMetrics(ctx, d.ID, cpuPct, upserts, rateByIf, now, printer)
 	if arpEntries, err := snmp.WalkARP(g); err != nil {
 		e.log.Warn("poll arp", "device_id", d.ID, "err", err)
 	} else {
@@ -922,6 +941,11 @@ func (e *Engine) pollOne(ctx context.Context, d store.PollDevice) error {
 		}
 		if err := e.st.ReplaceARPSnapshot(ctx, d.ID, storeARP, now); err != nil {
 			e.log.Warn("arp snapshot write", "device_id", d.ID, "err", err)
+		} else if n, err := e.st.BackfillEmptyChassisFromARP(ctx, storeARP); err != nil {
+			e.log.Debug("chassis backfill from arp", "device_id", d.ID, "err", err)
+		} else if n > 0 {
+			e.log.Info("chassis_mac backfilled from arp", "from_device_id", d.ID, "count", n)
+			e.notifyTopologyDirty("arp-chassis")
 		}
 	}
 	if pollFDBNow {
@@ -937,13 +961,33 @@ func (e *Engine) pollOne(ctx context.Context, d store.PollDevice) error {
 	return nil
 }
 
-func (e *Engine) recordMetrics(ctx context.Context, deviceID int64, cpuPct *float32, upserts []store.InterfaceUpsert, rates map[int][2]float32, at time.Time) {
+func (e *Engine) recordMetrics(ctx context.Context, deviceID int64, cpuPct *float32, upserts []store.InterfaceUpsert, rates map[int][2]float32, at time.Time, printer *snmp.PrinterReading) {
 	if !e.cfg.MetricsEnabled {
 		return
 	}
 	var samples []store.MetricSample
 	if cpuPct != nil {
 		samples = append(samples, store.MetricSample{MetricType: "cpu_pct", Value: *cpuPct, SampledAt: at})
+	}
+	if printer != nil {
+		if printer.PageCount != nil {
+			samples = append(samples, store.MetricSample{MetricType: "page_count", Value: float32(*printer.PageCount), SampledAt: at})
+		}
+		seen := map[string]bool{}
+		for _, t := range printer.Toners {
+			if t.Pct == nil {
+				continue
+			}
+			mt := t.MetricType
+			if mt == "" {
+				mt = snmp.TonerMetricType(t.Key)
+			}
+			if seen[mt] {
+				continue
+			}
+			seen[mt] = true
+			samples = append(samples, store.MetricSample{MetricType: mt, Value: *t.Pct, SampledAt: at})
+		}
 	}
 	for _, u := range upserts {
 		if u.OperStatus == nil || *u.OperStatus != 1 {
@@ -1118,13 +1162,31 @@ func (e *Engine) persistNeighbors(ctx context.Context, d store.PollDevice, proto
 		e.clearNeighborEmptyStreak(d.ID, protocol)
 	}
 	rows := make([]store.PortNeighbor, 0, len(neighbors))
+	var chassisIdx map[string]store.ChassisEndpoint
+	if protocol == "lldp" || protocol == "cdp" {
+		if idx, err := e.st.ListChassisMACIndex(ctx); err == nil {
+			chassisIdx = idx
+		}
+	}
 	for _, n := range neighbors {
+		sys := n.RemoteSysName
+		// Windows LLDP часто без sysName — подставить имя из inventory по chassis MAC.
+		if strings.TrimSpace(sys) == "" && chassisIdx != nil {
+			if mac, ok := store.FormatFullMAC(n.RemoteChassisID); ok {
+				hex := strings.ToLower(strings.ReplaceAll(mac, ":", ""))
+				if ep, ok := chassisIdx[hex]; ok {
+					if name := strings.TrimSpace(ep.Name); name != "" {
+						sys = name
+					}
+				}
+			}
+		}
 		rows = append(rows, store.PortNeighbor{
 			DeviceID:        d.ID,
 			IfIndex:         n.IfIndex,
 			RemIndex:        n.RemIndex,
 			Protocol:        protocol,
-			RemoteSysName:   strPtr(n.RemoteSysName),
+			RemoteSysName:   strPtr(sys),
 			RemotePortID:    strPtr(n.RemotePortID),
 			RemoteChassisID: strPtr(n.RemoteChassisID),
 			RemoteMgmtAddr:  strPtr(n.RemoteMgmtAddr),

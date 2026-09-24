@@ -7,27 +7,29 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"git.kalinamall.ru/PapaTramp/netlynx/internal/secrets"
 )
 
 // Config загружается из переменных окружения (см. .env.example).
 type Config struct {
-	DatabaseURL       string
-	HTTPAddr          string
+	DatabaseURL string
+	HTTPAddr    string
 	// PollSchedulerSeconds — как часто планировщик проверяет, какие узлы пора опросить (не путать с poll_interval_seconds устройства в БД).
 	PollSchedulerSeconds int
 	// AccessPortLongIdle — порог «порт был пуст N времени», затем появился MAC (событие ACCESS_PORT_LONG_IDLE_DEVICE).
 	AccessPortLongIdle time.Duration
-	FDBPollInterval   time.Duration
-	FDBLearnDuration  time.Duration
+	FDBPollInterval    time.Duration
+	FDBLearnDuration   time.Duration
 	// Авто-классификация trunk по FDB: если на порту >= MinMACs и MAC из >= MinVLANs, порт считаем trunk для FDB-событий.
 	FDBAutoTrunkMinMACs  int
 	FDBAutoTrunkMinVLANs int
 	// Фолбэк, когда VLAN из Q-BRIDGE-MIB недоступны: trunk по одному MACCount (порог обычно выше).
 	FDBAutoTrunkFallbackMinMACs int
-	PortUtilHighPct   float64
-	PortUtilOKPct     float64
-	AccessTokenTTL    time.Duration
-	RefreshTokenTTL   time.Duration
+	PortUtilHighPct             float64
+	PortUtilOKPct               float64
+	AccessTokenTTL              time.Duration
+	RefreshTokenTTL             time.Duration
 	// WebStaticDir — абсолютный путь к каталогу с собранным фронтом (index.html). Пусто = не отдавать веб с Go.
 	WebStaticDir string
 	// AuthDisabled — явный отказ от auth (только lab). Иначе нужен NETLYNX_ADMIN_PASSWORD.
@@ -60,10 +62,10 @@ type Config struct {
 
 	// MAC investigation / flapping.
 	// SyslogListenAddr — UDP syslog (пусто = выкл). Пример: ":9514".
-	SyslogListenAddr      string
-	MACFlapMinMoves       int           // ≥K смен порта за окно → MAC_FLAPPING
-	MACFlapWindow         time.Duration // окно подсчёта moves
-	MACFlapDebounce       time.Duration
+	SyslogListenAddr string
+	MACFlapMinMoves  int           // ≥K смен порта за окно → MAC_FLAPPING
+	MACFlapWindow    time.Duration // окно подсчёта moves
+	MACFlapDebounce  time.Duration
 
 	// PORT_FLAP: N LINK_UP/DOWN на порту за окно.
 	PortFlapMinBounces int
@@ -71,8 +73,8 @@ type Config struct {
 	PortFlapDebounce   time.Duration
 
 	// Loop watch: периодический DFS, событие на новый cycle key.
-	LoopWatchEnabled  bool
-	LoopWatchInterval time.Duration // не повторять событие чаще
+	LoopWatchEnabled      bool
+	LoopWatchInterval     time.Duration // не повторять событие чаще
 	MACMovesRetentionDays int           // prune mac_fdb_moves
 
 	// Broadcast storm heuristic (poller): ≥N ports above util % + FDB growth.
@@ -99,9 +101,16 @@ type Config struct {
 	TopologyBlastCacheInterval time.Duration
 	TopologyBlastNightHour     int // 0–23, wall-clock nightly rebuild
 	TopologyBlastHistoryDays   int
+	// VLANBlastMaxDepth — hop вниз при delete-impact (0 = без лимита).
+	VLANBlastMaxDepth int
 
 	// PublicBaseURL — публичный URL UI для ссылок в письмах (http://host:8080).
 	PublicBaseURL string
+
+	// At-rest encryption for device/notification/UISP/backup secrets (AES-256-GCM).
+	// SecretsKey — 32 raw bytes; nil = compat (plaintext). See docs/Secrets.md.
+	SecretsKey        []byte
+	SecretsRequireKey bool // true → старт без ключа = fatal
 }
 
 func Load() (Config, error) {
@@ -452,6 +461,14 @@ func Load() (Config, error) {
 		}
 		c.TopologyBlastHistoryDays = n
 	}
+	c.VLANBlastMaxDepth = 32
+	if v := os.Getenv("VLAN_BLAST_MAX_DEPTH"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 0 || n > 10000 {
+			return Config{}, fmt.Errorf("VLAN_BLAST_MAX_DEPTH: invalid value %q (0=unlimited, иначе 1–10000)", v)
+		}
+		c.VLANBlastMaxDepth = n
+	}
 
 	c.AccessTokenTTL = 15 * time.Minute
 	if v := envLegacy("NETLYNX_ACCESS_TTL_SECONDS", "INETOR_ACCESS_TTL_SECONDS", ""); v != "" {
@@ -486,6 +503,20 @@ func Load() (Config, error) {
 	}
 
 	c.PublicBaseURL = strings.TrimRight(strings.TrimSpace(envLegacy("NETLYNX_PUBLIC_URL", "INETOR_PUBLIC_URL", "")), "/")
+
+	c.SecretsRequireKey = strings.EqualFold(strings.TrimSpace(getenv("SECRETS_REQUIRE_KEY", "false")), "true")
+	{
+		keyB64 := strings.TrimSpace(os.Getenv("NETLYNX_SECRETS_KEY"))
+		keyFile := strings.TrimSpace(os.Getenv("NETLYNX_SECRETS_KEY_FILE"))
+		key, err := secrets.LoadMasterKey(keyB64, keyFile)
+		if err != nil {
+			return Config{}, err
+		}
+		c.SecretsKey = key
+		if c.SecretsRequireKey && len(c.SecretsKey) == 0 {
+			return Config{}, fmt.Errorf("SECRETS_REQUIRE_KEY=true, но NETLYNX_SECRETS_KEY / NETLYNX_SECRETS_KEY_FILE не заданы")
+		}
+	}
 
 	return c, nil
 }

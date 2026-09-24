@@ -1,10 +1,10 @@
-# SNMP Community в NetLynx
+﻿# SNMP Community в NetLynx
 
 Как настроить опрос и управление коммутаторами по SNMPv1/v2c (и кратко — v3).
 
 ## Зачем
 
-NetLynx опрашивает узлы по SNMP (интерфейсы, LLDP/CDP, FDB, PoE, CPU и т.д.).  
+NetLynx опрашивает узлы по SNMP (интерфейсы, LLDP/CDP, FDB, PoE, CPU; у МФУ — Printer-MIB: страницы и тонер).  
 Часть операций **пишет** на устройство через SNMP SET:
 
 - вкл/выкл порта (admin up/down);

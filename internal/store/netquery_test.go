@@ -19,6 +19,21 @@ func TestFormatFullMAC(t *testing.T) {
 	}
 }
 
+func TestSplitHostOrMAC(t *testing.T) {
+	h, m := SplitHostOrMAC("  aa-bb-cc-dd-ee-ff ")
+	if h != "" || m != "aa:bb:cc:dd:ee:ff" {
+		t.Fatalf("mac field: host=%q mac=%q", h, m)
+	}
+	h, m = SplitHostOrMAC("192.168.10.20")
+	if h != "192.168.10.20" || m != "" {
+		t.Fatalf("ip field: host=%q mac=%q", h, m)
+	}
+	h, m = SplitHostOrMAC("")
+	if h != "" || m != "" {
+		t.Fatalf("empty: host=%q mac=%q", h, m)
+	}
+}
+
 func TestClassifySearchQuery(t *testing.T) {
 	k, n := ClassifySearchQuery("192.168.1.50")
 	if k != SearchQueryIP || n != "192.168.1.50" {

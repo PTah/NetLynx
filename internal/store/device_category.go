@@ -88,6 +88,9 @@ func NormalizeDeviceCategory(raw string) string {
 		return DeviceCategoryAP
 	case DeviceCategoryOther, "иное", "другие":
 		return DeviceCategoryOther
+	case "virtual":
+		// kind топологии («не в Узлах»), не id справочника типов.
+		return DeviceCategoryOther
 	}
 	if ValidCategoryID(s) {
 		return s

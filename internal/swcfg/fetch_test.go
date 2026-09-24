@@ -39,3 +39,18 @@ func TestIsSSHFlaky(t *testing.T) {
 		t.Fatal("not flaky")
 	}
 }
+
+func TestLooksLikeEnableSecretStep(t *testing.T) {
+	if !looksLikeEnableSecretStep("R3tt3tnatur") {
+		t.Fatal("password-like")
+	}
+	if looksLikeEnableSecretStep("terminal length 0") {
+		t.Fatal("cli step")
+	}
+	if looksLikeEnableSecretStep("enable") {
+		t.Fatal("enable itself")
+	}
+	if looksLikeEnableSecretStep("show running-config") {
+		t.Fatal("show")
+	}
+}

@@ -8,6 +8,24 @@ import (
 	"git.kalinamall.ru/PapaTramp/netlynx/internal/swcfg"
 )
 
+func TestVLANBlastSummaryNames(t *testing.T) {
+	hits := []VLANBlastHit{
+		{VLANID: 12, NeighborDeviceID: 10, NeighborName: "ES48 #11", Hop: 1},
+		{VLANID: 12, NeighborDeviceID: 11, NeighborName: "16 #5", Hop: 2},
+		{VLANID: 30, NeighborDeviceID: 10, NeighborName: "ES48 #11", Hop: 1},
+	}
+	s := VLANBlastSummary(hits, 0, 2, 0, 0, 0, 0)
+	if !strings.Contains(s, "Удалив VLAN") || !strings.Contains(s, "12") || !strings.Contains(s, "30") {
+		t.Fatalf("vlan list: %s", s)
+	}
+	if !strings.Contains(s, "ES48 #11") || !strings.Contains(s, "16 #5") {
+		t.Fatalf("switch names: %s", s)
+	}
+	if !strings.Contains(s, "отключите от этих VLAN свичи") {
+		t.Fatalf("phrase: %s", s)
+	}
+}
+
 func TestOrientLink(t *testing.T) {
 	// root=0: Y dist 2, parent dist 1 → up; child dist 3 → down; peer same → peer
 	if got := OrientLink(2, 1, true, true, ""); got != LinkDirUp {

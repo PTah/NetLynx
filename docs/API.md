@@ -59,15 +59,15 @@ http://<IP_или_имя_сервера>:8080
 | GET | `/api/v1/devices/{id}/interfaces` | порты |
 | GET | `/api/v1/devices/{id}/interfaces/{ifIndex}/clients` | MAC/IP (FDB+ARP) |
 | GET | `/api/v1/devices/{id}/interfaces/{ifIndex}/settings` | ignore, thresholds |
-| GET | `/api/v1/devices/{id}/interfaces/{ifIndex}/shut-impact` | превью риска shutdown |
+| GET | `/api/v1/devices/{id}/interfaces/{ifIndex}/shut-impact` | превью риска shutdown: clients, LLDP/CDP, **downstream** (multi-hop blast-cache), cut_paths |
 | GET | `/api/v1/devices/{id}/events` | события узла |
-| GET | `/api/v1/devices/{id}/metrics` | история метрик |
+| GET | `/api/v1/devices/{id}/metrics` | история метрик (`metric_type`: `cpu_pct`, `page_count`, `toner_black_pct` / `toner_cyan_pct` / `toner_magenta_pct` / `toner_yellow_pct`, `util_*`) |
 | GET | `/api/v1/devices/{id}/traffic-series` | трафик по портам |
 | GET | `/api/v1/devices/{id}/config/snapshots` | снимки show run |
 | GET | `/api/v1/devices/{id}/config/snapshots/{snapId}` | один снимок |
 | GET | `/api/v1/devices/{id}/config/diff?from=&to=` | diff (можно опустить — последний) |
 | GET | `/api/v1/devices/{id}/vlans` | VLAN database + членство портов (show run / порты); FDB только для уже известных VLAN (не создаёт строки-призраки) |
-| GET | `/api/v1/devices/{id}/vlans/delete-impact?vlan_ids=` | blast-radius удаления VLAN: топология (STP/heuristic), VLAN на trunk, вниз/redundant, FDB; SVI/mgmt (`mgmt_risks`, severity `critical`); шлюзы с SVI (`gateways`); `blocks_delete` пока false (advisory); override UPLINK/DOWNLINK |
+| GET | `/api/v1/devices/{id}/vlans/delete-impact?vlan_ids=` | blast-radius удаления VLAN: топология (STP/heuristic), VLAN на trunk, вниз/redundant, FDB; глубина `VLAN_BLAST_MAX_DEPTH` (default 32); SVI/mgmt (`mgmt_risks`, severity `critical`); шлюзы с SVI (`gateways`); `blocks_delete` пока false (advisory); override UPLINK/DOWNLINK |
 | GET | `/api/v1/devices/{id}/fdb/snapshots` | ежедневные снимки FDB |
 | GET | `/api/v1/ports/search?q=` | поиск порта |
 
@@ -150,6 +150,8 @@ http://<IP_или_имя_сервера>:8080
 | Метод | Путь | Описание |
 |-------|------|----------|
 | GET | `/api/v1/topology` | граф LLDP/CDP/FDB/manual; `vlan_id` — подсветка: `vlan_filter_id` + `vlan_match_device_ids` (VLAN в show run vlan database), граф не режется |
+| GET | `/api/v1/topology/path?from=&to=` | кратчайший путь A→B по **blast-cache** (viewer+); `404` если кэш пуст или пути нет |
+| GET | `/api/v1/topology/reachability?from=&max_depth=` | BFS-срез от узла (отладка цепочек); default `max_depth=32` |
 | GET/PATCH | `/api/v1/settings/topology` | настройки карты (viewer get / operator patch) |
 | GET | `/api/v1/discovered` | кандидаты LLDP/CDP |
 | POST | `/api/v1/discovered/{id}/preview\|promote\|ignore\|reopen` | operator |
@@ -215,6 +217,8 @@ http://<IP_или_имя_сервера>:8080
 | Метод | Путь | Описание |
 |-------|------|----------|
 | GET | `/api/v1/system/stats` | CPU/RAM/disk хоста |
+| GET | `/api/v1/system/secrets` | admin: статус at-rest encryption + счётчик plaintext |
+| POST | `/api/v1/system/secrets/rewrap` | admin: plaintext → `enc:v1:` (идемпотентно) |
 | GET | `/metrics` | Prometheus (Bearer viewer+) |
 
 ---

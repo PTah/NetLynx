@@ -1,4 +1,4 @@
-﻿package api
+package api
 
 import (
 	"context"
@@ -49,6 +49,7 @@ func (s *Server) handleListDevices(w http.ResponseWriter, r *http.Request) {
 type createDeviceBody struct {
 	Name                string  `json:"name"`
 	Host                string  `json:"host"`
+	ChassisMAC          string  `json:"chassis_mac"`
 	Location            *string `json:"location"`
 	DeviceCategory      string  `json:"device_category"`
 	SNMPVersion         string  `json:"snmp_version"`
@@ -70,22 +71,44 @@ func (s *Server) handleCreateDevice(w http.ResponseWriter, r *http.Request) {
 	}
 	body.Name = strings.TrimSpace(body.Name)
 	body.Host = strings.TrimSpace(body.Host)
+	body.ChassisMAC = strings.TrimSpace(body.ChassisMAC)
 	body.SNMPVersion = strings.TrimSpace(strings.ToLower(body.SNMPVersion))
-	if body.Name == "" || body.Host == "" {
-		writeError(w, http.StatusBadRequest, "name и host обязательны")
+	if body.Name == "" {
+		writeError(w, http.StatusBadRequest, "укажите имя узла")
 		return
 	}
-	if err := netutil.ValidateDeviceHost(body.Host); err != nil {
-		writeError(w, http.StatusBadRequest, "host: "+err.Error())
-		return
+	host, macFromHost := store.SplitHostOrMAC(body.Host)
+	chassis := strings.TrimSpace(body.ChassisMAC)
+	if chassis == "" {
+		chassis = macFromHost
+	}
+	body.Host = host
+	if body.Host != "" {
+		if err := netutil.ValidateDeviceHost(body.Host); err != nil {
+			writeError(w, http.StatusBadRequest, "host: "+err.Error())
+			return
+		}
+	}
+	if body.SNMPVersion == "" {
+		body.SNMPVersion = "v2c"
 	}
 	if !isSNMPCommunityMode(body.SNMPVersion) && body.SNMPVersion != "v3" {
 		writeError(w, http.StatusBadRequest, "snmp_version должен быть v1, v2c или v3")
 		return
 	}
-	if isSNMPCommunityMode(body.SNMPVersion) && (body.Community == nil || strings.TrimSpace(*body.Community) == "") {
-		writeError(w, http.StatusBadRequest, "для v1/v2c нужен community")
-		return
+	if body.Host == "" {
+		if !isSNMPCommunityMode(body.SNMPVersion) {
+			body.SNMPVersion = "v2c"
+		}
+		if body.Community == nil || strings.TrimSpace(*body.Community) == "" {
+			c := "public"
+			body.Community = &c
+		}
+	} else {
+		if isSNMPCommunityMode(body.SNMPVersion) && (body.Community == nil || strings.TrimSpace(*body.Community) == "") {
+			writeError(w, http.StatusBadRequest, "для v1/v2c нужен community")
+			return
+		}
 	}
 	if body.SNMPVersion == "v3" && (body.V3User == nil || strings.TrimSpace(*body.V3User) == "") {
 		writeError(w, http.StatusBadRequest, "для v3 нужен v3_user")
@@ -133,6 +156,10 @@ func (s *Server) handleCreateDevice(w http.ResponseWriter, r *http.Request) {
 			locPtr = &t
 		}
 	}
+	var chassisPtr *string
+	if chassis != "" {
+		chassisPtr = &chassis
+	}
 
 	id, err := s.st.CreateDevice(r.Context(), store.CreateDeviceInput{
 		Name:                body.Name,
@@ -148,6 +175,7 @@ func (s *Server) handleCreateDevice(w http.ResponseWriter, r *http.Request) {
 		V3PrivPass:          body.V3PrivPass,
 		V3EngineID:          body.V3EngineID,
 		PollIntervalSeconds: body.PollIntervalSeconds,
+		ChassisMAC:          chassisPtr,
 	})
 	if err != nil {
 		if dup, ok := store.IsDuplicateIdentity(err); ok {
@@ -401,13 +429,13 @@ func (s *Server) handleGetNotifications(w http.ResponseWriter, r *http.Request) 
 }
 
 type testEmailBody struct {
-	EmailFrom       *string `json:"email_from"`
-	EmailTo         *string `json:"email_to"`
-	SMTPHost        *string `json:"smtp_host"`
-	SMTPPort        *int    `json:"smtp_port"`
-	SMTPUsername    *string `json:"smtp_username"`
-	SMTPPassword    *string `json:"smtp_password"` // пусто = взять сохранённый
-	SMTPTLSSkipVerify *bool `json:"smtp_tls_skip_verify"`
+	EmailFrom         *string `json:"email_from"`
+	EmailTo           *string `json:"email_to"`
+	SMTPHost          *string `json:"smtp_host"`
+	SMTPPort          *int    `json:"smtp_port"`
+	SMTPUsername      *string `json:"smtp_username"`
+	SMTPPassword      *string `json:"smtp_password"` // пусто = взять сохранённый
+	SMTPTLSSkipVerify *bool   `json:"smtp_tls_skip_verify"`
 }
 
 // handlePostEmailTest шлёт пробное письмо по полям формы (пароль можно не слать — берётся из БД).
@@ -513,31 +541,31 @@ func (s *Server) handlePostEmailTest(w http.ResponseWriter, r *http.Request) {
 }
 
 type patchNotificationsBody struct {
-	WebhookURL           *string `json:"webhook_url"`
-	WebhookEnabled       *bool   `json:"webhook_enabled"`
-	WebhookEventTypes    *string `json:"webhook_event_types"`
-	WebhookSeverities    *string `json:"webhook_severities"`
-	EmailEnabled         *bool   `json:"email_enabled"`
-	EmailFrom            *string `json:"email_from"`
-	EmailTo              *string `json:"email_to"`
-	EmailEventTypes      *string `json:"email_event_types"`
-	EmailSeverities      *string `json:"email_severities"`
-	SMTPHost             *string `json:"smtp_host"`
-	SMTPPort             *int    `json:"smtp_port"`
-	SMTPUsername         *string `json:"smtp_username"`
-	SMTPPassword         *string `json:"smtp_password"`
-	SMTPTLSSkipVerify    *bool   `json:"smtp_tls_skip_verify"`
-	TelegramBotToken     *string `json:"telegram_bot_token"`
-	TelegramChatID       *string `json:"telegram_chat_id"`
-	TelegramEnabled      *bool   `json:"telegram_enabled"`
-	TelegramEventTypes   *string `json:"telegram_event_types"`
-	TelegramSeverities   *string `json:"telegram_severities"`
-	NotifyMaxRetries           *int    `json:"notify_max_retries"`
-	NotifyRetryBackoffMs       *int    `json:"notify_retry_backoff_ms"`
-	IncidentActionEnabled      *bool   `json:"incident_action_enabled"`
-	IncidentActionEventTypes   *string `json:"incident_action_event_types"`
-	IncidentActionDryRun       *bool   `json:"incident_action_dry_run"`
-	IncidentActionCooldownSec  *int    `json:"incident_action_cooldown_seconds"`
+	WebhookURL                *string `json:"webhook_url"`
+	WebhookEnabled            *bool   `json:"webhook_enabled"`
+	WebhookEventTypes         *string `json:"webhook_event_types"`
+	WebhookSeverities         *string `json:"webhook_severities"`
+	EmailEnabled              *bool   `json:"email_enabled"`
+	EmailFrom                 *string `json:"email_from"`
+	EmailTo                   *string `json:"email_to"`
+	EmailEventTypes           *string `json:"email_event_types"`
+	EmailSeverities           *string `json:"email_severities"`
+	SMTPHost                  *string `json:"smtp_host"`
+	SMTPPort                  *int    `json:"smtp_port"`
+	SMTPUsername              *string `json:"smtp_username"`
+	SMTPPassword              *string `json:"smtp_password"`
+	SMTPTLSSkipVerify         *bool   `json:"smtp_tls_skip_verify"`
+	TelegramBotToken          *string `json:"telegram_bot_token"`
+	TelegramChatID            *string `json:"telegram_chat_id"`
+	TelegramEnabled           *bool   `json:"telegram_enabled"`
+	TelegramEventTypes        *string `json:"telegram_event_types"`
+	TelegramSeverities        *string `json:"telegram_severities"`
+	NotifyMaxRetries          *int    `json:"notify_max_retries"`
+	NotifyRetryBackoffMs      *int    `json:"notify_retry_backoff_ms"`
+	IncidentActionEnabled     *bool   `json:"incident_action_enabled"`
+	IncidentActionEventTypes  *string `json:"incident_action_event_types"`
+	IncidentActionDryRun      *bool   `json:"incident_action_dry_run"`
+	IncidentActionCooldownSec *int    `json:"incident_action_cooldown_seconds"`
 }
 
 func (s *Server) handlePatchNotifications(w http.ResponseWriter, r *http.Request) {
@@ -761,31 +789,31 @@ func (s *Server) handlePatchNotifications(w http.ResponseWriter, r *http.Request
 		incCD = *body.IncidentActionCooldownSec
 	}
 	next := store.NotificationSettings{
-		WebhookURL:                     url,
-		WebhookEnabled:                 en,
-		WebhookEventTypes:              whTypes,
-		WebhookSeverities:              whSev,
-		EmailEnabled:                   emailEn,
-		EmailFrom:                      emailFrom,
-		EmailTo:                        emailTo,
-		EmailEventTypes:                emailTypes,
-		EmailSeverities:                emailSev,
-		SMTPHost:                       smtpHost,
-		SMTPPort:                       smtpPort,
-		SMTPUsername:                   smtpUser,
-		SMTPPassword:                   smtpPass,
-		SMTPTLSSkipVerify:              smtpTLSSkip,
-		TelegramBotToken:               tok,
-		TelegramChatID:                 chat,
-		TelegramEnabled:                tgEn,
-		TelegramEventTypes:             tgTypes,
-		TelegramSeverities:             tgSev,
-		NotifyMaxRetries:               maxRetries,
-		NotifyRetryBackoffMs:           backoffMs,
-		IncidentActionEnabled:          incEn,
-		IncidentActionEventTypes:       incTypes,
-		IncidentActionDryRun:           incDry,
-		IncidentActionCooldownSeconds:   incCD,
+		WebhookURL:                    url,
+		WebhookEnabled:                en,
+		WebhookEventTypes:             whTypes,
+		WebhookSeverities:             whSev,
+		EmailEnabled:                  emailEn,
+		EmailFrom:                     emailFrom,
+		EmailTo:                       emailTo,
+		EmailEventTypes:               emailTypes,
+		EmailSeverities:               emailSev,
+		SMTPHost:                      smtpHost,
+		SMTPPort:                      smtpPort,
+		SMTPUsername:                  smtpUser,
+		SMTPPassword:                  smtpPass,
+		SMTPTLSSkipVerify:             smtpTLSSkip,
+		TelegramBotToken:              tok,
+		TelegramChatID:                chat,
+		TelegramEnabled:               tgEn,
+		TelegramEventTypes:            tgTypes,
+		TelegramSeverities:            tgSev,
+		NotifyMaxRetries:              maxRetries,
+		NotifyRetryBackoffMs:          backoffMs,
+		IncidentActionEnabled:         incEn,
+		IncidentActionEventTypes:      incTypes,
+		IncidentActionDryRun:          incDry,
+		IncidentActionCooldownSeconds: incCD,
 	}
 	if err := s.st.UpsertNotificationSettings(r.Context(), next); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -826,10 +854,10 @@ func (s *Server) handleGetUISPSettings(w http.ResponseWriter, r *http.Request) {
 }
 
 type patchUISPBody struct {
-	Enabled          *bool   `json:"enabled"`
-	BaseURL          *string `json:"base_url"`
-	APIToken         *string `json:"api_token"`
-	ImportCommunity  *string `json:"import_community"`
+	Enabled         *bool   `json:"enabled"`
+	BaseURL         *string `json:"base_url"`
+	APIToken        *string `json:"api_token"`
+	ImportCommunity *string `json:"import_community"`
 }
 
 func (s *Server) handlePatchUISPSettings(w http.ResponseWriter, r *http.Request) {

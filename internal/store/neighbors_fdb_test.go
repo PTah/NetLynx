@@ -72,6 +72,25 @@ func TestFdbTopoLinkEligible(t *testing.T) {
 	if fdbTopoLinkEligible("trunk", DeviceCategoryMFU) {
 		t.Fatal("trunk must not link MFU/PC from VLAN flood")
 	}
+	if !fdbTopoLinkEligible("trunk", "nas") {
+		t.Fatal("trunk bond should link NAS")
+	}
+	if !fdbTopoLinkEligible("trunk", DeviceCategoryServer) {
+		t.Fatal("trunk bond should link server")
+	}
+	if fdbTopoLinkEligible("trunk", DeviceCategorySwitch) {
+		t.Fatal("trunk must not FDB-link switch")
+	}
+}
+
+func TestFdbTopoPortEligibleQuietBond(t *testing.T) {
+	// Port 0/4 Olbox Bond: trunk, 0 AP, few MACs.
+	if !fdbTopoPortEligible("trunk", 2, 0, 1, 0) {
+		t.Fatal("quiet trunk/bond without AP should be eligible")
+	}
+	if fdbAPLinkScore("trunk", 2, 0, 1, 0) < fdbAPLinkMinTrunkScore {
+		t.Fatal("quiet bond trunk should score above min")
+	}
 }
 
 func TestInventoryStatsByPortAPOnly(t *testing.T) {

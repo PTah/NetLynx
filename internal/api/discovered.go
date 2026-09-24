@@ -1,4 +1,4 @@
-﻿package api
+package api
 
 import (
 	"encoding/json"
@@ -205,6 +205,11 @@ func (s *Server) handlePromoteDiscovered(w http.ResponseWriter, r *http.Request)
 	if mac := store.DiscoveredChassisMAC(d); mac != "" {
 		chassis = &mac
 	}
+	if chassis == nil {
+		if _, macFromHost := store.SplitHostOrMAC(strings.TrimSpace(body.Host)); macFromHost != "" {
+			chassis = &macFromHost
+		}
+	}
 	deviceID, err := s.st.CreateDevice(r.Context(), store.CreateDeviceInput{
 		Name:                name,
 		Host:                pd.Host,
@@ -255,6 +260,9 @@ func pollDeviceFromDiscoveredBody(d *store.DiscoveredDevice, body discoveredSNMP
 	host := strings.TrimSpace(body.Host)
 	if host == "" {
 		host = store.SuggestDiscoveredHost(d)
+	}
+	if _, macFromHost := store.SplitHostOrMAC(host); macFromHost != "" {
+		host = ""
 	}
 	if host == "" && requireHost {
 		return store.PollDevice{}, "host обязателен (mgmt addr неизвестен — укажите вручную)"

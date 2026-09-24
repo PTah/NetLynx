@@ -1,7 +1,8 @@
 [Unit]
 Description=NetLynx SNMP monitoring service
-After=network-online.target
-Wants=network-online.target
+# docker поднимает postgres (compose restart: unless-stopped); без After= возможна гонка → краткий restart-loop.
+After=network-online.target docker.service
+Wants=network-online.target docker.service
 
 [Service]
 Type=simple

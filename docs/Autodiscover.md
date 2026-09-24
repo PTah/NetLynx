@@ -1,4 +1,6 @@
-# Autodiscover устройств на портах (LLDP / CDP)
+﻿# Autodiscover устройств на портах (LLDP / CDP)
+
+Как NetLynx **опрашивает** свитчи и **пересобирает** кэш графа (в т.ч. «ночной» rebuild в 3:00) — отдельно: [Polling-and-Topology-Cache.md](Polling-and-Topology-Cache.md).
 
 ## Что нужно на коммутаторах
 
@@ -115,6 +117,8 @@ Enable-NetAdapterBinding -Name "Ethernet" -ComponentID ms_rspndr
 Если `ms_lldp` нет в списке — в «Свойства» сетевого подключения включите **Microsoft LLDP Protocol Driver** (и при наличии **Link-Layer Topology Discovery** Mapper/Responder).
 
 На **коммутаторе** после этого в `show lldp remote-device` / в NetLynx в колонке соседа должен появиться хост (имя Windows / chassis). Без LLDP на ПК свитч часто показывает только MAC в FDB, без нормального sysName в LLDP.
+
+**Важно (Windows):** драйвер Microsoft LLDP часто шлёт только chassis MAC **без sysName и без management address**. NetLynx с **0.12.6** заполняет `chassis_mac` узла из SNMP `ifPhysAddress` (по IP хоста) и/или из ARP свича, а пустой LLDP sysName подставляет из inventory — иначе линк на карте не склеивается.
 
 ### Linux — SNMP (`snmpd`)
 

@@ -389,20 +389,24 @@ func fdbAPLinkScore(role string, macCount, apCount, invCount, maxSibling int) in
 	case "access":
 		return 1000000 + macCount
 	case "trunk":
-		if apCount != fdbTopoMaxAPsOnTrunk {
-			return -1
+		if apCount == fdbTopoMaxAPsOnTrunk {
+			if !trunkAPUplinkLikely(macCount, apCount, invCount, maxSibling) {
+				return -1
+			}
+			if macCount <= fdbTopoMaxMACsOnPort {
+				return 1000000 + (fdbTopoMaxMACsOnPort - macCount)
+			}
+			nonInv := macCount - invCount
+			if nonInv < 0 {
+				nonInv = 0
+			}
+			return macCount*100 + nonInv*50 - maxSibling*5
 		}
-		if !trunkAPUplinkLikely(macCount, apCount, invCount, maxSibling) {
-			return -1
+		// Bond/LACP к NAS/серверу: 0 AP, мало MAC.
+		if trunkQuietEdgeLikely(macCount, apCount) {
+			return 900000 + (fdbTopoMaxMACsOnPort - macCount)
 		}
-		if macCount <= fdbTopoMaxMACsOnPort {
-			return 1000000 + (fdbTopoMaxMACsOnPort - macCount)
-		}
-		nonInv := macCount - invCount
-		if nonInv < 0 {
-			nonInv = 0
-		}
-		return macCount*100 + nonInv*50 - maxSibling*5
+		return -1
 	default:
 		return -1
 	}
@@ -465,6 +469,11 @@ func maxSiblingTrunkAPCount(apDeviceCount map[int]int, portRole map[int]string, 
 	return n
 }
 
+// trunkQuietEdgeLikely — trunk/bond к одному edge-устройству (NAS/сервер): мало MAC, без AP.
+func trunkQuietEdgeLikely(portMACCount, apDeviceCount int) bool {
+	return apDeviceCount == 0 && portMACCount > 0 && portMACCount <= fdbTopoMaxMACsOnPort
+}
+
 // trunkAPUplinkLikely — trunk с одной AP: uplink edge (мало MAC) vs VLAN-flood на core (XG).
 func trunkAPUplinkLikely(portMACCount, apDeviceCount, inventoryMACCount, maxSiblingTrunkAP int) bool {
 	if apDeviceCount != fdbTopoMaxAPsOnTrunk {
@@ -487,7 +496,7 @@ func trunkAPUplinkLikely(portMACCount, apDeviceCount, inventoryMACCount, maxSibl
 	return portMACCount >= fdbTopoMinMACsQuietAPTrunk && portMACCount <= fdbTopoMinMACsQuietAPTrunk*4
 }
 
-// fdbTopoPortEligible — порт подходит для FDB→топология (access или trunk к AP).
+// fdbTopoPortEligible — порт подходит для FDB→топология (access или trunk к AP/NAS-bond).
 func fdbTopoPortEligible(role string, portMACCount, apDeviceCount, inventoryMACCount, maxSiblingTrunkAP int) bool {
 	role = strings.ToLower(strings.TrimSpace(role))
 	if role == "ignore" || portMACCount <= 0 {
@@ -497,9 +506,25 @@ func fdbTopoPortEligible(role string, portMACCount, apDeviceCount, inventoryMACC
 	case "access":
 		return portMACCount <= fdbTopoMaxMACsOnPort
 	case "trunk":
-		return trunkAPUplinkLikely(portMACCount, apDeviceCount, inventoryMACCount, maxSiblingTrunkAP)
+		return trunkAPUplinkLikely(portMACCount, apDeviceCount, inventoryMACCount, maxSiblingTrunkAP) ||
+			trunkQuietEdgeLikely(portMACCount, apDeviceCount)
 	default:
 		return portMACCount <= fdbTopoMaxMACsOnPort
+	}
+}
+
+// fdbTopoTrunkRemoteOK — кого можно вешать FDB-линком на trunk.
+// AP (UniFi uplink); NAS/server/other/custom — bond; не switch/router и не «шум» VLAN (PC/МФУ/телефон).
+func fdbTopoTrunkRemoteOK(remoteCategory string) bool {
+	cat := NormalizeDeviceCategory(remoteCategory)
+	switch cat {
+	case DeviceCategoryAP, DeviceCategoryServer, DeviceCategoryOther:
+		return true
+	case DeviceCategorySwitch, DeviceCategoryRouter,
+		DeviceCategoryComputer, DeviceCategoryPhone, DeviceCategoryMFU, DeviceCategoryCamera:
+		return false
+	default:
+		return cat != "" // nas, storage, …
 	}
 }
 
@@ -510,10 +535,47 @@ func fdbTopoLinkEligible(role, remoteCategory string) bool {
 	case "access":
 		return true
 	case "trunk":
-		return NormalizeDeviceCategory(remoteCategory) == DeviceCategoryAP
+		return fdbTopoTrunkRemoteOK(remoteCategory)
 	default:
 		return NormalizeDeviceCategory(remoteCategory) == DeviceCategoryAP
 	}
+}
+
+// discoveryNeighborHints — live LLDP/CDP на свитче: chassis hex и порты с аплинком на switch/router.
+func (s *Store) discoveryNeighborHints(ctx context.Context, switchID int64, chassis map[string]ChassisEndpoint) (discChassis map[string]bool, infraPorts map[int]bool, err error) {
+	discChassis = map[string]bool{}
+	infraPorts = map[int]bool{}
+	rows, err := s.pool.Query(ctx, `
+		SELECT if_index, remote_chassis_id FROM port_neighbors
+		WHERE device_id = $1 AND stale = false
+		  AND lower(protocol) IN ('lldp', 'cdp')`, switchID)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var ifi int
+		var ch *string
+		if err := rows.Scan(&ifi, &ch); err != nil {
+			return nil, nil, err
+		}
+		if ch == nil {
+			continue
+		}
+		mac, ok := FormatFullMAC(*ch)
+		if !ok {
+			continue
+		}
+		hex := macHexDigits(mac)
+		discChassis[hex] = true
+		if ep, ok := chassis[hex]; ok {
+			cat := NormalizeDeviceCategory(ep.Category)
+			if cat == DeviceCategorySwitch || cat == DeviceCategoryRouter {
+				infraPorts[ifi] = true
+			}
+		}
+	}
+	return discChassis, infraPorts, rows.Err()
 }
 
 // SyncFDBTopologyNeighbors — FDB MAC → protocol=fdb на порту свитча.
@@ -533,11 +595,19 @@ func (s *Store) SyncFDBTopologyNeighbors(
 	if at.IsZero() {
 		at = time.Now().UTC()
 	}
+	discChassis, infraPorts, err := s.discoveryNeighborHints(ctx, switchID, chassis)
+	if err != nil {
+		return 0, err
+	}
 	inv := inventoryStatsByPort(entries, chassis)
 	present := make(map[string]int) // hex → ifIndex on this switch (eligible ports)
 	for mac, ent := range entries {
 		ifIndex := ent.IfIndex
 		if ifIndex <= 0 {
+			continue
+		}
+		// На порту уже LLDP/CDP к свитчу/роутеру — MAC за аплинком, не прямой линк.
+		if infraPorts[ifIndex] {
 			continue
 		}
 		sibling := maxSiblingTrunkAPCount(inv.apDeviceCount, portRole, ifIndex)
@@ -551,6 +621,10 @@ func (s *Store) SyncFDBTopologyNeighbors(
 		hex := macHexDigits(macNorm)
 		ep, ok := chassis[hex]
 		if !ok || ep.ID == switchID {
+			continue
+		}
+		// Уже есть LLDP/CDP к этому chassis — FDB ghost на другом порту не нужен.
+		if discChassis[hex] {
 			continue
 		}
 		if !fdbTopoLinkEligible(portRole[ifIndex], ep.Category) {
@@ -634,7 +708,11 @@ func (s *Store) SyncFDBTopologyNeighbors(
 		}
 		curIf, seen := present[hex]
 		if !seen {
-			continue // offline / ещё не в FDB — sticky
+			// Специально не создавали FDB (есть LLDP к этому chassis / порт — аплинк на switch).
+			if discChassis[hex] || infraPorts[ifi] {
+				addStale(ifi, ri)
+			}
+			continue // иначе sticky offline
 		}
 		if curIf != ifi {
 			addStale(ifi, ri)

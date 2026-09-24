@@ -1,4 +1,4 @@
-﻿import type { CSSProperties } from "react";
+import type { CSSProperties } from "react";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { apiDelete, apiGet, apiPost } from "../api";
@@ -18,6 +18,7 @@ import {
   type CategoryFilterState,
   type DeviceCategory,
   deviceCategoryLabel,
+  isPrinterCategory,
   normalizeDeviceCategory,
   readCategoryFilter,
   writeCategoryFilter,
@@ -26,6 +27,8 @@ import { DeviceCategoryIcon } from "../components/DeviceCategoryIcon";
 import { useDeviceCategories } from "../hooks/useDeviceCategories";
 import { isDeviceOnline } from "../deviceOnline";
 import { formatMacDisplay, macVendorLabel } from "../macUtil";
+import { formatPageCount, formatTonerPct, tonerLetter, tonerSwatch } from "../printerMetrics";
+import { alertDeviceCreateError } from "../apiError";
 
 type SnmpTestResult = {
   ok: boolean;
@@ -103,9 +106,31 @@ function sortIndicator(active: boolean, dir: SortDir): string {
   return dir === "asc" ? " ▲" : " ▼";
 }
 
+function TonerRemainCell({
+  toners,
+  muted,
+}: {
+  toners?: Device["last_toners"];
+  muted: string;
+}) {
+  if (!toners?.length) return <span style={{ color: muted }}>—</span>;
+  return (
+    <span style={{ display: "inline-flex", flexWrap: "wrap", gap: "0.35rem 0.65rem" }}>
+      {toners.map((t, i) => {
+        const low = t.pct != null && t.pct < 10;
+        return (
+          <span key={`${t.key}-${i}`} title={t.description || t.label} style={{ color: low ? "#f88" : undefined }}>
+            <span style={{ color: tonerSwatch(t.key), fontWeight: 700 }}>{tonerLetter(t.key)}</span>{" "}
+            {formatTonerPct(t)}
+          </span>
+        );
+      })}
+    </span>
+  );
+}
+
 export default function Devices() {
   const { categories } = useDeviceCategories();
-  const { colgroup, ResizeHandle } = usePersistedColumnWidths("devices-list", [52, 140, 130, 110, 220, 72, 80, 150, 100, 88]);
   const [list, setList] = useState<Device[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
@@ -154,6 +179,19 @@ export default function Devices() {
     });
     return rows;
   }, [list, sortCol, sortDir, categoryFilter]);
+
+  const mfuOnlyFilter = useMemo(() => {
+    const enabled = categories.filter((c) => categoryFilter[c.id] !== false);
+    return enabled.length > 0 && enabled.every((c) => isPrinterCategory(c.id));
+  }, [categories, categoryFilter]);
+
+  const colDefaults = mfuOnlyFilter
+    ? [52, 140, 130, 110, 220, 100, 170, 72, 80, 150, 100, 88]
+    : [52, 140, 130, 110, 220, 72, 80, 150, 100, 88];
+  const { colgroup, ResizeHandle } = usePersistedColumnWidths(
+    mfuOnlyFilter ? "devices-list-mfu" : "devices-list",
+    colDefaults,
+  );
 
   const toggleCategoryFilter = (id: DeviceCategory) => {
     setCategoryFilter((prev) => {
@@ -338,7 +376,10 @@ export default function Devices() {
         setV3PrivPass("");
         reload();
       })
-      .catch((e: Error) => setErr(e.message));
+      .catch((e: Error) => {
+        alertDeviceCreateError(e);
+        setErr(e.message);
+      });
   };
 
   return (
@@ -407,9 +448,13 @@ export default function Devices() {
           <input value={name} onChange={(e) => setName(e.target.value)} required />
         </label>
         <label>
-          IP адрес
+          IP адрес (необязательно)
           <br />
-          <input value={host} onChange={(e) => setHost(e.target.value)} required />
+          <input
+            value={host}
+            onChange={(e) => setHost(e.target.value)}
+            placeholder="IP или MAC"
+          />
         </label>
         <label>
           Расположение (опционально)
@@ -639,25 +684,37 @@ export default function Devices() {
               </button>
               <ResizeHandle colIndex={4} />
             </th>
+            {mfuOnlyFilter && (
+              <>
+                <th style={{ userSelect: "none" }}>
+                  Страниц всего
+                  <ResizeHandle colIndex={5} />
+                </th>
+                <th style={{ userSelect: "none" }}>
+                  Остаток тонера
+                  <ResizeHandle colIndex={6} />
+                </th>
+              </>
+            )}
             <th style={{ userSelect: "none" }}>
               SNMP
-              <ResizeHandle colIndex={5} />
+              <ResizeHandle colIndex={mfuOnlyFilter ? 7 : 5} />
             </th>
             <th style={{ userSelect: "none" }}>
               Опрос (с)
-              <ResizeHandle colIndex={6} />
+              <ResizeHandle colIndex={mfuOnlyFilter ? 8 : 6} />
             </th>
             <th style={{ userSelect: "none" }}>
               SNMP / ping
-              <ResizeHandle colIndex={7} />
+              <ResizeHandle colIndex={mfuOnlyFilter ? 9 : 7} />
             </th>
             <th style={{ userSelect: "none" }}>
               Проверка SNMP
-              <ResizeHandle colIndex={8} />
+              <ResizeHandle colIndex={mfuOnlyFilter ? 10 : 8} />
             </th>
             <th style={{ userSelect: "none" }}>
               Удалить
-              <ResizeHandle colIndex={9} />
+              <ResizeHandle colIndex={mfuOnlyFilter ? 11 : 9} />
             </th>
           </tr>
         </thead>
@@ -696,6 +753,16 @@ export default function Devices() {
                 <td style={{ fontSize: "0.9rem", overflow: "hidden", textOverflow: "ellipsis", ...dim }}>
                   {d.location?.trim() ? d.location : "—"}
                 </td>
+                {mfuOnlyFilter && (
+                  <>
+                    <td style={{ fontVariantNumeric: "tabular-nums", ...dim }}>
+                      {formatPageCount(d.last_page_count)}
+                    </td>
+                    <td style={{ fontSize: "0.85rem", lineHeight: 1.35, ...dim }}>
+                      <TonerRemainCell toners={d.last_toners} muted={muted} />
+                    </td>
+                  </>
+                )}
                 <td style={dim}>{d.snmp_version}</td>
                 <td style={dim}>{d.poll_interval_seconds}</td>
                 <td style={{ fontSize: "0.9rem", lineHeight: 1.35, ...dim }}>

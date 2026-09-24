@@ -49,16 +49,9 @@ func (e *Engine) shouldTrackMAC(ctx context.Context, mac string) bool {
 		e.rememberWiFiMAC(norm)
 		return false
 	}
-	if store.IsLocallyAdministeredMAC(norm) {
-		hasARP, arpErr := e.st.MACHasARP(ctx, norm)
-		if arpErr != nil {
-			e.log.Warn("wifi mac arp presence", "mac", norm, "err", arpErr)
-			return false
-		}
-		if !hasARP {
-			return false
-		}
-	}
+	// LAA без ARP раньше отсекали «шумные» privacy MAC — но это глотало QEMU/KVM
+	// (52:54:…) без ARP, в т.ч. realtime syslog MAC_FLAPPING с Eltex.
+	// WiFi по-прежнему режется префиксом/списком выше.
 	return true
 }
 

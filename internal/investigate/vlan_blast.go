@@ -10,8 +10,23 @@ import (
 	"git.kalinamall.ru/PapaTramp/netlynx/internal/swcfg"
 )
 
-// Глубина обхода нижестоящих с VLAN (Phase 1).
-const VLANBlastMaxDepth = 4
+// Глубина обхода нижестоящих с VLAN (fallback, если MaxDepth не задан).
+// 0 в конфиге = без лимита (см. EffectiveVLANBlastMaxDepth).
+const DefaultVLANBlastMaxDepth = 32
+
+// VLANBlastMaxDepth — устаревший алиас константы (совместимость вызовов).
+const VLANBlastMaxDepth = DefaultVLANBlastMaxDepth
+
+// EffectiveVLANBlastMaxDepth нормализует depth: <0 → default 32; 0 → «без лимита» (большой cap).
+func EffectiveVLANBlastMaxDepth(configured int) int {
+	if configured < 0 {
+		return DefaultVLANBlastMaxDepth
+	}
+	if configured == 0 {
+		return 1_000_000
+	}
+	return configured
+}
 
 // Направления линка для delete-impact / blast-radius.
 const (
@@ -470,8 +485,10 @@ func WalkDownWithVLAN(adj map[int64][]int64, start, exclude int64, maxDepth int,
 // AnalyzeVLANDeleteBlast — blast-radius: топология + VLAN на линке + потомки + Phase2 (обход/FDB).
 func AnalyzeVLANDeleteBlast(in VLANBlastInput) VLANBlastResult {
 	maxDepth := in.MaxDepth
-	if maxDepth <= 0 {
-		maxDepth = VLANBlastMaxDepth
+	if maxDepth < 0 {
+		maxDepth = DefaultVLANBlastMaxDepth
+	} else {
+		maxDepth = EffectiveVLANBlastMaxDepth(maxDepth)
 	}
 	res := VLANBlastResult{
 		RootDeviceID: in.RootID,
@@ -856,12 +873,57 @@ func collectVLANBlastFDBClients(in VLANBlastInput, downIf map[int]struct{}) []VL
 
 func vlanBlastEmptySummary(towardCore int) string {
 	if towardCore > 0 {
-		return "Риск транзита вниз не найден: удаляемые VLAN есть только у соседей к ядру (вверх), не у нижестоящих."
+		return "Риск вниз не найден: удаляемые VLAN есть только у соседей к ядру (вверх), не у нижестоящих."
 	}
-	return "Риск транзита вниз не найден: у LLDP/CDP-соседей ниже по топологии этих VLAN нет (или VLAN не идёт по trunk к ним)."
+	return "Риск вниз не найден: у LLDP/CDP-соседей ниже по топологии этих VLAN нет (или VLAN не идёт по trunk к ним)."
 }
 
-// VLANBlastSummary — человекочитаемое резюме.
+// formatNamedList — «A, B, C» или «A, B, C… (+N)».
+func formatNamedList(names []string, maxShow int) string {
+	if maxShow < 1 {
+		maxShow = 12
+	}
+	if len(names) == 0 {
+		return ""
+	}
+	if len(names) <= maxShow {
+		return strings.Join(names, ", ")
+	}
+	shown := names[:maxShow]
+	return fmt.Sprintf("%s… (+%d)", strings.Join(shown, ", "), len(names)-maxShow)
+}
+
+func uniqueHitDeviceNames(hits []VLANBlastHit) []string {
+	seen := map[int64]struct{}{}
+	names := make([]string, 0)
+	for _, h := range hits {
+		id := h.NeighborDeviceID
+		if id <= 0 {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		nm := strings.TrimSpace(h.NeighborName)
+		if nm == "" {
+			nm = fmt.Sprintf("#%d", id)
+		}
+		names = append(names, nm)
+	}
+	sort.Strings(names)
+	return names
+}
+
+func formatVLANIDList(ids []int) string {
+	parts := make([]string, len(ids))
+	for i, id := range ids {
+		parts[i] = strconv.Itoa(id)
+	}
+	return strings.Join(parts, ", ")
+}
+
+// VLANBlastSummary — человекочитаемое резюме с именами свитчей (с любого узла, не только root).
 func VLANBlastSummary(hits []VLANBlastHit, towardCoreSkipped, affectedCount, redundantCount, fdbCount, mgmtCount, gwCount int) string {
 	if len(hits) == 0 && mgmtCount == 0 && gwCount == 0 {
 		s := vlanBlastEmptySummary(towardCoreSkipped)
@@ -870,24 +932,11 @@ func VLANBlastSummary(hits []VLANBlastHit, towardCoreSkipped, affectedCount, red
 		}
 		return s
 	}
-	if mgmtCount > 0 {
-		msg := fmt.Sprintf("Критично: удаляется management VLAN этого свитча (SVI = host), рисков mgmt: %d.", mgmtCount)
-		if affectedCount > 0 {
-			msg += fmt.Sprintf(" Также затронуто нижестоящих устройств: %d.", affectedCount)
-		}
-		if gwCount > 0 {
-			msg += fmt.Sprintf(" Шлюзов/L3 с SVI: %d.", gwCount)
-		}
-		return msg
-	}
+
 	vlans := map[int]struct{}{}
-	direct := map[int64]struct{}{}
 	critical := 0
 	for _, h := range hits {
 		vlans[h.VLANID] = struct{}{}
-		if h.Hop <= 1 {
-			direct[h.NeighborDeviceID] = struct{}{}
-		}
 		if !h.Redundant {
 			critical++
 		}
@@ -897,32 +946,47 @@ func VLANBlastSummary(hits []VLANBlastHit, towardCoreSkipped, affectedCount, red
 		ids = append(ids, id)
 	}
 	sort.Ints(ids)
-	parts := make([]string, len(ids))
-	for i, id := range ids {
-		parts[i] = strconv.Itoa(id)
+	vlanCSV := formatVLANIDList(ids)
+	switchNames := uniqueHitDeviceNames(hits)
+	nameList := formatNamedList(switchNames, 16)
+
+	if mgmtCount > 0 {
+		msg := fmt.Sprintf("Критично: удаляется management VLAN этого свитча (SVI = host).")
+		if nameList != "" {
+			msg += fmt.Sprintf(" Также от этих VLAN могут отключиться свичи: %s.", nameList)
+		} else if affectedCount > 0 {
+			msg += fmt.Sprintf(" Затронуто нижестоящих: %d.", affectedCount)
+		}
+		if gwCount > 0 {
+			msg += fmt.Sprintf(" Шлюзов/L3 с SVI: %d.", gwCount)
+		}
+		return msg
 	}
-	vlanCSV := strings.Join(parts, ", ")
+
 	if vlanCSV == "" && gwCount > 0 {
 		return fmt.Sprintf("Удаляемые VLAN имеют SVI на L3/роутере (шлюзов: %d) — риск маршрутизации сегмента.", gwCount)
 	}
-	nAff := affectedCount
-	if nAff == 0 {
-		nAff = len(direct)
-	}
-	msg := fmt.Sprintf(
-		"Удаление может отрезать транзит вниз по топологии: VLAN %s — затронуто устройств: %d (прямых соседей: %d).",
-		vlanCSV, nAff, len(direct),
-	)
-	if len(hits) == 0 {
-		msg = fmt.Sprintf("VLAN %s.", vlanCSV)
-	}
-	if redundantCount > 0 && critical == 0 && len(hits) > 0 {
-		msg = fmt.Sprintf(
-			"Нижестоящие с VLAN %s есть, но у всех найден путь к ядру в обход этого свитча (redundant=%d) — риск транзита снижен.",
-			vlanCSV, redundantCount,
-		)
-	} else if redundantCount > 0 && len(hits) > 0 {
-		msg += fmt.Sprintf(" С обходом к ядру: %d из %d.", redundantCount, len(hits))
+
+	var msg string
+	if nameList != "" {
+		if redundantCount > 0 && critical == 0 {
+			msg = fmt.Sprintf(
+				"Удалив VLAN %s с этого свитча, вы затронете свичи %s — но у всех найден обход к ядру (риск снижен).",
+				vlanCSV, nameList,
+			)
+		} else {
+			msg = fmt.Sprintf(
+				"Удалив VLAN %s с этого свитча, вы отключите от этих VLAN свичи: %s.",
+				vlanCSV, nameList,
+			)
+			if redundantCount > 0 {
+				msg += fmt.Sprintf(" У части (%d) есть обход к ядру.", redundantCount)
+			}
+		}
+	} else if vlanCSV != "" {
+		msg = fmt.Sprintf("Удаление VLAN %s может затронуть нижестоящие устройства (%d).", vlanCSV, affectedCount)
+	} else {
+		msg = "Удаление VLAN может затронуть нижестоящие устройства."
 	}
 	if gwCount > 0 {
 		msg += fmt.Sprintf(" Шлюзов/L3 с SVI: %d.", gwCount)

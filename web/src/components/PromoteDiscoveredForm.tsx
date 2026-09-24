@@ -62,14 +62,14 @@ export function PromoteDiscoveredForm({
     >
       <strong>{title}</strong>
       <p style={{ margin: "2px 0 4px", color: "#9aa3b5", fontSize: "0.85rem" }}>
-        Имя и тип обязательны. IP необязателен (другой офис / нет SNMP с сервера) — тогда узел создаётся по MAC
-        из LLDP. Community нужен только если указали IP.
+        Имя обязательно. В первое поле — IP <em>или</em> MAC, если известны. Если на порту нет ни того ни другого
+        (пустой FDB/ARP), оставьте поле пустым: узел появится в списке, адрес допишете в карточке.
       </p>
       <input
         name="promote-host"
         value={values.host}
         onChange={(e) => onChange({ host: e.target.value })}
-        placeholder="Host / IP (необязательно)"
+        placeholder="IP или MAC (необязательно)"
         style={{ width: "100%" }}
       />
       <input
@@ -109,8 +109,8 @@ export function PromoteDiscoveredForm({
       />
       {!values.host.trim() && (
         <p style={{ margin: 0, color: "#c9a227", fontSize: "0.85rem" }}>
-          Mgmt IP неизвестен — узел можно добавить без адреса (по chassis MAC). SNMP/ping с сервера NetLynx
-          работать не будут, пока не укажете IP позже.
+          Без IP и MAC узел всё равно можно сохранить по имени. SNMP/ping с сервера NetLynx заработают после
+          адреса в карточке; линк на топологии — когда появится MAC в FDB.
         </p>
       )}
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>

@@ -102,17 +102,27 @@ func (s *Server) handlePromotePortClient(w http.ResponseWriter, r *http.Request)
 	}
 	mac, errMsg := normalizePortClientMAC(body.MAC)
 	if errMsg != "" {
+		if _, macFromHost := store.SplitHostOrMAC(strings.TrimSpace(body.Host)); macFromHost != "" {
+			mac = macFromHost
+			errMsg = ""
+		} else if strings.TrimSpace(body.MAC) == "" {
+			// Пустой FDB/ARP: узел по имени, без идентификатора на порту.
+			mac = ""
+			errMsg = ""
+		}
+	}
+	if errMsg != "" {
 		writeError(w, http.StatusBadRequest, errMsg)
 		return
 	}
-	seen, err := s.st.HasPortFDBEntry(r.Context(), deviceID, ifIndex, mac)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	if !seen {
-		writeError(w, http.StatusBadRequest, "этот MAC сейчас не виден на порту (FDB)")
-		return
+	inFDB := false
+	if mac != "" {
+		seen, err := s.st.HasPortFDBEntry(r.Context(), deviceID, ifIndex, mac)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		inFDB = seen
 	}
 
 	d := syntheticDiscoveredFromClient(mac, strings.TrimSpace(body.Host))
@@ -146,15 +156,22 @@ func (s *Server) handlePromotePortClient(w http.ResponseWriter, r *http.Request)
 		if name == "" {
 			if pd.Host != "" {
 				name = pd.Host
-			} else {
+			} else if mac != "" {
 				name = mac
+			} else {
+				writeError(w, http.StatusBadRequest, "укажите имя узла (на порту нет MAC и IP)")
+				return
 			}
 		}
 		var locPtr *string
 		if loc := strings.TrimSpace(body.Location); loc != "" {
 			locPtr = &loc
 		}
-		chassis := mac
+		var chassisPtr *string
+		if mac != "" {
+			chassis := mac
+			chassisPtr = &chassis
+		}
 		newID, err = s.st.CreateDevice(r.Context(), store.CreateDeviceInput{
 			Name:                name,
 			Host:                pd.Host,
@@ -169,7 +186,7 @@ func (s *Server) handlePromotePortClient(w http.ResponseWriter, r *http.Request)
 			V3PrivPass:          pd.V3PrivPass,
 			V3EngineID:          pd.V3EngineID,
 			PollIntervalSeconds: pd.PollIntervalSeconds,
-			ChassisMAC:          &chassis,
+			ChassisMAC:          chassisPtr,
 		})
 		if err != nil {
 			if dup, ok := store.IsDuplicateIdentity(err); ok {
@@ -193,9 +210,11 @@ func (s *Server) handlePromotePortClient(w http.ResponseWriter, r *http.Request)
 	} else if existingName != "" {
 		sys = &existingName
 	}
-	if err := s.st.UpsertFDBTopologyNeighbor(r.Context(), deviceID, ifIndex, mac, mgmt, sys, time.Now().UTC()); err != nil {
-		writeError(w, http.StatusInternalServerError, "узел создан, но линк на топологии не записан: "+err.Error())
-		return
+	if inFDB && mac != "" {
+		if err := s.st.UpsertFDBTopologyNeighbor(r.Context(), deviceID, ifIndex, mac, mgmt, sys, time.Now().UTC()); err != nil {
+			writeError(w, http.StatusInternalServerError, "узел создан, но линк на топологии не записан: "+err.Error())
+			return
+		}
 	}
 
 	cat := store.NormalizeDeviceCategory(body.DeviceCategory)
@@ -215,7 +234,7 @@ func (s *Server) handlePromotePortClient(w http.ResponseWriter, r *http.Request)
 		"ok":              true,
 		"id":              newID,
 		"already":         already,
-		"linked":          true,
+		"linked":          inFDB,
 		"mac":             mac,
 		"device_category": cat,
 	})

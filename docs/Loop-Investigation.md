@@ -4,6 +4,8 @@
 
 С **0.9.0** по умолчанию DFS идёт по **topology blast cache** (тот же скелет, что VLAN blast: LLDP+CDP+manual). Если кэш пуст — fallback на live LLDP.
 
+С **0.10.0** тот же кэш — единый скелет для VLAN delete-impact (глубина `VLAN_BLAST_MAX_DEPTH`, default **32**), MAC L2-path, loops, multi-hop shut-impact и `GET /api/v1/topology/path`.
+
 ## Быстрый путь
 
 1. Меню **Петли** (`/investigate/loops`).

@@ -370,7 +370,25 @@ func ParseVLANDatabase(raw string) map[int]string {
 			names[iosVLAN] = unquoteVLANName(strings.TrimSpace(line[len("name"):]))
 		}
 	}
+	// VLAN 1 — default на почти всех Ethernet-свитчах; Cisco/многие CLI не пишут «vlan 1» в show run.
+	if vlanConfigImpliesDefaultVLAN1(raw, names) {
+		if _, ok := names[1]; !ok {
+			names[1] = "default"
+		}
+	}
 	return names
+}
+
+// vlanConfigImpliesDefaultVLAN1 — есть признаки L2/VLAN-конфига → VLAN 1 считаем существующим.
+func vlanConfigImpliesDefaultVLAN1(raw string, names map[int]string) bool {
+	if len(names) > 0 {
+		return true
+	}
+	ll := strings.ToLower(raw)
+	return strings.Contains(ll, "vlan database") ||
+		strings.Contains(ll, "switchport") ||
+		strings.Contains(ll, "vlan pvid") ||
+		strings.Contains(ll, "spanning-tree")
 }
 
 // parseVLANIDNameRest — «10 name Office» / «10 name "Cameras"» (ELTEX MES / HP one-liner).

@@ -1,4 +1,4 @@
-﻿package api
+package api
 
 import (
 	"strings"
@@ -35,6 +35,17 @@ func TestPollDeviceFromDiscoveredBody(t *testing.T) {
 	_, errMsg = pollDeviceFromDiscoveredBody(d, discoveredSNMPBody{SNMPVersion: "v2c"}, true)
 	if errMsg == "" {
 		t.Fatal("expected community required")
+	}
+
+	pd, errMsg = pollDeviceFromDiscoveredBody(&store.DiscoveredDevice{}, discoveredSNMPBody{
+		Name:        "cam-no-addr",
+		SNMPVersion: "v2c",
+	}, false)
+	if errMsg != "" {
+		t.Fatalf("empty host promote: %s", errMsg)
+	}
+	if pd.Host != "" {
+		t.Fatalf("expected empty host, got %q", pd.Host)
 	}
 }
 

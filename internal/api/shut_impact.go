@@ -2,9 +2,11 @@ package api
 
 import (
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 
+	"git.kalinamall.ru/PapaTramp/netlynx/internal/investigate"
 	"git.kalinamall.ru/PapaTramp/netlynx/internal/models"
 	"git.kalinamall.ru/PapaTramp/netlynx/internal/snmp"
 	"git.kalinamall.ru/PapaTramp/netlynx/internal/store"
@@ -147,6 +149,31 @@ func (s *Server) handlePortShutImpact(w http.ResponseWriter, r *http.Request) {
 		warnings = append(warnings, "FDB и LLDP пусты — последствия неизвестны (снимок мог быть пуст).")
 	}
 
+	neighborIDs := make([]int64, 0)
+	seenN := map[int64]struct{}{}
+	for _, ni := range nOut {
+		if ni.RemoteDeviceID == nil || *ni.RemoteDeviceID <= 0 {
+			continue
+		}
+		id := *ni.RemoteDeviceID
+		if _, ok := seenN[id]; ok {
+			continue
+		}
+		seenN[id] = struct{}{}
+		neighborIDs = append(neighborIDs, id)
+	}
+	blastB := investigate.Builder{St: s.st}
+	shutBlast, _ := blastB.BuildShutBlast(r.Context(), deviceID, neighborIDs, s.cfg.VLANBlastMaxDepth)
+	if shutBlast == nil {
+		shutBlast = &investigate.ShutBlastResult{Downstream: []investigate.ShutDownstreamHit{}, CutPaths: []investigate.ShutCutPath{}}
+	}
+	if len(shutBlast.Warnings) > 0 {
+		warnings = append(warnings, shutBlast.Warnings...)
+	}
+	if shutBlast.DownstreamCount > 0 {
+		uplinkSuspected = true
+	}
+
 	severity := "info"
 	if uplinkSuspected {
 		severity = "critical"
@@ -178,23 +205,29 @@ func (s *Server) handlePortShutImpact(w http.ResponseWriter, r *http.Request) {
 		clientOut = append(clientOut, row)
 	}
 
+	summary := shutImpactSummary(macsOnPort, len(nOut), uplinkSuspected, shutBlast)
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"device_id":        deviceID,
-		"device_name":      dev.Name,
-		"device_host":      dev.Host,
-		"if_index":         ifIndex,
-		"if_name":          ifName,
-		"if_descr":         ifDescr,
-		"port_role":        role,
-		"admin_status":     admin,
-		"oper_status":      oper,
-		"macs_on_port":     macsOnPort,
-		"clients":          clientOut,
-		"neighbors":        nOut,
-		"uplink_suspected": uplinkSuspected,
-		"severity":          severity,
-		"warnings":         warnings,
-		"summary":          shutImpactSummary(macsOnPort, len(nOut), uplinkSuspected),
+		"device_id":          deviceID,
+		"device_name":        dev.Name,
+		"device_host":        dev.Host,
+		"if_index":           ifIndex,
+		"if_name":            ifName,
+		"if_descr":           ifDescr,
+		"port_role":          role,
+		"admin_status":       admin,
+		"oper_status":        oper,
+		"macs_on_port":       macsOnPort,
+		"clients":            clientOut,
+		"neighbors":          nOut,
+		"downstream":         shutBlast.Downstream,
+		"downstream_count":   shutBlast.DownstreamCount,
+		"cut_paths":          shutBlast.CutPaths,
+		"topology_source":    shutBlast.TopologySource,
+		"root_device_id":     shutBlast.RootDeviceID,
+		"uplink_suspected":   uplinkSuspected,
+		"severity":            severity,
+		"warnings":           warnings,
+		"summary":            summary,
 	})
 }
 
@@ -208,9 +241,31 @@ func portDisplayDescr(row models.DeviceInterface) string {
 	return strings.TrimSpace(derefStr(row.IfDescr))
 }
 
-func shutImpactSummary(macs, neigh int, uplink bool) string {
+func shutImpactSummary(macs, neigh int, uplink bool, blast *investigate.ShutBlastResult) string {
+	names := make([]string, 0)
+	if blast != nil {
+		for _, d := range blast.Downstream {
+			nm := strings.TrimSpace(d.DeviceName)
+			if nm == "" {
+				nm = "#" + strconv.FormatInt(d.DeviceID, 10)
+			}
+			names = append(names, nm)
+		}
+	}
+	if len(names) > 0 {
+		sort.Strings(names)
+		list := strings.Join(names, ", ")
+		if len(names) > 16 {
+			list = strings.Join(names[:16], ", ") + "…"
+		}
+		msg := "Отключив этот порт, вы можете отрезать от сети свичи: " + list + "."
+		if macs > 0 {
+			msg += " Также " + strconv.Itoa(macs) + " MAC в FDB на порту."
+		}
+		return msg
+	}
 	if uplink {
-		return "Похоже на uplink: shutdown может отрезать свитч или сегмент за ним."
+		return "Похоже на uplink/trunk: shutdown может отрезать свитч или сегмент за ним."
 	}
 	if macs == 0 && neigh == 0 {
 		return "Явных устройств за портом в снимке нет."

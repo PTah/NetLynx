@@ -1,6 +1,9 @@
 package snmp
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+)
 
 func TestNormalizeChassisMAC(t *testing.T) {
 	if got := normalizeChassisMAC("AA-BB-CC-DD-EE-FF"); got != "aa:bb:cc:dd:ee:ff" {
@@ -14,6 +17,33 @@ func TestNormalizeChassisMAC(t *testing.T) {
 	}
 	if got := normalizeChassisMAC(""); got != "" {
 		t.Fatalf("empty: %q", got)
+	}
+}
+
+func TestParseIPv4Host(t *testing.T) {
+	if got := parseIPv4Host("192.168.128.5"); got == nil || got.String() != "192.168.128.5" {
+		t.Fatalf("got %v", got)
+	}
+	if parseIPv4Host("papasha") != nil {
+		t.Fatal("hostname must be nil")
+	}
+	if parseIPv4Host("") != nil {
+		t.Fatal("empty")
+	}
+	if parseIPv4Host("2001:db8::1") != nil {
+		t.Fatal("IPv6 not supported for this fallback")
+	}
+}
+
+func TestPhysAddressOIDForHost(t *testing.T) {
+	ip := parseIPv4Host("192.168.128.5")
+	if ip == nil {
+		t.Fatal("parse")
+	}
+	want := "1.3.6.1.2.1.4.20.1.2.192.168.128.5"
+	got := fmt.Sprintf("%s.%d.%d.%d.%d", oidIpAdEntIfIndex, ip[0], ip[1], ip[2], ip[3])
+	if got != want {
+		t.Fatalf("got %q want %q", got, want)
 	}
 }
 

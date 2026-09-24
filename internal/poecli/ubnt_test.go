@@ -17,7 +17,7 @@ func TestSelectSSHVendorProfile(t *testing.T) {
 		t.Fatalf("unexpected cisco profile: %+v", p)
 	}
 	p = selectSSHVendorProfile("SNR-S2989G-48TX-POE Device, NAG LLC")
-	if p.name != "snr" || p.privilegeCmd != "" {
+	if p.name != "snr" || p.privilegeCmd != "enable" || p.needsEnablePass {
 		t.Fatalf("unexpected snr profile: %+v", p)
 	}
 }

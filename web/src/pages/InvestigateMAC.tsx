@@ -138,6 +138,15 @@ type ShutImpact = {
   macs_on_port: number;
   clients: ShutImpactClient[];
   neighbors: ShutImpactNeighbor[];
+  downstream?: {
+    device_id: number;
+    device_name: string;
+    device_host?: string;
+    hop: number;
+    path_device_ids?: number[];
+    redundant?: boolean;
+  }[];
+  downstream_count?: number;
   uplink_suspected: boolean;
   severity: string;
   warnings: string[];
@@ -1052,6 +1061,26 @@ export default function InvestigateMAC() {
                     ))}
                   </ul>
                 )}
+
+                {shutImpact.downstream && shutImpact.downstream.length > 0 ? (
+                  <div style={{ marginTop: 12 }}>
+                    <h3 style={{ fontSize: "0.95rem", marginBottom: 6 }}>
+                      Ниже по топологии ({shutImpact.downstream_count ?? shutImpact.downstream.length})
+                    </h3>
+                    <ul style={{ fontSize: "0.85rem", marginTop: 0, maxHeight: 160, overflow: "auto" }}>
+                      {shutImpact.downstream.slice(0, 40).map((d) => (
+                        <li key={d.device_id}>
+                          hop {d.hop}:{" "}
+                          <Link to={`/devices/${d.device_id}`}>{d.device_name}</Link>
+                          {d.device_host ? (
+                            <span style={{ color: "#9aa3b5" }}> ({d.device_host})</span>
+                          ) : null}
+                          {d.redundant ? " · есть обход" : ""}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
 
                 {shutImpact.uplink_suspected ? (
                   <label style={{ display: "flex", gap: 8, alignItems: "flex-start", margin: "12px 0", color: "#f0b4b4" }}>

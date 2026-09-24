@@ -1,4 +1,4 @@
-/** Типы узлов: встроенные + пользовательские (API /settings/device-categories). */
+﻿/** Типы узлов: встроенные + пользовательские (API /settings/device-categories). */
 
 export type DeviceCategory = string;
 
@@ -44,10 +44,19 @@ export function normalizeDeviceCategory(raw?: string | null): DeviceCategory {
     case "camera":
     case "other":
       return c;
+    case "virtual":
+      // Метка топологии (peer без inventory), не тип узла.
+      return "other";
     default:
       if (/^[a-z][a-z0-9_]{0,31}$/.test(c)) return c;
       return "other";
   }
+}
+
+/** Встроенный тип МФУ/принтер (в БД принтеры нормализуются в mfu). */
+export function isPrinterCategory(raw?: string | null): boolean {
+  const c = (raw ?? "").trim().toLowerCase();
+  return c === "mfu" || c === "мфу" || c === "принтер" || c === "printer" || c === "mfp";
 }
 
 export function categoryById(

@@ -5,6 +5,26 @@ import (
 	"testing"
 )
 
+func TestParseVLANDatabase_ImplicitVLAN1(t *testing.T) {
+	// Cisco-like: только vlan 10 в run, vlan 1 не перечислен.
+	raw := `
+vlan 10
+ name Office
+!
+interface GigabitEthernet0/1
+ switchport mode access
+ switchport access vlan 10
+!
+`
+	names := ParseVLANDatabase(raw)
+	if _, ok := names[1]; !ok {
+		t.Fatalf("expected implicit VLAN 1, got %+v", names)
+	}
+	if names[10] != "Office" {
+		t.Fatalf("vlan 10: %+v", names)
+	}
+}
+
 func TestParseVLANDatabase_EdgeSwitch(t *testing.T) {
 	raw := `
 vlan database

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -15,15 +16,16 @@ import (
 	"git.kalinamall.ru/PapaTramp/netlynx/internal/api"
 	"git.kalinamall.ru/PapaTramp/netlynx/internal/config"
 	"git.kalinamall.ru/PapaTramp/netlynx/internal/configsnapshot"
+	ddb "git.kalinamall.ru/PapaTramp/netlynx/internal/db"
 	"git.kalinamall.ru/PapaTramp/netlynx/internal/fdbsnapshot"
 	"git.kalinamall.ru/PapaTramp/netlynx/internal/live"
 	"git.kalinamall.ru/PapaTramp/netlynx/internal/loopwatch"
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/topologycache"
-	ddb "git.kalinamall.ru/PapaTramp/netlynx/internal/db"
 	"git.kalinamall.ru/PapaTramp/netlynx/internal/notify"
 	"git.kalinamall.ru/PapaTramp/netlynx/internal/poller"
+	"git.kalinamall.ru/PapaTramp/netlynx/internal/secrets"
 	"git.kalinamall.ru/PapaTramp/netlynx/internal/store"
 	"git.kalinamall.ru/PapaTramp/netlynx/internal/syslogrecv"
+	"git.kalinamall.ru/PapaTramp/netlynx/internal/topologycache"
 	"git.kalinamall.ru/PapaTramp/netlynx/internal/traprecv"
 )
 
@@ -35,6 +37,15 @@ var (
 
 func main() {
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})))
+
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "secrets-rewrap":
+			os.Exit(runSecretsRewrap())
+		case "secrets-genkey":
+			os.Exit(runSecretsGenKey())
+		}
+	}
 
 	cfg, err := config.Load()
 	if err != nil {
@@ -58,6 +69,14 @@ func main() {
 	}
 
 	st := store.New(pool)
+	if box, err := attachSecretsBox(st, cfg); err != nil {
+		slog.Error("secrets box", "err", err)
+		os.Exit(1)
+	} else if box == nil {
+		slog.Warn("секреты at-rest: ключ не задан — community/SSH/SMTP/токены пишутся в Postgres открытым текстом (см. docs/Secrets.md)")
+	} else {
+		slog.Info("секреты at-rest: AES-256-GCM включён")
+	}
 	if err := st.RefreshAllOfflineSince(ctx); err != nil {
 		slog.Warn("offline_since backfill", "err", err)
 	}
@@ -203,4 +222,69 @@ func main() {
 	case <-time.After(shutdownWait):
 		slog.Warn("shutdown: timeout waiting for workers", "timeout", shutdownWait.String())
 	}
+}
+
+func attachSecretsBox(st *store.Store, cfg config.Config) (*secrets.Box, error) {
+	if len(cfg.SecretsKey) == 0 {
+		return nil, nil
+	}
+	box, err := secrets.NewBox(cfg.SecretsKey)
+	if err != nil {
+		return nil, err
+	}
+	st.SetSecretsBox(box)
+	return box, nil
+}
+
+func runSecretsGenKey() int {
+	k, err := secrets.GenerateMasterKeyBase64()
+	if err != nil {
+		slog.Error("secrets-genkey", "err", err)
+		return 1
+	}
+	fmt.Println(k)
+	fmt.Fprintln(os.Stderr, "# Добавьте в /etc/netlynx/netlynx.env:")
+	fmt.Fprintln(os.Stderr, "# NETLYNX_SECRETS_KEY="+k)
+	return 0
+}
+
+func runSecretsRewrap() int {
+	cfg, err := config.Load()
+	if err != nil {
+		slog.Error("конфиг", "err", err)
+		return 1
+	}
+	if len(cfg.SecretsKey) == 0 {
+		slog.Error("задайте NETLYNX_SECRETS_KEY или NETLYNX_SECRETS_KEY_FILE")
+		return 1
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	defer cancel()
+	pool, err := ddb.NewPool(ctx, cfg.DatabaseURL)
+	if err != nil {
+		slog.Error("postgres", "err", err)
+		return 1
+	}
+	defer pool.Close()
+	if err := ddb.Migrate(ctx, pool); err != nil {
+		slog.Error("миграции", "err", err)
+		return 1
+	}
+	st := store.New(pool)
+	if _, err := attachSecretsBox(st, cfg); err != nil {
+		slog.Error("secrets box", "err", err)
+		return 1
+	}
+	res, err := st.RewrapAllSecrets(ctx)
+	if err != nil {
+		slog.Error("rewrap", "err", err)
+		return 1
+	}
+	slog.Info("secrets rewrap done",
+		"rewrapped", res.Rewrapped,
+		"skipped", res.Skipped,
+		"plaintext_before", res.Before.Total,
+		"plaintext_after", res.After.Total,
+	)
+	return 0
 }

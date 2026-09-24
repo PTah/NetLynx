@@ -117,8 +117,8 @@ func selectSSHVendorProfile(sysDescr string) sshVendorProfile {
 	case strings.Contains(s, "snr"), strings.Contains(s, "nag llc"):
 		return sshVendorProfile{
 			name:            "snr",
-			privilegeCmd:    "",
-			needsEnablePass: false,
+			privilegeCmd:    "enable",
+			needsEnablePass: false, // SNR S2989 и др.: после enable пароль не спрашивают
 			poeCommands:     []string{"show power inline"},
 		}
 	default:

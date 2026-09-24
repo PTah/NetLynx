@@ -1,16 +1,18 @@
-type Point = { value: number; sampled_at: string };
+﻿type Point = { value: number; sampled_at: string };
 
 type Props = {
   title: string;
   samples: Point[];
   unit?: string;
   maxY?: number;
+  digits?: number;
 };
 
-export default function MetricChart({ title, samples, unit = "%", maxY = 100 }: Props) {
+export default function MetricChart({ title, samples, unit = "%", maxY = 100, digits = 1 }: Props) {
   const w = 480;
   const h = 120;
   const pad = 8;
+  const fmt = (v: number) => (digits <= 0 ? Math.round(v).toLocaleString("ru-RU") : v.toFixed(digits));
   if (!samples.length) {
     return (
       <div style={{ marginBottom: "1rem" }}>
@@ -35,7 +37,7 @@ export default function MetricChart({ title, samples, unit = "%", maxY = 100 }: 
       <div style={{ fontWeight: 600, marginBottom: 4 }}>
         {title}{" "}
         <span style={{ color: "#8cf", fontWeight: 400 }}>
-          {last.value.toFixed(1)}
+          {fmt(last.value)}
           {unit}
         </span>
       </div>

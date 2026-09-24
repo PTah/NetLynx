@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { apiGet } from "../api";
 import { DeviceSearchSelect } from "../components/DeviceSearchSelect";
+import { formatDateTimeRU } from "../dateFormat";
 import { formatEventTypeLabel } from "../eventFormat";
 import { deviceLinkState } from "../navigation";
 import type { Device } from "../types";
@@ -184,7 +185,8 @@ export default function Postmortem() {
               {report.device_name}
             </Link>
             {" · "}
-            {report.from.slice(0, 19)} — {report.to.slice(0, 19)} · окно {report.window} · узлов в области: {report.scope_devices.length}
+            {formatDateTimeRU(report.from)} — {formatDateTimeRU(report.to)} · окно {report.window} · узлов в области:{" "}
+            {report.scope_devices.length}
           </p>
           {report.scope_devices.length > 1 && (
             <p style={{ fontSize: "0.8rem", color: "#7a8499", marginBottom: "1rem" }}>
@@ -213,7 +215,7 @@ export default function Postmortem() {
                 {report.timeline.map((row, i) => (
                   <tr key={`${row.kind}-${row.at}-${i}`} style={{ borderBottom: "1px solid #1e2430" }}>
                     <td style={{ padding: "6px 8px", whiteSpace: "nowrap", color: "#9aa3b5" }}>
-                      {row.at.replace("T", " ").slice(0, 19)}
+                      {formatDateTimeRU(row.at)}
                     </td>
                     <td style={{ padding: "6px 8px" }}>{kindLabel(row.kind)}</td>
                     <td style={{ padding: "6px 8px" }}>

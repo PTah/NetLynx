@@ -279,6 +279,8 @@ NetLynx при этом слушает только **`127.0.0.1:8080`** — с 
 
 Откуда берётся пароль: в `/etc/netlynx/netlynx.env` — `NETLYNX_ADMIN_USER` и `NETLYNX_ADMIN_PASSWORD`. При **первом** старте службы создаётся пользователь в БД; дальше действует пароль из БД.
 
+**Секреты узлов (SNMP/SSH/SMTP/токены) в Postgres:** по умолчанию открытый текст. Рекомендуется включить AES-GCM: [Secrets.md](Secrets.md) (`NETLYNX_SECRETS_KEY`, затем `netlynxd secrets-rewrap`).
+
 ### Проверка на сервере
 
 ```bash

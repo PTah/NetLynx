@@ -306,13 +306,31 @@ func ciscoLikeRunning(client *ssh.Client, timeout time.Duration, steps []string,
 		}
 		prefix = append(prefix, s)
 	}
-	for _, s := range prefix {
+	for i := 0; i < len(prefix); i++ {
+		s := prefix[i]
+		low := strings.ToLower(strings.TrimSpace(s))
+		before := outBuf.Len()
 		if _, err := in.Write([]byte(s + "\r\n")); err != nil {
 			return "", err
 		}
-		time.Sleep(350 * time.Millisecond)
+		waitQuiet(&outBuf, 450*time.Millisecond, timeout)
+		// enable / en: пароль только если CLI спросил Password: (SNR S2989 и др. — без enable-пароля).
+		if low == "enable" || low == "en" {
+			chunk := strings.ToLower(outBuf.String()[before:])
+			needPass := strings.Contains(chunk, "password") || strings.Contains(chunk, "assword:")
+			if i+1 < len(prefix) && looksLikeEnableSecretStep(prefix[i+1]) {
+				i++
+				if needPass {
+					if _, err := in.Write([]byte(prefix[i] + "\r\n")); err != nil {
+						return "", err
+					}
+					waitQuiet(&outBuf, 450*time.Millisecond, timeout)
+				}
+				// иначе пропускаем секрет — иначе он уйдёт как команда (% Invalid input)
+			}
+		}
 	}
-	time.Sleep(400 * time.Millisecond)
+	time.Sleep(200 * time.Millisecond)
 	if _, err := in.Write([]byte(showCmd + "\r\n")); err != nil {
 		return "", err
 	}
@@ -410,6 +428,27 @@ func redactSecrets(s string, secrets ...string) string {
 		s = strings.ReplaceAll(s, sec, "****")
 	}
 	return s
+}
+
+// looksLikeEnableSecretStep — следующий шаг после enable/en это секрет, а не CLI-команда.
+func looksLikeEnableSecretStep(s string) bool {
+	low := strings.ToLower(strings.TrimSpace(s))
+	if low == "" {
+		return false
+	}
+	if low == "enable" || low == "en" {
+		return false
+	}
+	if strings.HasPrefix(low, "terminal ") ||
+		strings.HasPrefix(low, "show ") ||
+		strings.HasPrefix(low, "display ") ||
+		strings.HasPrefix(low, "screen-length") ||
+		strings.HasPrefix(low, "configure") ||
+		strings.HasPrefix(low, "config ") ||
+		low == "configure" || low == "conf" || low == "config" {
+		return false
+	}
+	return true
 }
 
 func looksLikeBusyboxShell(s string) bool {

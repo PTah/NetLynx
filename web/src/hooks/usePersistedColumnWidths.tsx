@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
+﻿import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 
 function loadWidths(key: string, defaults: number[]): number[] {
   if (typeof window === "undefined") return [...defaults];
@@ -32,11 +32,17 @@ const storageKey = (tableId: string) => `invetor_table_cols_${tableId}`;
  */
 export function usePersistedColumnWidths(tableId: string, defaults: number[]) {
   const key = storageKey(tableId);
+  const defaultsKey = defaults.join(",");
   const [widths, setWidths] = useState<number[]>(() => loadWidths(key, defaults));
   const widthsRef = useRef(widths);
   useEffect(() => {
     widthsRef.current = widths;
   }, [widths]);
+  useEffect(() => {
+    setWidths(loadWidths(storageKey(tableId), defaults));
+    // defaults captured via defaultsKey; tableId via key
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tableId, defaultsKey]);
 
   const colgroup = useMemo(
     () => (

@@ -108,6 +108,22 @@
 
 **Не в ближайшей очереди:** pcap/NetFlow-коллектор, полный RANCID-замена, cable-test/TDR, L2-path между двумя MAC, ARP-probe (raw socket), SNMP Walk UI.
 
+## Секреты at-rest (AES-GCM)
+
+Док: [Secrets.md](Secrets.md). На проде (0.12.0): `NETLYNX_SECRETS_KEY` + `secrets-rewrap` + `SECRETS_REQUIRE_KEY=true`; community/SSH/SMTP/TG/UISP/backup в Postgres как `enc:v1:`.
+
+**Корень доверия:** полностью убрать открытый ключ с хоста нельзя — его можно только сузить (файл/systemd credentials/TPM). `DATABASE_URL` и мастер-ключ всё равно нужны процессу при старте.
+
+| Этап | Задача | Статус |
+|------|--------|--------|
+| 1 | Envelope AES-256-GCM для device/notify/UISP/backup; dual-read; CLI/API rewrap; `SECRETS_REQUIRE_KEY` | [x] 0.12.0 |
+| 2a | JWT HS256 в `app_secrets` тоже как `enc:v1:` (тем же `NETLYNX_SECRETS_KEY`) — дамп БД без signing key | [ ] |
+| 2b | Рекомендовать/документировать `NETLYNX_SECRETS_KEY_FILE` + `chmod 0600` / systemd `LoadCredential` вместо ключа в общем `netlynx.env` | [ ] |
+| 2c | Предупреждение в UI при restore backup: без того же ключа SNMP/SSH не поднимутся | [ ] |
+| 3 | Ротация мастер-ключа (current + previous, `secrets-rewrap --old-key`) | [ ] позже |
+
+Не в scope: пароли UI (уже bcrypt); «шифрование без какого-либо ключа на диске» без внешнего KMS/HSM.
+
 ## Аудит backlog (после 0.17.4 волны 1)
 
 Волна 1 закрыта в 0.17.4: SSE reconnect, tb/radial layout, logout+Basic, NETLYNX_TRUST_PROXY.  
