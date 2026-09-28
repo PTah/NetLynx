@@ -136,6 +136,9 @@ func main() {
 		BuiltAt: builtAt,
 	}, hub, trapMgr, eng)
 	apiSrv.SetTopologyDirty(topoHub.NotifyDirty)
+
+	emitServiceStarted(ctx, st, hub, version, commit, builtAt)
+
 	workers.Add(1)
 	go func() {
 		defer workers.Done()
@@ -222,6 +225,42 @@ func main() {
 	case <-time.After(shutdownWait):
 		slog.Warn("shutdown: timeout waiting for workers", "timeout", shutdownWait.String())
 	}
+}
+
+// emitServiceStarted пишет SERVICE_STARTED в ленту (деплой / рестарт / первый старт).
+// Уведомления не шлёт — только events + SSE.
+func emitServiceStarted(ctx context.Context, st *store.Store, hub *live.Hub, ver, cmt, built string) {
+	reason := "start"
+	prev, err := st.LastServiceStartedVersion(ctx)
+	if err != nil {
+		slog.Warn("service_started: last version", "err", err)
+	} else if prev != "" {
+		if prev != strings.TrimSpace(ver) {
+			reason = "deploy"
+		} else {
+			reason = "restart"
+		}
+	}
+	id, pl, err := st.InsertServiceStarted(ctx, store.ServiceStartInfo{
+		Version: ver,
+		Commit:  cmt,
+		BuiltAt: built,
+	}, reason)
+	if err != nil {
+		slog.Warn("service_started: insert", "err", err)
+		return
+	}
+	slog.Info("service_started", "id", id, "reason", reason, "version", ver)
+	if hub == nil {
+		return
+	}
+	hub.Publish(live.EventPayload{
+		EventID:   id,
+		DeviceID:  0,
+		EventType: store.EventTypeServiceStarted,
+		Severity:  "info",
+		Payload:   pl,
+	})
 }
 
 func attachSecretsBox(st *store.Store, cfg config.Config) (*secrets.Box, error) {

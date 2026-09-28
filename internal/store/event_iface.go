@@ -135,6 +135,9 @@ func (s *Store) EnrichEventsWithIfaceLabels(ctx context.Context, events []models
 	seen := make(map[eventIfaceRef]struct{})
 	var refs []eventIfaceRef
 	for i := range events {
+		if events[i].DeviceID <= 0 {
+			continue
+		}
 		if events[i].IfIndex == nil || *events[i].IfIndex <= 0 {
 			continue
 		}
@@ -153,6 +156,9 @@ func (s *Store) EnrichEventsWithIfaceLabels(ctx context.Context, events []models
 		return err
 	}
 	for i := range events {
+		if events[i].DeviceID <= 0 {
+			continue
+		}
 		if events[i].IfIndex == nil || *events[i].IfIndex <= 0 {
 			continue
 		}

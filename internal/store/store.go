@@ -651,12 +651,18 @@ func (s *Store) InsertEvent(ctx context.Context, deviceID int64, ifIndex *int, e
 	} else {
 		jb = []byte("{}")
 	}
+	var deviceArg interface{}
+	if deviceID > 0 {
+		deviceArg = deviceID
+	} else {
+		deviceArg = nil // system events (SERVICE_STARTED)
+	}
 	var id int64
 	err := s.pool.QueryRow(ctx, `
 		INSERT INTO events (device_id, if_index, event_type, severity, payload)
 		VALUES ($1,$2,$3,$4,$5::jsonb)
 		RETURNING id`,
-		deviceID, ifIndex, eventType, severity, jb,
+		deviceArg, ifIndex, eventType, severity, jb,
 	).Scan(&id)
 	return id, err
 }
@@ -712,8 +718,12 @@ func scanEvents(rows pgx.Rows) ([]models.Event, error) {
 	for rows.Next() {
 		var e models.Event
 		var raw []byte
-		if err := rows.Scan(&e.ID, &e.DeviceID, &e.IfIndex, &e.EventType, &e.Severity, &raw, &e.CreatedAt); err != nil {
+		var deviceID *int64
+		if err := rows.Scan(&e.ID, &deviceID, &e.IfIndex, &e.EventType, &e.Severity, &raw, &e.CreatedAt); err != nil {
 			return nil, err
+		}
+		if deviceID != nil {
+			e.DeviceID = *deviceID
 		}
 		if len(raw) > 0 {
 			_ = json.Unmarshal(raw, &e.Payload)

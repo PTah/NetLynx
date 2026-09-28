@@ -27,6 +27,7 @@ const EVENT_TYPE_OPTIONS: { value: string; label: string }[] = [
   { value: "ACCESS_PORT_LONG_IDLE_DEVICE", label: formatEventTypeLabel("ACCESS_PORT_LONG_IDLE_DEVICE") },
   { value: "MANUAL_LINK_SUPERSEDED", label: formatEventTypeLabel("MANUAL_LINK_SUPERSEDED") },
   { value: "CONFIG_EDIT", label: formatEventTypeLabel("CONFIG_EDIT") },
+  { value: "SERVICE_STARTED", label: formatEventTypeLabel("SERVICE_STARTED") },
 ];
 const SEVERITIES = ["", "info", "warning", "error"];
 
@@ -105,7 +106,10 @@ export default function Events() {
     for (const d of devices) {
       m.set(d.id, d.name);
     }
-    return (id: number) => m.get(id) ?? `#${id}`;
+    return (id: number) => {
+      if (!id || id <= 0) return "NetLynx";
+      return m.get(id) ?? `#${id}`;
+    };
   }, [devices]);
 
   const applyFilters = (e: FormEvent) => {

@@ -280,8 +280,12 @@ func scanEventBriefs(rows pgx.Rows) ([]EventBrief, error) {
 	for rows.Next() {
 		var e EventBrief
 		var raw []byte
-		if err := rows.Scan(&e.ID, &e.DeviceID, &e.IfIndex, &e.EventType, &e.Severity, &e.CreatedAt, &raw); err != nil {
+		var deviceID *int64
+		if err := rows.Scan(&e.ID, &deviceID, &e.IfIndex, &e.EventType, &e.Severity, &e.CreatedAt, &raw); err != nil {
 			return nil, err
+		}
+		if deviceID != nil {
+			e.DeviceID = *deviceID
 		}
 		if len(raw) > 0 {
 			_ = json.Unmarshal(raw, &e.Payload)

@@ -64,9 +64,13 @@ export default function EventsTable({ rows, deviceLabel, deviceLinkState, widthS
           <tr key={ev.id}>
             <td style={{ whiteSpace: "nowrap" }}>{new Date(ev.created_at).toLocaleString()}</td>
             <td>
-              <Link to={`/devices/${ev.device_id}`} state={deviceLinkState}>
-                {deviceLabel(ev.device_id)}
-              </Link>
+              {ev.device_id > 0 ? (
+                <Link to={`/devices/${ev.device_id}`} state={deviceLinkState}>
+                  {deviceLabel(ev.device_id)}
+                </Link>
+              ) : (
+                deviceLabel(ev.device_id)
+              )}
             </td>
             <td
               style={{

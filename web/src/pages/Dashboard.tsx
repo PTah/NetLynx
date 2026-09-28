@@ -439,7 +439,7 @@ export default function Dashboard() {
       activeCount: active,
       inactiveCount: inactive,
       filteredDevices: filtered,
-      deviceName: (id: number) => nameById.get(id) ?? `#${id}`,
+      deviceName: (id: number) => (id > 0 ? nameById.get(id) ?? `#${id}` : "NetLynx"),
       selectedTypeCount,
       devicesTableTitle: dashboardDevicesTableTitle(categoryFilter, categories),
     };

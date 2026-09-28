@@ -8,6 +8,7 @@ export function formatEventSourceLabel(payload?: Record<string, unknown> | null)
   if (str(p.source) === "trap") return "trap";
   if (str(p.source) === "syslog") return "syslog";
   if (str(p.source) === "ui") return "UI";
+  if (str(p.source) === "service") return "служба";
   return "опрос";
 }
 
@@ -62,6 +63,8 @@ export function formatEventTypeLabel(eventType: string): string {
       return "Ручная связь заменена LLDP/CDP";
     case "CONFIG_EDIT":
       return "Правка конфига";
+    case "SERVICE_STARTED":
+      return "Старт / рестарт NetLynx";
     case "PORT_ADMIN_DOWN_ACTION":
       return "Авто-shutdown порта";
     default:
@@ -383,6 +386,21 @@ export function formatEventSummary(ev: Pick<EventRow, "event_type" | "payload" |
       const detail = formatConfigEditDetail(p);
       if (detail) return `${user}: ${change} — ${detail}`;
       return `${user}: ${change}`;
+    }
+    case "SERVICE_STARTED": {
+      const ver = str(p.version) || "?";
+      const reason = str(p.reason);
+      const why =
+        reason === "deploy"
+          ? "деплой / обновление"
+          : reason === "restart"
+            ? "рестарт"
+            : reason === "start"
+              ? "первый старт"
+              : reason || "старт";
+      const cmt = str(p.commit);
+      if (cmt && cmt !== "none") return `${why}: v${ver} (${cmt})`;
+      return `${why}: v${ver}`;
     }
     default:
       return Object.keys(p).length ? JSON.stringify(p) : "—";
