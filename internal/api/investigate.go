@@ -29,8 +29,8 @@ func (s *Server) handleInvestigateMAC(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err == investigate.ErrWiFiMACNotTracked {
-			writeError(w, http.StatusNotFound,
-				"WiFi-клиент: расследование отключено в настройках MAC (включите «Отслеживать WiFi устройства на AP»).")
+			// Без CTA «включите отслеживание» — при выключенной опции MAC просто не в расследовании.
+			writeError(w, http.StatusNotFound, "mac_not_tracked")
 			return
 		}
 		writeError(w, http.StatusInternalServerError, err.Error())

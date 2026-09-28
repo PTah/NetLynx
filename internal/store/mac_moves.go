@@ -547,6 +547,14 @@ func (s *Store) ListFlappingMACs(ctx context.Context, since time.Time, minMoves,
 	if limit <= 0 || limit > 100 {
 		limit = 40
 	}
+	// При фильтрации WiFi берём с запасом, чтобы после отсева осталось около limit.
+	fetchLimit := limit
+	if excludeWiFiPrefix != nil {
+		fetchLimit = limit * 3
+		if fetchLimit > 200 {
+			fetchLimit = 200
+		}
+	}
 	rows, err := s.pool.Query(ctx, `
 		SELECT m.mac,
 		       COUNT(*)::int AS move_count,
@@ -574,7 +582,7 @@ func (s *Store) ListFlappingMACs(ctx context.Context, since time.Time, minMoves,
 		GROUP BY m.mac
 		HAVING COUNT(*) >= $2
 		ORDER BY move_count DESC, last_seen DESC
-		LIMIT $3`, since, minMoves, limit, excludeWiFiPrefix)
+		LIMIT $3`, since, minMoves, fetchLimit, excludeWiFiPrefix)
 	if err != nil {
 		return nil, err
 	}
@@ -607,6 +615,9 @@ func (s *Store) ListFlappingMACs(ctx context.Context, since time.Time, minMoves,
 			}
 		}
 		out = filtered
+	}
+	if len(out) > limit {
+		out = out[:limit]
 	}
 	macs := make([]string, len(out))
 	for i, r := range out {

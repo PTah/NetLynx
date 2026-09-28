@@ -184,8 +184,6 @@ type Report = {
   }[];
   move_graph?: { nodes: MoveGraphNode[]; edges: MoveGraphEdge[] };
   correlated_events: CorrEvent[];
-  wifi_untracked?: boolean;
-  wifi_untracked_note?: string;
   generated_at: string;
 };
 
@@ -371,6 +369,13 @@ export default function InvestigateMAC() {
           } catch {
             /* не JSON */
           }
+          // WiFi-клиент при выключенном отслеживании — не показываем отчёт и не агитируем включать опцию.
+          if (msg === "mac_not_tracked" || msg.includes("mac_not_tracked")) {
+            setErr(null);
+            setMacInput("");
+            setParams({}, { replace: true });
+            return;
+          }
           setErr(msg);
         })
         .finally(() => setLoading(false));
@@ -493,22 +498,6 @@ export default function InvestigateMAC() {
 
       {report && (
         <>
-          {report.wifi_untracked && report.wifi_untracked_note ? (
-            <div
-              role="status"
-              style={{
-                marginBottom: "1rem",
-                padding: "0.75rem 1rem",
-                borderRadius: 6,
-                border: "1px solid #4a5568",
-                background: "#1a2030",
-                color: "#b8c0d0",
-              }}
-            >
-              {report.wifi_untracked_note}{" "}
-              <Link to="/settings?tab=mac">Настройки → MAC</Link>
-            </div>
-          ) : null}
           {multiAccessBanner ? (
             <div
               role="alert"

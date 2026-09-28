@@ -10,7 +10,7 @@
 2. **Горячие MAC** или ввод адреса вручную.
 3. Смотрите: баннер multi-access (если есть), **L2-путь**, **карту перемещений**, footprint, **гипотезы**, timeline, **FDB history**.
 4. Статус: **открыто** / **закрыто** / **игнор** (operator).
-5. При необходимости — превью **shut-impact** и admin-down порта; WiFi-MAC без трекинга → баннер и Настройки → MAC.
+5. При необходимости — превью **shut-impact** и admin-down порта. WiFi-клиенты при выключенном «Отслеживать WiFi…» в горячих MAC и отчёте не показываются (Настройки → MAC).
 
 Либо «расследовать» у события `MAC_FLAPPING` / `MAC_MOVED` / `MAC_MULTI_ACCESS`, либо клик по MAC в поиске портов.
 
@@ -38,7 +38,7 @@ curl -sS -H "Authorization: Bearer $TOKEN" \
 | PATCH | `/investigate/mac/status` | operator |
 | GET/PATCH | `/settings/mac-investigation` | get viewer / patch operator |
 
-WiFi-MAC из списка «не трекать» → **404** `ErrWiFiMACNotTracked`.
+WiFi-MAC из списка «не трекать» → **404** `mac_not_tracked` (без отчёта и без призыва включить WiFi-трекинг).
 
 ## Гипотезы (примеры)
 

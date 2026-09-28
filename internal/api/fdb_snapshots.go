@@ -48,7 +48,7 @@ func (s *Server) handleInvestigateMACFDBHistory(w http.ResponseWriter, r *http.R
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	} else if skip {
-		writeError(w, http.StatusNotFound, "WiFi-клиент: история FDB недоступна при выключенном отслеживании WiFi.")
+		writeError(w, http.StatusNotFound, "mac_not_tracked")
 		return
 	}
 	days := 7

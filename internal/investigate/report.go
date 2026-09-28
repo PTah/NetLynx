@@ -68,8 +68,6 @@ type Report struct {
 	LoopsTouching []TopologyCycle  `json:"loops_touching,omitempty"`
 	MoveGraph   MoveGraph          `json:"move_graph"`
 	Correlated  []store.EventBrief `json:"correlated_events"`
-	WiFiUntracked bool               `json:"wifi_untracked,omitempty"`
-	WiFiUntrackedNote string           `json:"wifi_untracked_note,omitempty"`
 	GeneratedAt time.Time          `json:"generated_at"`
 }
 
