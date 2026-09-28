@@ -189,7 +189,14 @@ func (s *Server) handleScanSNMPAdd(w http.ResponseWriter, r *http.Request) {
 	if l := strings.TrimSpace(body.Location); l != "" {
 		loc = &l
 	}
+	// Тип узла при массовом добавлении из скана — «other»; уточняют в карточке узла.
+	// Пустой/неизвестный category не превращаем в switch (как в CreateDevice по умолчанию).
 	cat := strings.TrimSpace(body.DeviceCategory)
+	if cat == "" {
+		cat = store.DeviceCategoryOther
+	} else {
+		cat = store.NormalizeDeviceCategory(cat)
+	}
 	created, skipped := 0, 0
 	var createdHosts []string
 	var errs []scanSNMPAddError

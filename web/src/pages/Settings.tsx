@@ -267,7 +267,6 @@ export default function Settings() {
   const [scanCommunity, setScanCommunity] = useState("public");
   const [scanVersion, setScanVersion] = useState<"v1" | "v2c">("v2c");
   const [scanLocation, setScanLocation] = useState("");
-  const [scanCategory, setScanCategory] = useState("switch");
   const [scanBusy, setScanBusy] = useState(false);
   const [scanAddBusy, setScanAddBusy] = useState(false);
   const [scanErr, setScanErr] = useState<string | null>(null);
@@ -546,7 +545,6 @@ export default function Settings() {
         snmp_version: scanVersion,
         community: scanCommunity.trim(),
         location: scanLocation.trim() || undefined,
-        device_category: scanCategory,
         names,
       },
     )
@@ -1314,7 +1312,8 @@ export default function Settings() {
             <p>
               Массовый обход подсети или списка IP по SNMP (sysName/sysDescr). Лимит — 256 адресов (например{" "}
               <code>192.168.1.0/24</code>). Ответившие хосты попадают в «Обнаружено»; в Узлы добавляются только
-              выбранные. SNMPv3 в скане не поддерживается — только v1/v2c.
+              выбранные (тип «Иное» — потом можно сменить в карточке). SNMPv3 в скане не поддерживается — только
+              v1/v2c.
             </p>
             {scanErr && <p style={{ color: "#f88" }}>{scanErr}</p>}
             {scanMsg && <p style={{ color: "#8d8" }}>{scanMsg}</p>}
@@ -1362,21 +1361,6 @@ export default function Settings() {
                   onChange={(e) => setScanLocation(e.target.value)}
                   disabled={scanBusy || scanAddBusy || !canWrite}
                 />
-              </label>
-              <label>
-                Тип узла
-                <br />
-                <select
-                  value={scanCategory}
-                  onChange={(e) => setScanCategory(e.target.value)}
-                  disabled={scanBusy || scanAddBusy || !canWrite}
-                >
-                  {categories.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.label}
-                    </option>
-                  ))}
-                </select>
               </label>
             </div>
             <label style={{ display: "block", marginTop: "0.75rem" }}>
