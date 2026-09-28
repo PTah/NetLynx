@@ -231,6 +231,22 @@ sudo systemctl enable --now snmpd lldpd
 
 При poll пишется `devices.chassis_mac`; при promote MAC из discovered сразу в `chassis_mac`.
 
+## Сканирование сети (SNMP subnet scan)
+
+Отдельно от LLDP/CDP: **ручной** обход management-подсети или списка IP из **Настройки → Инвентарь → Сканирование сети**.
+
+| Параметр | Значение |
+|----------|----------|
+| Протокол | SNMP **v1 / v2c** (community); v3 в скане нет |
+| Лимит | ≤ **256** адресов (`/24` или список) |
+| Проба | `sysName` / `sysDescr` (параллельно до 20) |
+| Staging | успешные hits → `discovered_devices` (`last_protocol=snmp-scan`, `identity_key=addr:<ip>`) |
+| В Узлы | только явно: «Добавить выбранные» или promote на `/discovered` |
+
+Не путать с ночным blast-rebuild: это не фоновый daemon и не ping-sweep по расписанию — [Polling-and-Topology-Cache.md](Polling-and-Topology-Cache.md).
+
+API: `POST /api/v1/devices/scan-snmp`, `POST /api/v1/devices/scan-snmp/add`.
+
 ### Ловушка EdgeSwitch ifName `0/10+`
 
 OctetString `0/24` нельзя трактовать как IPv4 (`48.47.50.52`).
@@ -242,6 +258,7 @@ OctetString `0/24` нельзя трактовать как IPv4 (`48.47.50.52`)
 | discovered_devices + promote/ignore | **готово** (исторически 0.16) |
 | FDB → topology neighbors | **готово** (`protocol=fdb`) |
 | Фильтры/layout топологии | **готово** в UI |
+| SNMP subnet scan (Настройки) | **готово** (0.12.11) |
 
 ## Диагностика
 

@@ -197,6 +197,45 @@ func (s *Store) upsertDiscoveredCandidate(ctx context.Context, identity string, 
 	return err
 }
 
+const DiscoveredProtocolSNMPScan = "snmp-scan"
+
+// UpsertDiscoveredFromScan пишет кандидата с identity addr:<ip> после успешной SNMP-пробы.
+// source device/if_index пустые (скан не с порта свитча). status/promoted не затираются.
+func (s *Store) UpsertDiscoveredFromScan(ctx context.Context, host, sysName string) (id int64, err error) {
+	host = strings.TrimSpace(host)
+	if host == "" {
+		return 0, fmt.Errorf("пустой host")
+	}
+	identity := DiscoveredIdentityKey("", host, "")
+	if identity == "" {
+		return 0, fmt.Errorf("не удалось построить identity для %s", host)
+	}
+	now := time.Now().UTC()
+	var sys *string
+	if sn := strings.TrimSpace(sysName); sn != "" {
+		sys = &sn
+	}
+	mgmt := host
+	proto := DiscoveredProtocolSNMPScan
+	err = s.pool.QueryRow(ctx, `
+		INSERT INTO discovered_devices (
+			identity_key, remote_sys_name, remote_chassis_id, remote_mgmt_addr,
+			first_seen_from_device_id, first_seen_if_index,
+			last_seen_from_device_id, last_seen_if_index, last_protocol,
+			status, last_seen_at, created_at, updated_at
+		) VALUES ($1,$2,NULL,$3,NULL,NULL,NULL,NULL,$4,'new',$5,$5,$5)
+		ON CONFLICT (identity_key) DO UPDATE SET
+			remote_sys_name = COALESCE(EXCLUDED.remote_sys_name, discovered_devices.remote_sys_name),
+			remote_mgmt_addr = COALESCE(EXCLUDED.remote_mgmt_addr, discovered_devices.remote_mgmt_addr),
+			last_protocol = EXCLUDED.last_protocol,
+			last_seen_at = EXCLUDED.last_seen_at,
+			updated_at = EXCLUDED.updated_at
+		RETURNING id`,
+		identity, sys, mgmt, proto, now,
+	).Scan(&id)
+	return id, err
+}
+
 func nullIfEmpty(s string) *string {
 	s = strings.TrimSpace(s)
 	if s == "" {
@@ -259,6 +298,33 @@ func (s *Store) GetDiscovered(ctx context.Context, id int64) (*DiscoveredDevice,
 			last_seen_from_device_id, last_seen_if_index, last_protocol,
 			status, promoted_device_id, last_seen_at, created_at, updated_at
 		FROM discovered_devices WHERE id = $1`, id).Scan(
+		&d.ID, &d.IdentityKey, &d.RemoteSysName, &d.RemoteChassisID, &d.RemoteMgmtAddr,
+		&d.FirstSeenFromDeviceID, &d.FirstSeenIfIndex,
+		&d.LastSeenFromDeviceID, &d.LastSeenIfIndex, &d.LastProtocol,
+		&d.Status, &d.PromotedDeviceID, &d.LastSeenAt, &d.CreatedAt, &d.UpdatedAt,
+	)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &d, nil
+}
+
+// GetDiscoveredByIdentityKey — точечный поиск по identity_key (scan / promote).
+func (s *Store) GetDiscoveredByIdentityKey(ctx context.Context, identity string) (*DiscoveredDevice, error) {
+	identity = strings.TrimSpace(identity)
+	if identity == "" {
+		return nil, nil
+	}
+	var d DiscoveredDevice
+	err := s.pool.QueryRow(ctx, `
+		SELECT id, identity_key, remote_sys_name, remote_chassis_id, remote_mgmt_addr,
+			first_seen_from_device_id, first_seen_if_index,
+			last_seen_from_device_id, last_seen_if_index, last_protocol,
+			status, promoted_device_id, last_seen_at, created_at, updated_at
+		FROM discovered_devices WHERE identity_key = $1`, identity).Scan(
 		&d.ID, &d.IdentityKey, &d.RemoteSysName, &d.RemoteChassisID, &d.RemoteMgmtAddr,
 		&d.FirstSeenFromDeviceID, &d.FirstSeenIfIndex,
 		&d.LastSeenFromDeviceID, &d.LastSeenIfIndex, &d.LastProtocol,

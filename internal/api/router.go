@@ -140,6 +140,8 @@ func NewServer(st *store.Store, cfg config.Config, bi BuildInfo, hub *live.Hub, 
 	ar.Group(func(r chi.Router) {
 		r.Use(s.requireMinRole(roleOperator))
 		r.Post("/devices/import-uisp", s.handleImportUISP)
+		r.Post("/devices/scan-snmp", s.handleScanSNMP)
+		r.Post("/devices/scan-snmp/add", s.handleScanSNMPAdd)
 		r.Post("/devices", s.handleCreateDevice)
 		r.Patch("/devices/{id}/name", s.handlePatchDeviceName)
 		r.Patch("/devices/{id}/host", s.handlePatchDeviceHost)

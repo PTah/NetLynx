@@ -262,6 +262,32 @@ export default function Settings() {
   const [staleFdbErr, setStaleFdbErr] = useState<string | null>(null);
   const [staleFdbBusy, setStaleFdbBusy] = useState(false);
 
+  const [scanCidr, setScanCidr] = useState("");
+  const [scanHostsText, setScanHostsText] = useState("");
+  const [scanCommunity, setScanCommunity] = useState("public");
+  const [scanVersion, setScanVersion] = useState<"v1" | "v2c">("v2c");
+  const [scanLocation, setScanLocation] = useState("");
+  const [scanCategory, setScanCategory] = useState("switch");
+  const [scanBusy, setScanBusy] = useState(false);
+  const [scanAddBusy, setScanAddBusy] = useState(false);
+  const [scanErr, setScanErr] = useState<string | null>(null);
+  const [scanMsg, setScanMsg] = useState<string | null>(null);
+  const [scanResult, setScanResult] = useState<{
+    total: number;
+    responded: number;
+    skipped_known: number;
+    hits: {
+      host: string;
+      sys_name?: string;
+      sys_descr?: string;
+      already_in_inventory: boolean;
+      inventory_device_id?: number;
+      inventory_device_name?: string;
+      discovered_id?: number;
+    }[];
+  } | null>(null);
+  const [scanSelected, setScanSelected] = useState<Record<string, boolean>>({});
+
   const [offlineDays, setOfflineDays] = useState("60");
   const [offlinePreview, setOfflinePreview] = useState<{
     count: number;
@@ -425,6 +451,128 @@ export default function Settings() {
       })
       .catch((e: Error) => setStaleFdbErr(e.message))
       .finally(() => setStaleFdbBusy(false));
+  };
+
+  const runNetworkScan = () => {
+    if (!canWrite) return;
+    const hosts = scanHostsText
+      .split(/[\n,;]+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (!scanCidr.trim() && hosts.length === 0) {
+      setScanErr("Укажите CIDR (например 192.168.1.0/24) или список IP");
+      return;
+    }
+    if (!scanCommunity.trim()) {
+      setScanErr("Укажите SNMP community");
+      return;
+    }
+    setScanBusy(true);
+    setScanErr(null);
+    setScanMsg(null);
+    setScanSelected({});
+    apiPost<{
+      ok: boolean;
+      total: number;
+      responded: number;
+      skipped_known: number;
+      hits: {
+        host: string;
+        sys_name?: string;
+        sys_descr?: string;
+        already_in_inventory: boolean;
+        inventory_device_id?: number;
+        inventory_device_name?: string;
+        discovered_id?: number;
+      }[];
+    }>("/api/v1/devices/scan-snmp", {
+      cidr: scanCidr.trim() || undefined,
+      hosts: hosts.length ? hosts : undefined,
+      snmp_version: scanVersion,
+      community: scanCommunity.trim(),
+    })
+      .then((r) => {
+        const hits = r.hits ?? [];
+        setScanResult({
+          total: r.total,
+          responded: r.responded,
+          skipped_known: r.skipped_known,
+          hits,
+        });
+        const sel: Record<string, boolean> = {};
+        for (const h of hits) {
+          if (!h.already_in_inventory) sel[h.host] = true;
+        }
+        setScanSelected(sel);
+        setScanMsg(
+          `Опрошено ${r.total}, ответили ${r.responded}` +
+            (r.skipped_known ? `, уже в Узлах ${r.skipped_known}` : "") +
+            ". Кандидаты также на странице «Обнаружено».",
+        );
+      })
+      .catch((e: Error) => setScanErr(e.message))
+      .finally(() => setScanBusy(false));
+  };
+
+  const addSelectedScanHits = () => {
+    if (!canWrite || !scanResult) return;
+    const hosts = scanResult.hits
+      .filter((h) => scanSelected[h.host] && !h.already_in_inventory)
+      .map((h) => h.host);
+    if (hosts.length === 0) {
+      setScanErr("Выберите хосты, которых ещё нет в Узлах");
+      return;
+    }
+    const names: Record<string, string> = {};
+    for (const h of scanResult.hits) {
+      if (hosts.includes(h.host) && h.sys_name?.trim()) {
+        names[h.host] = h.sys_name.trim();
+      }
+    }
+    if (
+      !window.confirm(
+        `Добавить в Узлы ${hosts.length} устройств с community «${scanCommunity.trim()}» (SNMP ${scanVersion})?`,
+      )
+    ) {
+      return;
+    }
+    setScanAddBusy(true);
+    setScanErr(null);
+    setScanMsg(null);
+    apiPost<{ created: number; skipped: number; created_hosts?: string[]; errors?: { host: string; error: string }[] }>(
+      "/api/v1/devices/scan-snmp/add",
+      {
+        hosts,
+        snmp_version: scanVersion,
+        community: scanCommunity.trim(),
+        location: scanLocation.trim() || undefined,
+        device_category: scanCategory,
+        names,
+      },
+    )
+      .then((r) => {
+        const errN = r.errors?.length ?? 0;
+        setScanMsg(
+          `Добавлено ${r.created}, пропущено ${r.skipped}` + (errN ? `, ошибок ${errN}` : "") + ".",
+        );
+        if (errN && r.errors) {
+          setScanErr(r.errors.map((e) => `${e.host}: ${e.error}`).join("; "));
+        }
+        const added = new Set(r.created_hosts ?? []);
+        setScanResult((prev) => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            hits: prev.hits.map((h) =>
+              added.has(h.host) ? { ...h, already_in_inventory: true } : h,
+            ),
+            skipped_known: prev.skipped_known + added.size,
+          };
+        });
+        setScanSelected({});
+      })
+      .catch((e: Error) => setScanErr(e.message))
+      .finally(() => setScanAddBusy(false));
   };
 
   const loadOfflinePreview = () => {
@@ -941,8 +1089,8 @@ export default function Settings() {
       {tab === "inventory" && (
         <div role="tabpanel">
           <p className="settings-lead">
-            Как наполнить систему узлами: импорт из UISP, ручное добавление, соседи по LLDP/CDP. Сканирование подсети
-            по SNMP пока не реализовано.
+            Как наполнить систему узлами: импорт из UISP, ручное добавление, соседи по LLDP/CDP или сканирование
+            management-подсети по SNMP (до /24).
           </p>
 
           <section className="settings-card">
@@ -1162,14 +1310,165 @@ export default function Settings() {
           </section>
 
           <section className="settings-card">
-            <h2>
-              Сканирование сети
-              <span className="settings-soon">скоро</span>
-            </h2>
+            <h2>Сканирование сети</h2>
             <p>
-              Массовый обход подсети (SNMP ping/scan списка IP) в NetLynx пока не реализован. Пока используйте ручное
-              добавление опорных свитчей и автообнаружение по LLDP/CDP либо импорт из UISP, если он есть.
+              Массовый обход подсети или списка IP по SNMP (sysName/sysDescr). Лимит — 256 адресов (например{" "}
+              <code>192.168.1.0/24</code>). Ответившие хосты попадают в «Обнаружено»; в Узлы добавляются только
+              выбранные. SNMPv3 в скане не поддерживается — только v1/v2c.
             </p>
+            {scanErr && <p style={{ color: "#f88" }}>{scanErr}</p>}
+            {scanMsg && <p style={{ color: "#8d8" }}>{scanMsg}</p>}
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "0.75rem", alignItems: "flex-end" }}>
+              <label>
+                CIDR
+                <br />
+                <input
+                  style={{ width: 180 }}
+                  value={scanCidr}
+                  onChange={(e) => setScanCidr(e.target.value)}
+                  placeholder="192.168.1.0/24"
+                  disabled={scanBusy || !canWrite}
+                />
+              </label>
+              <label>
+                SNMP
+                <br />
+                <select
+                  value={scanVersion}
+                  onChange={(e) => setScanVersion(e.target.value as "v1" | "v2c")}
+                  disabled={scanBusy || !canWrite}
+                >
+                  <option value="v2c">v2c</option>
+                  <option value="v1">v1</option>
+                </select>
+              </label>
+              <label>
+                Community
+                <br />
+                <input
+                  style={{ width: 140 }}
+                  value={scanCommunity}
+                  onChange={(e) => setScanCommunity(e.target.value)}
+                  disabled={scanBusy || !canWrite}
+                  autoComplete="off"
+                />
+              </label>
+              <label>
+                Расположение (для добавления)
+                <br />
+                <input
+                  style={{ width: 160 }}
+                  value={scanLocation}
+                  onChange={(e) => setScanLocation(e.target.value)}
+                  disabled={scanBusy || scanAddBusy || !canWrite}
+                />
+              </label>
+              <label>
+                Тип узла
+                <br />
+                <select
+                  value={scanCategory}
+                  onChange={(e) => setScanCategory(e.target.value)}
+                  disabled={scanBusy || scanAddBusy || !canWrite}
+                >
+                  {categories.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <label style={{ display: "block", marginTop: "0.75rem" }}>
+              Или список IP (по строке / через запятую)
+              <br />
+              <textarea
+                rows={3}
+                style={{ width: "100%", maxWidth: 520, fontFamily: "inherit" }}
+                value={scanHostsText}
+                onChange={(e) => setScanHostsText(e.target.value)}
+                placeholder={"192.168.1.10\n192.168.1.20"}
+                disabled={scanBusy || !canWrite}
+              />
+            </label>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "0.75rem", marginTop: "0.5rem" }}>
+              {canWrite && (
+                <button type="button" disabled={scanBusy || scanAddBusy} onClick={runNetworkScan}>
+                  {scanBusy ? "Сканирование…" : "Сканировать"}
+                </button>
+              )}
+              {canWrite && scanResult && (
+                <button type="button" disabled={scanBusy || scanAddBusy} onClick={addSelectedScanHits}>
+                  {scanAddBusy ? "Добавление…" : "Добавить выбранные"}
+                </button>
+              )}
+              <Link to="/discovered">Открыть «Обнаружено»</Link>
+            </div>
+            {scanResult && (
+              <div style={{ marginTop: "0.75rem" }}>
+                <p style={{ color: "#9aa3b5", fontSize: "0.9rem" }}>
+                  Ответили: {scanResult.responded} из {scanResult.total}
+                  {scanResult.skipped_known ? ` · уже в Узлах: ${scanResult.skipped_known}` : ""}
+                </p>
+                {scanResult.hits.length === 0 ? (
+                  <p style={{ color: "#9aa3b5" }}>Нет хостов, ответивших на SNMP.</p>
+                ) : (
+                  <table
+                    className="settings-cat-table"
+                    style={{ width: "100%", maxWidth: 900, borderCollapse: "collapse", marginTop: "0.35rem" }}
+                  >
+                    <thead>
+                      <tr style={{ textAlign: "left", color: "#9aa3b5", fontSize: "0.85rem" }}>
+                        <th style={{ padding: "0.35rem 0.5rem", width: 36 }} />
+                        <th style={{ padding: "0.35rem 0.5rem" }}>IP</th>
+                        <th style={{ padding: "0.35rem 0.5rem" }}>sysName</th>
+                        <th style={{ padding: "0.35rem 0.5rem" }}>sysDescr</th>
+                        <th style={{ padding: "0.35rem 0.5rem" }} />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {scanResult.hits.map((h) => (
+                        <tr key={h.host}>
+                          <td style={{ padding: "0.35rem 0.5rem" }}>
+                            <input
+                              type="checkbox"
+                              checked={!!scanSelected[h.host]}
+                              disabled={h.already_in_inventory || !canWrite || scanAddBusy}
+                              onChange={(e) =>
+                                setScanSelected((prev) => ({ ...prev, [h.host]: e.target.checked }))
+                              }
+                            />
+                          </td>
+                          <td style={{ padding: "0.35rem 0.5rem" }}>{h.host}</td>
+                          <td style={{ padding: "0.35rem 0.5rem" }}>{h.sys_name || "—"}</td>
+                          <td
+                            style={{
+                              padding: "0.35rem 0.5rem",
+                              maxWidth: 280,
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
+                              color: "#9aa3b5",
+                              fontSize: "0.85rem",
+                            }}
+                            title={h.sys_descr || ""}
+                          >
+                            {h.sys_descr || "—"}
+                          </td>
+                          <td style={{ padding: "0.35rem 0.5rem", fontSize: "0.85rem", color: "#9aa3b5" }}>
+                            {h.already_in_inventory
+                              ? h.inventory_device_name
+                                ? `в Узлах: ${h.inventory_device_name}`
+                                : "уже в Узлах"
+                              : null}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            )}
           </section>
 
           <section className="settings-card">

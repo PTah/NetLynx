@@ -29,7 +29,7 @@ SNMP-мониторинг коммутаторов, веб-UI.
 - PoE и SNMP (диагностика): [docs/PoE-detection.md](docs/PoE-detection.md)
 - **SNMP RO/RW** (управление портами): [docs/SNMP-Community.md](docs/SNMP-Community.md) — мониторинг работает с **RO**; **управлять** коммутатором (shutdown, alias, incident actions) можно только с **RW** community на свитче — иначе NetLynx лишь смотрит, и в этом страшном мире крутым не быть.
 - **Автообнаружение / топология LLDP:** [docs/Autodiscover.md](docs/Autodiscover.md) — на свитчах должны быть включены **SNMP** и **LLDP** (NetLynx их не включает).
-- **Опросы и кэш топологии:** [docs/Polling-and-Topology-Cache.md](docs/Polling-and-Topology-Cache.md) — непрерывный SNMP-poll, ночной/часовой blast-rebuild, FDB/config snapshots (без ping-sweep LAN).
+- **Опросы и кэш топологии:** [docs/Polling-and-Topology-Cache.md](docs/Polling-and-Topology-Cache.md) — непрерывный SNMP-poll, ночной/часовой blast-rebuild, FDB/config snapshots; ручной скан подсети — из Настроек (не ночной sweep).
 - **Секреты at-rest:** [docs/Secrets.md](docs/Secrets.md) — AES-GCM для community/SSH/SMTP/токенов (`NETLYNX_SECRETS_KEY`, `secrets-rewrap`).
 - Производители коммутаторов: [docs/Vendors.md](docs/Vendors.md)
 - Расследование MAC / flapping: [docs/MAC-Investigation.md](docs/MAC-Investigation.md)

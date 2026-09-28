@@ -153,8 +153,10 @@ http://<IP_или_имя_сервера>:8080
 | GET | `/api/v1/topology/path?from=&to=` | кратчайший путь A→B по **blast-cache** (viewer+); `404` если кэш пуст или пути нет |
 | GET | `/api/v1/topology/reachability?from=&max_depth=` | BFS-срез от узла (отладка цепочек); default `max_depth=32` |
 | GET/PATCH | `/api/v1/settings/topology` | настройки карты (viewer get / operator patch) |
-| GET | `/api/v1/discovered` | кандидаты LLDP/CDP |
+| GET | `/api/v1/discovered` | кандидаты LLDP/CDP / snmp-scan |
 | POST | `/api/v1/discovered/{id}/preview\|promote\|ignore\|reopen` | operator |
+| POST | `/api/v1/devices/scan-snmp` | operator — скан CIDR/списка IP (v1/v2c, ≤256 хостов); hits → discovered |
+| POST | `/api/v1/devices/scan-snmp/add` | operator — bulk CreateDevice выбранных hits |
 | GET | `/api/v1/manual-links` | viewer |
 | POST/PATCH/DELETE | `/api/v1/manual-links[/{id}]` | operator |
 
@@ -175,6 +177,8 @@ http://<IP_или_имя_сервера>:8080
 | GET | `/api/v1/settings/inventory/offline-devices` | viewer | оффлайн узлы |
 | POST | `/api/v1/settings/inventory/offline-devices/delete` | admin | `X-Confirm: DELETE-OFFLINE-DEVICES` |
 | POST | `/api/v1/devices/import-uisp` | operator | импорт UISP |
+| POST | `/api/v1/devices/scan-snmp` | operator | SNMP-скан подсети/списка IP |
+| POST | `/api/v1/devices/scan-snmp/add` | operator | добавить выбранные hits в Узлы |
 
 ### Резервные копии — admin
 
