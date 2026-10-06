@@ -223,9 +223,12 @@ func deviceReachabilityPayload(dev *models.Device) map[string]interface{} {
 	if dev.LastPingRTTMs != nil {
 		pl["last_ping_rtt_ms"] = *dev.LastPingRTTMs
 	}
-	if dev.OnlineOverride != nil {
+	switch models.NormalizeReachabilityMode(dev.ReachabilityMode, dev.OnlineOverride) {
+	case "online", "offline":
 		pl["reason"] = "override"
-	} else {
+	case "ping":
+		pl["reason"] = "ping"
+	default:
 		cat := strings.ToLower(strings.TrimSpace(dev.DeviceCategory))
 		switchLike := cat == "" || cat == "switch" || cat == "router" || cat == "коммутатор" || cat == "коммутаторы"
 		if switchLike {

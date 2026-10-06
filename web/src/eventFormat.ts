@@ -449,7 +449,7 @@ function formatConfigEditChange(change: string): string {
     case "device.poll_interval":
       return "узел: интервал опроса";
     case "device.online_override":
-      return "узел: ручной online/offline";
+      return "узел: режим достижимости";
     case "device.trust_link_traps":
       return "узел: trust link traps";
     case "device.chassis_mac":

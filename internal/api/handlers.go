@@ -1162,7 +1162,7 @@ func (s *Server) handlePatchDeviceChassisMAC(w http.ResponseWriter, r *http.Requ
 }
 
 type patchDeviceOnlineOverrideBody struct {
-	Mode string `json:"mode"` // auto | online | offline
+	Mode string `json:"mode"` // auto | ping | online | offline
 }
 
 func (s *Server) handlePatchDeviceOnlineOverride(w http.ResponseWriter, r *http.Request) {

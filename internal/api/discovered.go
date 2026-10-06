@@ -2,6 +2,8 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -33,6 +35,10 @@ func (s *Server) handleListDiscovered(w http.ResponseWriter, r *http.Request) {
 	if list == nil {
 		list = []store.DiscoveredDevice{}
 	}
+	if err := s.st.AttachLikelyInventoryHints(r.Context(), list); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	writeJSON(w, http.StatusOK, list)
 }
 
@@ -51,7 +57,7 @@ func (s *Server) handleIgnoreDiscovered(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusNotFound, "кандидат не найден")
 		return
 	}
-	if err := s.st.SetDiscoveredStatus(r.Context(), id, store.DiscoveredStatusIgnored, nil); err != nil {
+	if err := s.st.IgnoreDiscovered(r.Context(), id); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -85,6 +91,60 @@ func (s *Server) handleReopenDiscovered(w http.ResponseWriter, r *http.Request) 
 		"was_status":   d.Status,
 	})
 	writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true, "id": id, "status": store.DiscoveredStatusNew})
+}
+
+type linkDiscoveredBody struct {
+	DeviceID int64 `json:"device_id"`
+}
+
+func (s *Server) handleLinkDiscovered(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil || id <= 0 {
+		writeError(w, http.StatusBadRequest, "неверный id")
+		return
+	}
+	d, err := s.st.GetDiscovered(r.Context(), id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if d == nil {
+		writeError(w, http.StatusNotFound, "кандидат не найден")
+		return
+	}
+	var body linkDiscoveredBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil && !errors.Is(err, io.EOF) {
+		writeError(w, http.StatusBadRequest, "неверный JSON: "+err.Error())
+		return
+	}
+	deviceID := body.DeviceID
+	if deviceID <= 0 {
+		hintID, ok, herr := s.st.MatchDiscoveredViaPortFDB(r.Context(), *d)
+		if herr != nil {
+			writeError(w, http.StatusInternalServerError, herr.Error())
+			return
+		}
+		if !ok || hintID <= 0 {
+			writeError(w, http.StatusBadRequest, "укажите device_id или дождитесь однозначного FDB на порту")
+			return
+		}
+		deviceID = hintID
+	}
+	if err := s.st.LinkDiscoveredToDevice(r.Context(), id, deviceID); err != nil {
+		if errors.Is(err, store.ErrDeviceNotFound) {
+			writeError(w, http.StatusNotFound, "кандидат или узел не найден")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.audit(r, "discovered.link", "discovered_device", &id, map[string]interface{}{
+		"identity_key": d.IdentityKey,
+		"device_id":    deviceID,
+	})
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"ok": true, "id": id, "status": store.DiscoveredStatusAdded, "device_id": deviceID,
+	})
 }
 
 type discoveredSNMPBody struct {

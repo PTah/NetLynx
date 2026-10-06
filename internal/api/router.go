@@ -183,6 +183,7 @@ func NewServer(st *store.Store, cfg config.Config, bi BuildInfo, hub *live.Hub, 
 		r.Post("/devices/{id}/interfaces/{ifIndex}/clients/promote", s.handlePromotePortClient)
 		r.Post("/discovered/{id}/ignore", s.handleIgnoreDiscovered)
 		r.Post("/discovered/{id}/reopen", s.handleReopenDiscovered)
+		r.Post("/discovered/{id}/link", s.handleLinkDiscovered)
 		r.Post("/discovered/{id}/preview", s.handlePreviewDiscovered)
 		r.Post("/discovered/{id}/promote", s.handlePromoteDiscovered)
 		r.Post("/manual-links", s.handleCreateManualLink)

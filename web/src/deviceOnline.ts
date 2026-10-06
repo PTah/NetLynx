@@ -3,8 +3,10 @@ export type ReachabilityFields = {
   last_snmp_ok?: boolean | null;
   last_ping_ok?: boolean | null;
   last_ping_rtt_ms?: number | null;
-  /** null/undefined = авто; true/false = ручная отметка */
+  /** null/undefined = авто; true/false = ручная отметка (legacy) */
   online_override?: boolean | null;
+  /** auto | ping | online | offline */
+  reachability_mode?: string | null;
   device_category?: string | null;
   /** На топологии категория в kind (switch/other/…). */
   kind?: string | null;
@@ -13,9 +15,13 @@ export type ReachabilityFields = {
   virtual?: boolean;
 };
 
-export type OnlineOverrideMode = "auto" | "online" | "offline";
+export type OnlineOverrideMode = "auto" | "ping" | "online" | "offline";
 
 export function onlineOverrideMode(d: ReachabilityFields): OnlineOverrideMode {
+  const m = (d.reachability_mode ?? "").trim().toLowerCase();
+  if (m === "auto" || m === "ping" || m === "online" || m === "offline") {
+    return m;
+  }
   if (d.online_override === true) return "online";
   if (d.online_override === false) return "offline";
   return "auto";
@@ -33,15 +39,18 @@ export function isSnmpExpectedCategory(cat?: string | null): boolean {
 
 /**
  * Онлайн:
- * — ручной override → как задано
- * — SNMP ok → онлайн
- * — свитч/роутер: только SNMP (пинг один не считается)
- * — прочие (ПК, сервер, МФУ, иные…): пинг OR SNMP
+ * — online/offline → как задано вручную
+ * — ping → только ICMP
+ * — auto: SNMP ok → онлайн; свитч/роутер: только SNMP; прочие: пинг OR SNMP
  */
 export function isDeviceOnline(d: ReachabilityFields): boolean {
   if (d.virtual) return false;
-  if (d.online_override === true) return true;
-  if (d.online_override === false) return false;
+  const mode = onlineOverrideMode(d);
+  if (mode === "online") return true;
+  if (mode === "offline") return false;
+  if (mode === "ping") {
+    return d.last_ping_ok === true;
+  }
   if (d.last_snmp_ok === true) return true;
   if (isSnmpExpectedCategory(categoryHint(d))) {
     return false;
@@ -56,6 +65,16 @@ export function deviceReachabilityLabel(d: ReachabilityFields): { text: string; 
   }
   if (mode === "offline") {
     return { text: "оффлайн (вручную)", color: "#f88" };
+  }
+  if (mode === "ping") {
+    if (d.last_ping_ok === true) {
+      const rtt = d.last_ping_rtt_ms != null ? `ping ${d.last_ping_rtt_ms}ms` : "ping";
+      return { text: `онлайн (${rtt})`, color: "#6d6" };
+    }
+    if (d.last_ping_ok == null) {
+      return { text: "ещё не опрошен", color: "#9aa3b5" };
+    }
+    return { text: "оффлайн (нет ping)", color: "#f88" };
   }
   if (isDeviceOnline(d)) {
     const bits: string[] = [];

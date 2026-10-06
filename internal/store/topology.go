@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"git.kalinamall.ru/PapaTramp/netlynx/internal/models"
 )
@@ -21,8 +23,9 @@ type TopologyNode struct {
 	Location     *string `json:"location,omitempty"`
 	SNMPOK         *bool   `json:"last_snmp_ok,omitempty"`
 	PingOK         *bool   `json:"last_ping_ok,omitempty"`
-	OnlineOverride *bool   `json:"online_override"`
-	UISPDeviceID   *string `json:"uisp_device_id,omitempty"`
+	OnlineOverride   *bool   `json:"online_override"`
+	ReachabilityMode string  `json:"reachability_mode,omitempty"`
+	UISPDeviceID     *string `json:"uisp_device_id,omitempty"`
 	UISPStatus     *string `json:"uisp_overview_status,omitempty"`
 	Virtual        bool    `json:"virtual,omitempty"`
 	Kind           string  `json:"kind"`
@@ -104,6 +107,7 @@ func (s *Store) BuildTopologyGraphFiltered(ctx context.Context, f TopologyFilter
 	}
 	vlanByPort, _ := s.loadDominantVLANs(ctx)
 	discIndex, _ := s.loadDiscoveredNameIndex(ctx)
+	ignoredKeys, _ := s.loadIgnoredDiscoveredKeySet(ctx)
 
 	nodes := make([]TopologyNode, 0, len(devices))
 	index := buildDeviceNameIndex(devices)
@@ -113,7 +117,7 @@ func (s *Store) BuildTopologyGraphFiltered(ctx context.Context, f TopologyFilter
 			ID: d.ID, Name: d.Name, Host: d.Host,
 			SysName: d.SysName, SysDescr: d.SysDescr, CPUProfile: d.CPUProfile,
 			Location: d.Location, SNMPOK: d.LastSNMPOK, PingOK: d.LastPingOK,
-			OnlineOverride: d.OnlineOverride,
+			OnlineOverride: d.OnlineOverride, ReachabilityMode: d.ReachabilityMode,
 			UISPDeviceID: d.UISPDeviceID, UISPStatus: d.UISPOverviewStatus,
 			Kind: classifyTopologyKind(false, d.DeviceCategory, derefStr(d.CPUProfile), derefStr(d.SysDescr),
 				strings.TrimSpace(d.Name+" "+derefStr(d.SysName)+" "+d.Host)),
@@ -194,12 +198,20 @@ func (s *Store) BuildTopologyGraphFiltered(ctx context.Context, f TopologyFilter
 
 	virtualSeen := make(map[string]int64)
 	nextVirtual := int64(-1)
+	outEdges := make([]TopologyEdge, 0, len(edges))
 	for i := range edges {
-		if edges[i].RemoteDeviceID != nil {
+		e := edges[i]
+		if e.RemoteDeviceID != nil {
+			outEdges = append(outEdges, e)
 			continue
 		}
-		key, lab := virtualPeerIdentity(edges[i])
+		key, lab := virtualPeerIdentity(e)
 		if key == "" || lab == "" {
+			outEdges = append(outEdges, e)
+			continue
+		}
+		// Ignored discovered — не показывать virtual-узел и ребро на топологии.
+		if discoveredKeySetHits(ignoredKeys, topologyEdgeIgnoreKeys(e, key)) {
 			continue
 		}
 		vid, ok := virtualSeen[key]
@@ -218,8 +230,10 @@ func (s *Store) BuildTopologyGraphFiltered(ctx context.Context, f TopologyFilter
 			}
 			nodes = append(nodes, n)
 		}
-		edges[i].RemoteDeviceID = &vid
+		e.RemoteDeviceID = &vid
+		outEdges = append(outEdges, e)
 	}
+	edges = outEdges
 
 	// Active manual links → inventory↔inventory edges
 	for _, ml := range manuals {
@@ -962,6 +976,31 @@ func virtualPeerIdentity(e TopologyEdge) (key, label string) {
 	return key, label
 }
 
+// topologyEdgeIgnoreKeys — ключи ребра для сопоставления с ignored discovered.
+func topologyEdgeIgnoreKeys(e TopologyEdge, identity string) []string {
+	nb := PortNeighbor{
+		RemoteSysName:   e.RemoteSysName,
+		RemoteMgmtAddr:  e.RemoteMgmtAddr,
+		RemoteChassisID: e.RemoteChassisID,
+		RemotePortID:    e.RemotePortID,
+	}
+	keys := neighborDiscoveredIgnoreKeys(nb)
+	if identity != "" {
+		id := strings.TrimSpace(strings.ToLower(identity))
+		found := false
+		for _, k := range keys {
+			if k == id {
+				found = true
+				break
+			}
+		}
+		if !found {
+			keys = append(keys, id)
+		}
+	}
+	return keys
+}
+
 // ApplyTopologyFilter применяет q / device_id / protocol / stale / depth / location.
 // Подсветка VLAN (vlan database) — на уровне API, не здесь.
 func ApplyTopologyFilter(g *TopologyGraph, f TopologyFilter) *TopologyGraph {
@@ -1428,6 +1467,37 @@ func expandNameKeys(raw string) []string {
 	return out
 }
 
+// blobHasWord — подстрока как целое слово (границы: не буква/цифра).
+// "ventcamera" не матчит "camera"; "ip camera" / "camera-01" — матчит.
+func blobHasWord(blob, word string) bool {
+	if word == "" || blob == "" {
+		return false
+	}
+	for start := 0; start <= len(blob)-len(word); {
+		i := strings.Index(blob[start:], word)
+		if i < 0 {
+			return false
+		}
+		i += start
+		leftOK := true
+		if i > 0 {
+			r, _ := utf8.DecodeLastRuneInString(blob[:i])
+			leftOK = !unicode.IsLetter(r) && !unicode.IsDigit(r)
+		}
+		right := i + len(word)
+		rightOK := true
+		if right < len(blob) {
+			r, _ := utf8.DecodeRuneInString(blob[right:])
+			rightOK = !unicode.IsLetter(r) && !unicode.IsDigit(r)
+		}
+		if leftOK && rightOK {
+			return true
+		}
+		start = i + 1
+	}
+	return false
+}
+
 // looksLikeIPCameraHint — камера; video-LAN свитчи (DS-3E, DH-PFS, …) не считаем камерами.
 func looksLikeIPCameraHint(blob string) bool {
 	if strings.Contains(blob, "dh-pfs") || strings.Contains(blob, "pfs42") ||
@@ -1438,9 +1508,14 @@ func looksLikeIPCameraHint(blob string) bool {
 			strings.Contains(blob, "trassir"))) {
 		return false
 	}
-	for _, h := range []string{
-		"camera", "ipcam", "ip camera", "ipc-", "ds-2cd", "ds-2de", "dh-ipc",
-	} {
+	// Короткие слова — только целиком (иначе Ventcamera → camera).
+	for _, h := range []string{"camera", "ipcam"} {
+		if blobHasWord(blob, h) {
+			return true
+		}
+	}
+	// Фразы и префиксы моделей — подстрока осознанно.
+	for _, h := range []string{"ip camera", "ipc-", "ds-2cd", "ds-2de", "dh-ipc"} {
 		if strings.Contains(blob, h) {
 			return true
 		}

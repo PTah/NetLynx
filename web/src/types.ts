@@ -27,8 +27,10 @@
   last_ping_ok?: boolean | null;
   last_ping_at?: string | null;
   last_ping_rtt_ms?: number | null;
-  /** null = авто; true/false = ручная отметка онлайн/оффлайн */
+  /** null = авто; true/false = ручная отметка онлайн/оффлайн (legacy) */
   online_override?: boolean | null;
+  /** auto | ping | online | offline */
+  reachability_mode?: string | null;
   /** При mode=per_device — мгновенные LINK_* из SNMP trap */
   trust_link_traps?: boolean;
   /** ISO: когда узел стал оффлайн (если сейчас оффлайн) */

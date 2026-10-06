@@ -36,6 +36,9 @@ type DiscoveredDevice struct {
 	UpdatedAt             time.Time `json:"updated_at"`
 	// Joined for UI
 	SeenFromName *string `json:"seen_from_name,omitempty"`
+	// FDB на том же свитче/порту указывает ровно на один узел inventory (слабый LLDP без MAC).
+	LikelyDeviceID   *int64  `json:"likely_device_id,omitempty"`
+	LikelyDeviceName *string `json:"likely_device_name,omitempty"`
 }
 
 // DiscoveredIdentityKey выбирает стабильный ключ дедупа.
@@ -150,11 +153,20 @@ func (s *Store) SyncDiscoveredFromNeighbors(ctx context.Context, sourceDeviceID 
 		return err
 	}
 	idx := buildDeviceNameIndex(devices)
+	ignored, err := s.loadIgnoredDiscoveredKeySet(ctx)
+	if err != nil {
+		return err
+	}
 	now := time.Now().UTC()
 
 	for _, nb := range neighbors {
+		nb = s.enrichNeighborFromPortFDB(ctx, sourceDeviceID, nb)
 		identity, offer := ShouldOfferDiscovered(idx, nb)
 		if !offer {
+			continue
+		}
+		// Уже в ignore (тот же или смежный identity) — не создавать снова как new.
+		if discoveredKeySetHits(ignored, neighborDiscoveredIgnoreKeys(nb)) {
 			continue
 		}
 		if err := s.upsertDiscoveredCandidate(ctx, identity, sourceDeviceID, nb, now); err != nil {
@@ -163,6 +175,213 @@ func (s *Store) SyncDiscoveredFromNeighbors(ctx context.Context, sourceDeviceID 
 	}
 	_, err = s.markDiscoveredAlreadyInInventory(ctx, devices)
 	return err
+}
+
+// enrichNeighborFromPortFDB — LLDP без MAC/mgmt: подставить chassis/host единственного inventory на порту.
+func (s *Store) enrichNeighborFromPortFDB(ctx context.Context, sourceDeviceID int64, nb PortNeighbor) PortNeighbor {
+	if !neighborLacksStrongIdentity(nb) || nb.IfIndex <= 0 || sourceDeviceID <= 0 {
+		return nb
+	}
+	hint, err := s.UniqueInventoryOnPort(ctx, sourceDeviceID, nb.IfIndex)
+	if err != nil || hint == nil {
+		return nb
+	}
+	if hint.ChassisMAC != "" && strings.TrimSpace(derefStr(nb.RemoteChassisID)) == "" {
+		m := hint.ChassisMAC
+		nb.RemoteChassisID = &m
+	}
+	if hint.Host != "" && strings.TrimSpace(derefStr(nb.RemoteMgmtAddr)) == "" {
+		h := hint.Host
+		nb.RemoteMgmtAddr = &h
+	}
+	return nb
+}
+
+func neighborLacksStrongIdentity(nb PortNeighbor) bool {
+	if mac, ok := NormalizeMACQuery(derefStr(nb.RemoteChassisID)); ok && len(macHexDigits(mac)) == 12 {
+		return false
+	}
+	if mac, ok := NormalizeMACQuery(derefStr(nb.RemotePortID)); ok && len(macHexDigits(mac)) == 12 {
+		return false
+	}
+	if strings.TrimSpace(derefStr(nb.RemoteMgmtAddr)) != "" {
+		return false
+	}
+	if ip := decodeDiscoveredNetworkHex(derefStr(nb.RemoteChassisID)); ip != "" {
+		return false
+	}
+	return true
+}
+
+func discoveredLacksStrongIdentity(d DiscoveredDevice) bool {
+	if mac := DiscoveredChassisMAC(&d); mac != "" && len(macHexDigits(mac)) == 12 {
+		return false
+	}
+	if strings.TrimSpace(derefStr(d.RemoteMgmtAddr)) != "" {
+		return false
+	}
+	key := strings.ToLower(strings.TrimSpace(d.IdentityKey))
+	if strings.HasPrefix(key, "addr:") {
+		return false
+	}
+	if strings.HasPrefix(key, "chassis:") {
+		if mac, ok := NormalizeMACQuery(strings.TrimPrefix(key, "chassis:")); ok && len(macHexDigits(mac)) == 12 {
+			return false
+		}
+	}
+	return true
+}
+
+func discoveredPortAnchor(d DiscoveredDevice) (switchID int64, ifIndex int, ok bool) {
+	if d.LastSeenFromDeviceID != nil && *d.LastSeenFromDeviceID > 0 && d.LastSeenIfIndex != nil && *d.LastSeenIfIndex > 0 {
+		return *d.LastSeenFromDeviceID, *d.LastSeenIfIndex, true
+	}
+	if d.FirstSeenFromDeviceID != nil && *d.FirstSeenFromDeviceID > 0 && d.FirstSeenIfIndex != nil && *d.FirstSeenIfIndex > 0 {
+		return *d.FirstSeenFromDeviceID, *d.FirstSeenIfIndex, true
+	}
+	return 0, 0, false
+}
+
+// loadIgnoredDiscoveredKeySet — ключи ignored-кандидатов (identity / chassis / addr),
+// чтобы не показывать их в топологии и не заводить дубликаты new.
+func (s *Store) loadIgnoredDiscoveredKeySet(ctx context.Context) (map[string]struct{}, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT identity_key, remote_chassis_id, remote_mgmt_addr, remote_sys_name
+		FROM discovered_devices WHERE status = $1`, DiscoveredStatusIgnored)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]struct{}{}
+	for rows.Next() {
+		var identity string
+		var chassis, mgmt, sys *string
+		if err := rows.Scan(&identity, &chassis, &mgmt, &sys); err != nil {
+			return nil, err
+		}
+		addDiscoveredIgnoreKeys(out, identity, derefStr(chassis), derefStr(mgmt), derefStr(sys))
+	}
+	return out, rows.Err()
+}
+
+// addDiscoveredIgnoreKeys индексирует стабильные идентификаторы кандидата для match ignore.
+// Model-only sysName (SIP-T41S) не добавляем отдельно — только если identity уже name:…
+func addDiscoveredIgnoreKeys(out map[string]struct{}, identity, chassis, mgmt, sysName string) {
+	add := func(k string) {
+		k = strings.TrimSpace(strings.ToLower(k))
+		if k == "" {
+			return
+		}
+		out[k] = struct{}{}
+	}
+	idKey := strings.TrimSpace(strings.ToLower(identity))
+	if idKey != "" {
+		add(idKey)
+	}
+	if mac, ok := NormalizeMACQuery(chassis); ok {
+		if h := macHexDigits(mac); len(h) == 12 {
+			add("chassis:" + h)
+		}
+	}
+	if strings.HasPrefix(idKey, "chassis:") {
+		if mac, ok := NormalizeMACQuery(strings.TrimPrefix(idKey, "chassis:")); ok {
+			if h := macHexDigits(mac); len(h) == 12 {
+				add("chassis:" + h)
+			}
+		}
+	}
+	mgmt = strings.ToLower(strings.TrimSpace(mgmt))
+	if mgmt != "" {
+		add("addr:" + mgmt)
+	}
+	if strings.HasPrefix(idKey, "addr:") {
+		add(idKey)
+	}
+	_ = sysName // только через identity name: — см. neighborDiscoveredIgnoreKeys
+}
+
+// neighborDiscoveredIgnoreKeys — набор ключей соседа для проверки «уже ignored».
+func neighborDiscoveredIgnoreKeys(nb PortNeighbor) []string {
+	sys := derefStr(nb.RemoteSysName)
+	mgmt := derefStr(nb.RemoteMgmtAddr)
+	ch := derefStr(nb.RemoteChassisID)
+	port := derefStr(nb.RemotePortID)
+	identity := DiscoveredIdentityKeyWithPort(sys, mgmt, ch, port)
+	tmp := map[string]struct{}{}
+	addDiscoveredIgnoreKeys(tmp, identity, ch, mgmt, sys)
+	if mac, ok := NormalizeMACQuery(port); ok {
+		if h := macHexDigits(mac); len(h) == 12 {
+			tmp["chassis:"+h] = struct{}{}
+		}
+	}
+	if ip := decodeDiscoveredNetworkHex(ch); ip != "" {
+		tmp["addr:"+strings.ToLower(ip)] = struct{}{}
+	}
+	out := make([]string, 0, len(tmp))
+	for k := range tmp {
+		out = append(out, k)
+	}
+	return out
+}
+
+func discoveredKeySetHits(ignored map[string]struct{}, keys []string) bool {
+	if len(ignored) == 0 || len(keys) == 0 {
+		return false
+	}
+	for _, k := range keys {
+		k = strings.TrimSpace(strings.ToLower(k))
+		if k == "" {
+			continue
+		}
+		if _, ok := ignored[k]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+// IgnoreDiscovered помечает кандидата ignored и все new с тем же chassis/mgmt.
+func (s *Store) IgnoreDiscovered(ctx context.Context, id int64) error {
+	d, err := s.GetDiscovered(ctx, id)
+	if err != nil {
+		return err
+	}
+	if d == nil {
+		return ErrDeviceNotFound
+	}
+	if err := s.SetDiscoveredStatus(ctx, id, DiscoveredStatusIgnored, nil); err != nil {
+		return err
+	}
+	keys := map[string]struct{}{}
+	addDiscoveredIgnoreKeys(keys, d.IdentityKey, derefStr(d.RemoteChassisID), derefStr(d.RemoteMgmtAddr), derefStr(d.RemoteSysName))
+	if len(keys) == 0 {
+		return nil
+	}
+	list, err := s.ListDiscovered(ctx, DiscoveredStatusNew)
+	if err != nil {
+		return err
+	}
+	for _, o := range list {
+		if o.ID == id {
+			continue
+		}
+		probe := map[string]struct{}{}
+		addDiscoveredIgnoreKeys(probe, o.IdentityKey, derefStr(o.RemoteChassisID), derefStr(o.RemoteMgmtAddr), derefStr(o.RemoteSysName))
+		hit := false
+		for k := range probe {
+			if _, ok := keys[k]; ok {
+				hit = true
+				break
+			}
+		}
+		if !hit {
+			continue
+		}
+		if err := s.SetDiscoveredStatus(ctx, o.ID, DiscoveredStatusIgnored, nil); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *Store) upsertDiscoveredCandidate(ctx context.Context, identity string, sourceDeviceID int64, nb PortNeighbor, at time.Time) error {
@@ -201,6 +420,7 @@ const DiscoveredProtocolSNMPScan = "snmp-scan"
 
 // UpsertDiscoveredFromScan пишет кандидата с identity addr:<ip> после успешной SNMP-пробы.
 // source device/if_index пустые (скан не с порта свитча). status/promoted не затираются.
+// Если IP/identity уже ignored — не создаём new, возвращаем существующий id.
 func (s *Store) UpsertDiscoveredFromScan(ctx context.Context, host, sysName string) (id int64, err error) {
 	host = strings.TrimSpace(host)
 	if host == "" {
@@ -209,6 +429,23 @@ func (s *Store) UpsertDiscoveredFromScan(ctx context.Context, host, sysName stri
 	identity := DiscoveredIdentityKey("", host, "")
 	if identity == "" {
 		return 0, fmt.Errorf("не удалось построить identity для %s", host)
+	}
+	ignored, err := s.loadIgnoredDiscoveredKeySet(ctx)
+	if err != nil {
+		return 0, err
+	}
+	probe := map[string]struct{}{}
+	addDiscoveredIgnoreKeys(probe, identity, "", host, sysName)
+	keys := make([]string, 0, len(probe))
+	for k := range probe {
+		keys = append(keys, k)
+	}
+	if discoveredKeySetHits(ignored, keys) {
+		if existing, err := s.GetDiscoveredByIdentityKey(ctx, identity); err == nil && existing != nil {
+			return existing.ID, nil
+		}
+		// Смежный ignored (другой identity_key) — не плодим new.
+		return 0, nil
 	}
 	now := time.Now().UTC()
 	var sys *string
@@ -508,7 +745,8 @@ func hideDiscoveredAlreadyInInventory(list []DiscoveredDevice, devices []models.
 	return out
 }
 
-// HealDiscoveredAlreadyInInventory помечает new-кандидатов как added, если MAC/IP уже в Узлах.
+// HealDiscoveredAlreadyInInventory помечает new-кандидатов как added, если MAC/IP уже в Узлах
+// или слабый LLDP совпал с единственным inventory в FDB на том же порту.
 func (s *Store) HealDiscoveredAlreadyInInventory(ctx context.Context) (int64, error) {
 	devices, err := s.ListDevices(ctx)
 	if err != nil {
@@ -520,7 +758,9 @@ func (s *Store) HealDiscoveredAlreadyInInventory(ctx context.Context) (int64, er
 func (s *Store) markDiscoveredAlreadyInInventory(ctx context.Context, devices []models.Device) (int64, error) {
 	idx := buildInventoryIdentityIndex(devices)
 	rows, err := s.pool.Query(ctx, `
-		SELECT id, identity_key, remote_sys_name, remote_chassis_id, remote_mgmt_addr, status
+		SELECT id, identity_key, remote_sys_name, remote_chassis_id, remote_mgmt_addr, status,
+			first_seen_from_device_id, first_seen_if_index,
+			last_seen_from_device_id, last_seen_if_index
 		FROM discovered_devices
 		WHERE status = $1`, DiscoveredStatusNew)
 	if err != nil {
@@ -533,10 +773,23 @@ func (s *Store) markDiscoveredAlreadyInInventory(ctx context.Context, devices []
 	}
 	for rows.Next() {
 		var d DiscoveredDevice
-		if err := rows.Scan(&d.ID, &d.IdentityKey, &d.RemoteSysName, &d.RemoteChassisID, &d.RemoteMgmtAddr, &d.Status); err != nil {
+		if err := rows.Scan(
+			&d.ID, &d.IdentityKey, &d.RemoteSysName, &d.RemoteChassisID, &d.RemoteMgmtAddr, &d.Status,
+			&d.FirstSeenFromDeviceID, &d.FirstSeenIfIndex,
+			&d.LastSeenFromDeviceID, &d.LastSeenIfIndex,
+		); err != nil {
 			return 0, err
 		}
 		if deviceID, ok := matchDiscoveredToInventory(idx, d); ok {
+			hits = append(hits, struct {
+				id       int64
+				deviceID int64
+			}{d.ID, deviceID})
+			continue
+		}
+		if deviceID, ok, err := s.MatchDiscoveredViaPortFDB(ctx, d); err != nil {
+			return 0, err
+		} else if ok {
 			hits = append(hits, struct {
 				id       int64
 				deviceID int64
@@ -555,6 +808,70 @@ func (s *Store) markDiscoveredAlreadyInInventory(ctx context.Context, devices []
 		n++
 	}
 	return n, nil
+}
+
+// MatchDiscoveredViaPortFDB — слабый кандидат (без MAC/IP) + ровно один inventory в FDB на порту.
+func (s *Store) MatchDiscoveredViaPortFDB(ctx context.Context, d DiscoveredDevice) (int64, bool, error) {
+	if !discoveredLacksStrongIdentity(d) {
+		return 0, false, nil
+	}
+	switchID, ifIndex, ok := discoveredPortAnchor(d)
+	if !ok {
+		return 0, false, nil
+	}
+	hint, err := s.UniqueInventoryOnPort(ctx, switchID, ifIndex)
+	if err != nil || hint == nil {
+		return 0, false, err
+	}
+	return hint.DeviceID, true, nil
+}
+
+// AttachLikelyInventoryHints заполняет likely_device_* для new-кандидатов (UI «Это тот же узел»).
+func (s *Store) AttachLikelyInventoryHints(ctx context.Context, list []DiscoveredDevice) error {
+	for i := range list {
+		d := &list[i]
+		if d.Status != DiscoveredStatusNew || !discoveredLacksStrongIdentity(*d) {
+			continue
+		}
+		switchID, ifIndex, ok := discoveredPortAnchor(*d)
+		if !ok {
+			continue
+		}
+		hint, err := s.UniqueInventoryOnPort(ctx, switchID, ifIndex)
+		if err != nil {
+			return err
+		}
+		if hint == nil {
+			continue
+		}
+		id := hint.DeviceID
+		d.LikelyDeviceID = &id
+		name := hint.Name
+		d.LikelyDeviceName = &name
+	}
+	return nil
+}
+
+// LinkDiscoveredToDevice помечает кандидата added с существующим узлом (без CreateDevice).
+func (s *Store) LinkDiscoveredToDevice(ctx context.Context, discoveredID, deviceID int64) error {
+	if discoveredID <= 0 || deviceID <= 0 {
+		return fmt.Errorf("неверный id")
+	}
+	d, err := s.GetDiscovered(ctx, discoveredID)
+	if err != nil {
+		return err
+	}
+	if d == nil {
+		return ErrDeviceNotFound
+	}
+	dev, err := s.GetDevice(ctx, deviceID)
+	if err != nil {
+		return err
+	}
+	if dev == nil {
+		return ErrDeviceNotFound
+	}
+	return s.SetDiscoveredStatus(ctx, discoveredID, DiscoveredStatusAdded, &deviceID)
 }
 
 // SuggestDiscoveredHost — предпочтительный host для promote (mgmt addr или sys_name).

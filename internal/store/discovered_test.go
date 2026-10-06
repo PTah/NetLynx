@@ -78,6 +78,41 @@ func TestVirtualPeerIdentity(t *testing.T) {
 	}
 }
 
+func TestDiscoveredIgnoreKeyMatch(t *testing.T) {
+	ignored := map[string]struct{}{}
+	addDiscoveredIgnoreKeys(ignored, "chassis:001565c76e7f", "00:15:65:c7:6e:7f", "192.168.170.29", "SIP-T41S")
+
+	// Тот же chassis под другим identity (mgmt) — тоже ignored.
+	sys := "SIP-T41S"
+	mgmt := "192.168.170.29"
+	ch := "00:15:65:c7:6e:7f"
+	nb := PortNeighbor{RemoteSysName: &sys, RemoteMgmtAddr: &mgmt, RemoteChassisID: &ch}
+	if !discoveredKeySetHits(ignored, neighborDiscoveredIgnoreKeys(nb)) {
+		t.Fatal("same chassis/mgmt must hit ignored set")
+	}
+
+	// Только mgmt, без chassis в соседе — addr всё ещё в индексе.
+	nbAddr := PortNeighbor{RemoteSysName: &sys, RemoteMgmtAddr: &mgmt}
+	if !discoveredKeySetHits(ignored, neighborDiscoveredIgnoreKeys(nbAddr)) {
+		t.Fatal("mgmt addr must hit ignored set")
+	}
+
+	other := "10.9.8.7"
+	nbOther := PortNeighbor{RemoteMgmtAddr: &other}
+	if discoveredKeySetHits(ignored, neighborDiscoveredIgnoreKeys(nbOther)) {
+		t.Fatal("unrelated addr must not hit")
+	}
+
+	// Model-only name не должен матчить чужой SIP-T41S без chassis/mgmt в индексе.
+	ignoredName := map[string]struct{}{}
+	addDiscoveredIgnoreKeys(ignoredName, "name:unique-leaf-1", "", "", "unique-leaf-1")
+	model := "SIP-T41S"
+	nbModel := PortNeighbor{RemoteSysName: &model}
+	if discoveredKeySetHits(ignoredName, neighborDiscoveredIgnoreKeys(nbModel)) {
+		t.Fatal("unrelated model name must not hit name-only ignore")
+	}
+}
+
 func TestShouldOfferDiscovered(t *testing.T) {
 	sys := "known-sw"
 	devices := []models.Device{
@@ -132,6 +167,62 @@ func TestHideDiscoveredAlreadyInInventory(t *testing.T) {
 }
 
 func int64Ptr(v int64) *int64 { return &v }
+
+func TestDiscoveredLacksStrongIdentityAndPortAnchor(t *testing.T) {
+	weak := DiscoveredDevice{IdentityKey: "name:kd-trassir"}
+	if !discoveredLacksStrongIdentity(weak) {
+		t.Fatal("name-only must be weak")
+	}
+	mac := "68:1d:ef:5d:9b:5a"
+	strongMAC := DiscoveredDevice{IdentityKey: "chassis:681def5d9b5a", RemoteChassisID: &mac}
+	if discoveredLacksStrongIdentity(strongMAC) {
+		t.Fatal("full chassis must be strong")
+	}
+	ip := "192.168.160.111"
+	strongIP := DiscoveredDevice{IdentityKey: "addr:192.168.160.111", RemoteMgmtAddr: &ip}
+	if discoveredLacksStrongIdentity(strongIP) {
+		t.Fatal("mgmt IP must be strong")
+	}
+
+	sw, ifIdx := int64(42), 29
+	d := DiscoveredDevice{LastSeenFromDeviceID: &sw, LastSeenIfIndex: &ifIdx}
+	gotSW, gotIf, ok := discoveredPortAnchor(d)
+	if !ok || gotSW != 42 || gotIf != 29 {
+		t.Fatalf("last_seen anchor: ok=%v sw=%d if=%d", ok, gotSW, gotIf)
+	}
+	firstSW, firstIf := int64(7), 3
+	d2 := DiscoveredDevice{FirstSeenFromDeviceID: &firstSW, FirstSeenIfIndex: &firstIf}
+	gotSW, gotIf, ok = discoveredPortAnchor(d2)
+	if !ok || gotSW != 7 || gotIf != 3 {
+		t.Fatalf("first_seen fallback: ok=%v sw=%d if=%d", ok, gotSW, gotIf)
+	}
+}
+
+func TestNeighborLacksStrongIdentity(t *testing.T) {
+	sys := "KD-TRASSIR"
+	nb := PortNeighbor{RemoteSysName: &sys, IfIndex: 29}
+	if !neighborLacksStrongIdentity(nb) {
+		t.Fatal("sysName-only LLDP must be weak")
+	}
+	mac := "68:1d:ef:5d:9b:5a"
+	nb2 := PortNeighbor{RemoteSysName: &sys, RemoteChassisID: &mac, IfIndex: 29}
+	if neighborLacksStrongIdentity(nb2) {
+		t.Fatal("chassis MAC must be strong")
+	}
+}
+
+func TestUniquePortInventoryID(t *testing.T) {
+	if _, _, ok := uniquePortInventoryID(nil); ok {
+		t.Fatal("empty")
+	}
+	if _, _, ok := uniquePortInventoryID(map[int64]string{1: "a", 2: "b"}); ok {
+		t.Fatal("two devices must not match")
+	}
+	id, name, ok := uniquePortInventoryID(map[int64]string{99: "Cam"})
+	if !ok || id != 99 || name != "Cam" {
+		t.Fatalf("got id=%d name=%q ok=%v", id, name, ok)
+	}
+}
 
 func TestFilterUnknownNeighbors(t *testing.T) {
 	sys := "core1"

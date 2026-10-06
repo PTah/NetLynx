@@ -340,6 +340,8 @@ const PEER_CARD_H = 64;
 const GROUP_PAD = 28;
 const PEER_GAP = 18;
 const SIDE_GAP = 72;
+/** Заголовок + подпись («N устройств · …») + зазор до карточек внутри рамки. */
+const GROUP_HEADER_H = 58;
 
 export type ExpandedLayout = {
   pos: Map<number, Pos>;
@@ -452,7 +454,7 @@ export function layoutExpandedLocationView(exp: ExpandedLocationView, layoutMode
 
   const leftColW = leftPeers.length ? peerCardW + SIDE_GAP : 0;
   const shiftX = GROUP_PAD + leftColW;
-  const shiftY = GROUP_PAD + 36; // место под заголовок рамки
+  const shiftY = GROUP_PAD + GROUP_HEADER_H;
 
   for (const [id, p] of [...pos.entries()]) {
     pos.set(id, { x: p.x - minX + shiftX, y: p.y - minY + shiftY });
@@ -461,7 +463,7 @@ export function layoutExpandedLocationView(exp: ExpandedLocationView, layoutMode
     x: GROUP_PAD + leftColW - 16,
     y: GROUP_PAD,
     w: Math.max(320, maxX - minX + 32),
-    h: Math.max(160, maxY - minY + 36 + 32),
+    h: Math.max(160, maxY - minY + GROUP_HEADER_H + 32),
   };
 
   const stackPeers = (list: typeof exp.peers, x: number) => {

@@ -27,6 +27,8 @@ type Discovered = {
   promoted_device_id?: number | null;
   last_seen_at: string;
   seen_from_name?: string | null;
+  likely_device_id?: number | null;
+  likely_device_name?: string | null;
 };
 
 type StatusFilter = "new" | "ignored" | "added" | "all";
@@ -283,6 +285,24 @@ export default function Discovered() {
     }
   }
 
+  async function onLink(id: number, deviceId: number, deviceName?: string | null) {
+    setBusy(true);
+    setMsg(null);
+    setErr(null);
+    try {
+      await apiPost(`/api/v1/discovered/${id}/link`, { device_id: deviceId });
+      setMsg(
+        `Кандидат #${id} связан с узлом #${deviceId}${deviceName ? ` (${deviceName})` : ""} — убран из новых`,
+      );
+      if (promoteID === id) setPromoteID(null);
+      load();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function onReopen(id: number) {
     setBusy(true);
     setMsg(null);
@@ -416,8 +436,10 @@ export default function Discovered() {
       <p style={{ color: "#9aa3b5" }}>
         Кандидаты LLDP/CDP, которых ещё нет в списке <Link to="/devices">Узлы</Link> (inventory). Кнопка «Добавить»
         открывает ту же форму, что и на топологии: имя, тип, расположение, IP по желанию. Узел появляется только
-        после «Добавить и сохранить». Если узел потом удалили из Узлов, кандидат снова станет <code>new</code> и
-        его можно добавить повторно.
+        после «Добавить и сохранить». «Игнор» скрывает кандидата из топологии и из фильтра «Новые»; он остаётся
+        только в «Игнор» / «Все» и не появится снова при повторном LLDP/скане. Если LLDP без MAC, а на том же порту
+        в FDB уже ровно один узел из Узлов — кандидат склеивается с ним автоматически (или кнопка «Это узел …»).
+        Если узел потом удалили из Узлов, кандидат снова станет <code>new</code> и его можно добавить повторно.
       </p>
       {err && <p style={{ color: "#f88" }}>{err}</p>}
       {msg && <p style={{ color: "#6d6" }}>{msg}</p>}
@@ -460,6 +482,18 @@ export default function Discovered() {
                   {(d.status === "new" ||
                     (d.status === "added" && (d.promoted_device_id == null || !deviceIds.has(d.promoted_device_id)))) && (
                     <>
+                      {d.status === "new" && d.likely_device_id != null && deviceIds.has(d.likely_device_id) && (
+                        <>
+                          <button
+                            type="button"
+                            disabled={busy}
+                            title="На том же порту в FDB виден этот узел — пометить кандидата как уже добавленный"
+                            onClick={() => void onLink(d.id, d.likely_device_id!, d.likely_device_name)}
+                          >
+                            Это узел {d.likely_device_name?.trim() || `#${d.likely_device_id}`}
+                          </button>{" "}
+                        </>
+                      )}
                       <button type="button" disabled={busy} onClick={() => openPromote(d)}>
                         Добавить
                       </button>{" "}

@@ -187,6 +187,71 @@ func IsEdgeSwitchXP(sysDescr, name string) bool {
 	return isEdgeSwitchXP(sysDescr, name)
 }
 
+func deviceIdentityBlob(sysDescr, name string, extra ...string) string {
+	parts := make([]string, 0, 2+len(extra))
+	parts = append(parts, sysDescr, name)
+	parts = append(parts, extra...)
+	return strings.ToLower(strings.Join(parts, " "))
+}
+
+// isUniFiNetworkDevice — линейка UniFi (USW/UAP/UDM…), не EdgeSwitch / EdgeOS / XP.
+// Без контроллера имя порта на железе надёжно не пишется — только descr_override в NetLynx.
+func isUniFiNetworkDevice(sysDescr, name string, extra ...string) bool {
+	blob := deviceIdentityBlob(sysDescr, name, extra...)
+	if strings.Contains(blob, "edgeswitch") || strings.Contains(blob, "edgeos") || strings.Contains(blob, "toughswitch") {
+		return false
+	}
+	if isEdgeSwitchXP(sysDescr, name) {
+		return false
+	}
+	for _, m := range []string{
+		"unifi", "www.ui.com", "ui.com", "ubiquiti inc",
+		"usw", "uap-", "uap ", "udm", "ucg-", "uck-", "uxg-",
+		"us-8", "us-16", "us-24", "us-48",
+	} {
+		if strings.Contains(blob, m) {
+			return true
+		}
+	}
+	return false
+}
+
+// IsUniFiNetworkDevice — публичная обёртка для линейки UniFi Network.
+// extra: sysName, ssh_vendor и т.п.
+func IsUniFiNetworkDevice(sysDescr, name string, extra ...string) bool {
+	return isUniFiNetworkDevice(sysDescr, name, extra...)
+}
+
+// IsLocalPortDescrOnly — подпись порта только в БД NetLynx (XP / UniFi без push на железо).
+// extra: sysName, ssh_vendor и т.п. — чтобы поймать US-8, если кастомный Name без модели.
+func IsLocalPortDescrOnly(sysDescr, name string, extra ...string) bool {
+	return isEdgeSwitchXP(sysDescr, name) || isUniFiNetworkDevice(sysDescr, name, extra...)
+}
+
+// PortDescrPushImpliesLocalOnly — push на железо провалился так, что устройство
+// явно BusyBox/UniFi без Fastpath CLI → сохраняем только в NetLynx.
+func PortDescrPushImpliesLocalOnly(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	if strings.Contains(msg, "edgeswitch") && !strings.Contains(msg, "edgeswitch xp") {
+		return false
+	}
+	if strings.Contains(msg, "busybox") ||
+		strings.Contains(msg, "built-in shell (ash)") ||
+		strings.Contains(msg, "unifi") ||
+		strings.Contains(msg, "www.ui.com") ||
+		strings.Contains(msg, "edgeswitch xp") {
+		return true
+	}
+	if strings.Contains(msg, "нет признаков configure") &&
+		(strings.Contains(msg, "ubiquiti") || strings.Contains(msg, "ui.com") || strings.Contains(msg, "busybox")) {
+		return true
+	}
+	return false
+}
+
 func dumpBusyboxCfg(client *ssh.Client, timeout time.Duration) (string, error) {
 	if s, err := tryBusyboxCat(client); err == nil && looksLikeConfig(s) {
 		return s, nil

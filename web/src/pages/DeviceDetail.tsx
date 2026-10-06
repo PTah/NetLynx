@@ -1720,8 +1720,9 @@ export default function DeviceDetail() {
               </span>
             </div>
             <p style={{ margin: "0.35rem 0 0", color: "#9aa3b5", fontSize: "0.85rem" }}>
-              Для ПК с жёстким файрволом (нет ping и SNMP) отметьте «Онлайн вручную» — дашборд, список Узлы и
-              топология будут считать узел онлайн. «Авто» снова смотрит на ping и SNMP.
+              «Авто (ping / SNMP)» — как раньше (свитч/роутер: SNMP; прочие: ping или SNMP). «Авто (Ping)» — только
+              ICMP, для IoT без SNMP (станции Yandex и т.п.). «Онлайн/оффлайн вручную» фиксирует статус независимо от
+              опросов (для ПК за жёстким файрволом).
             </p>
             <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem", alignItems: "center", marginTop: "0.35rem" }}>
               <select
@@ -1729,9 +1730,10 @@ export default function DeviceDetail() {
                 onChange={(e) => setOnlineOverrideEdit(e.target.value as OnlineOverrideMode)}
                 style={{ width: fieldWidthLikeCpu, maxWidth: "100%", boxSizing: "border-box" }}
               >
-                <option value="auto">Авто (ping / SNMP)</option>
-                <option value="online">Онлайн вручную</option>
-                <option value="offline">Оффлайн вручную</option>
+                <option value="auto">A) Авто (ping / SNMP)</option>
+                <option value="ping">B) Авто (Ping)</option>
+                <option value="online">C) Онлайн вручную</option>
+                <option value="offline">D) Оффлайн вручную</option>
               </select>
               <button
                 type="button"
@@ -1743,13 +1745,13 @@ export default function DeviceDetail() {
                     mode: onlineOverrideEdit,
                   })
                     .then(() => {
-                      setOnlineOverrideMsg(
-                        onlineOverrideEdit === "auto"
-                          ? "Снова автоопределение."
-                          : onlineOverrideEdit === "online"
-                            ? "Отмечен как онлайн вручную."
-                            : "Отмечен как оффлайн вручную.",
-                      );
+                      const msgByMode: Record<OnlineOverrideMode, string> = {
+                        auto: "Снова автоопределение (ping / SNMP).",
+                        ping: "Авто по ping: онлайн только при ответе ICMP.",
+                        online: "Отмечен как онлайн вручную.",
+                        offline: "Отмечен как оффлайн вручную.",
+                      };
+                      setOnlineOverrideMsg(msgByMode[onlineOverrideEdit]);
                       load();
                     })
                     .catch((e: Error) => setErr(e.message));

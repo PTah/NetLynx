@@ -310,7 +310,8 @@ export default function Topology() {
 
   useEffect(() => {
     if (!typeMenuOpen) return;
-    const onDocClick = (e: MouseEvent) => {
+    // canvas pan: preventDefault на pointerdown гасит последующий mousedown — слушаем pointerdown в capture
+    const onDocPointer = (e: PointerEvent) => {
       if (typeMenuRef.current && !typeMenuRef.current.contains(e.target as Node)) setTypeMenuOpen(false);
     };
     const onKey = (e: KeyboardEvent) => {
@@ -319,10 +320,10 @@ export default function Topology() {
         setTypeMenuOpen(false);
       }
     };
-    document.addEventListener("mousedown", onDocClick);
+    document.addEventListener("pointerdown", onDocPointer, true);
     window.addEventListener("keydown", onKey);
     return () => {
-      document.removeEventListener("mousedown", onDocClick);
+      document.removeEventListener("pointerdown", onDocPointer, true);
       window.removeEventListener("keydown", onKey);
     };
   }, [typeMenuOpen]);

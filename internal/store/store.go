@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"git.kalinamall.ru/PapaTramp/netlynx/internal/models"
@@ -17,6 +18,10 @@ import (
 type Store struct {
 	pool *pgxpool.Pool
 	sec  *secrets.Box // optional at-rest encryption
+
+	trapSettingsMu    sync.Mutex
+	trapSettingsCache *SNMPTrapSettings
+	trapSettingsAt    time.Time
 }
 
 func New(pool *pgxpool.Pool) *Store {
@@ -123,7 +128,7 @@ func (s *Store) ListDevices(ctx context.Context) ([]models.Device, error) {
 		       v3_user, v3_auth_protocol, v3_priv_protocol, v3_engine_id,
 		       poll_interval_seconds, util_high_pct, util_ok_pct, fdb_poll_interval_seconds,
 		       created_at, updated_at, last_poll_at, last_snmp_ok, last_snmp_error,
-		       last_ping_ok, last_ping_at, last_ping_rtt_ms, online_override, offline_since,
+		       last_ping_ok, last_ping_at, last_ping_rtt_ms, online_override, COALESCE(NULLIF(btrim(reachability_mode), ''), 'auto'), offline_since,
 		       sys_name, sys_descr, chassis_mac, cpu_profile, device_category, last_cpu_pct, last_cpu_at, last_sys_uptime_cs,
 		       last_page_count, last_toners, fdb_monitoring_status,
 		       ssh_user, ssh_password, ssh_port, ssh_enable_password, COALESCE(NULLIF(btrim(ssh_vendor), ''), 'auto'),
@@ -142,7 +147,7 @@ func (s *Store) ListDevices(ctx context.Context) ([]models.Device, error) {
 			&d.V3User, &d.V3AuthProtocol, &d.V3PrivProtocol, &d.V3EngineID,
 			&d.PollIntervalSeconds, &d.UtilHighPct, &d.UtilOkPct, &d.FDBPollIntervalSeconds,
 			&d.CreatedAt, &d.UpdatedAt, &d.LastPollAt, &d.LastSNMPOK, &d.LastSNMPError,
-			&d.LastPingOK, &d.LastPingAt, &d.LastPingRTTMs, &d.OnlineOverride, &d.OfflineSince,
+			&d.LastPingOK, &d.LastPingAt, &d.LastPingRTTMs, &d.OnlineOverride, &d.ReachabilityMode, &d.OfflineSince,
 			&d.SysName, &d.SysDescr, &d.ChassisMAC, &d.CPUProfile, &d.DeviceCategory, &d.LastCPUPct, &d.LastCPUAt, &d.LastSysUptimeCs,
 			&d.LastPageCount, &tonerRaw, &d.FDBMonitoringStatus,
 			&d.SSHUser, &d.SSHPassword, &d.SSHPort, &d.SSHEnablePassword, &d.SSHVendor,
@@ -154,6 +159,7 @@ func (s *Store) ListDevices(ctx context.Context) ([]models.Device, error) {
 		if d.DeviceCategory == "" {
 			d.DeviceCategory = DeviceCategorySwitch
 		}
+		d.ReachabilityMode = models.NormalizeReachabilityMode(d.ReachabilityMode, d.OnlineOverride)
 		out = append(out, d)
 	}
 	return out, rows.Err()
@@ -173,7 +179,7 @@ func (s *Store) GetDevice(ctx context.Context, id int64) (*models.Device, error)
 		       v3_user, v3_auth_protocol, v3_priv_protocol, v3_engine_id,
 		       poll_interval_seconds, util_high_pct, util_ok_pct, fdb_poll_interval_seconds,
 		       created_at, updated_at, last_poll_at, last_snmp_ok, last_snmp_error,
-		       last_ping_ok, last_ping_at, last_ping_rtt_ms, online_override, offline_since,
+		       last_ping_ok, last_ping_at, last_ping_rtt_ms, online_override, COALESCE(NULLIF(btrim(reachability_mode), ''), 'auto'), offline_since,
 		       sys_name, sys_descr, chassis_mac, cpu_profile, device_category, last_cpu_pct, last_cpu_at, last_sys_uptime_cs,
 		       last_page_count, last_toners, fdb_monitoring_status,
 		       ssh_user, ssh_password, ssh_port, ssh_enable_password, COALESCE(NULLIF(btrim(ssh_vendor), ''), 'auto'),
@@ -183,7 +189,7 @@ func (s *Store) GetDevice(ctx context.Context, id int64) (*models.Device, error)
 		&d.V3User, &d.V3AuthProtocol, &d.V3PrivProtocol, &d.V3EngineID,
 		&d.PollIntervalSeconds, &d.UtilHighPct, &d.UtilOkPct, &d.FDBPollIntervalSeconds,
 		&d.CreatedAt, &d.UpdatedAt, &d.LastPollAt, &d.LastSNMPOK, &d.LastSNMPError,
-		&d.LastPingOK, &d.LastPingAt, &d.LastPingRTTMs, &d.OnlineOverride, &d.OfflineSince,
+		&d.LastPingOK, &d.LastPingAt, &d.LastPingRTTMs, &d.OnlineOverride, &d.ReachabilityMode, &d.OfflineSince,
 		&d.SysName, &d.SysDescr, &d.ChassisMAC, &d.CPUProfile, &d.DeviceCategory, &d.LastCPUPct, &d.LastCPUAt, &d.LastSysUptimeCs,
 		&d.LastPageCount, &tonerRaw, &d.FDBMonitoringStatus,
 		&d.SSHUser, &d.SSHPassword, &d.SSHPort, &d.SSHEnablePassword, &d.SSHVendor,
@@ -199,6 +205,7 @@ func (s *Store) GetDevice(ctx context.Context, id int64) (*models.Device, error)
 	if d.DeviceCategory == "" {
 		d.DeviceCategory = DeviceCategorySwitch
 	}
+	d.ReachabilityMode = models.NormalizeReachabilityMode(d.ReachabilityMode, d.OnlineOverride)
 	if err := s.openDeviceModelSecrets(&d); err != nil {
 		return nil, err
 	}
@@ -1134,25 +1141,27 @@ func (s *Store) UpdateDeviceHost(ctx context.Context, id int64, host string) err
 	return nil
 }
 
-// UpdateDeviceOnlineOverride: mode auto|online|offline (авто / вручную онлайн / вручную оффлайн).
+// UpdateDeviceOnlineOverride: mode auto|ping|online|offline.
+// Пишет reachability_mode и синхронизирует legacy online_override (NULL / true / false).
 func (s *Store) UpdateDeviceOnlineOverride(ctx context.Context, id int64, mode string) error {
-	mode = strings.ToLower(strings.TrimSpace(mode))
-	var val interface{}
+	mode = models.NormalizeReachabilityMode(mode, nil)
 	switch mode {
-	case "auto", "":
-		val = nil
-	case "online":
-		t := true
-		val = t
-	case "offline":
-		f := false
-		val = f
+	case "auto", "ping", "online", "offline":
 	default:
-		return errors.New("mode: ожидается auto, online или offline")
+		return errors.New("mode: ожидается auto, ping, online или offline")
+	}
+	var override interface{}
+	switch mode {
+	case "online":
+		override = true
+	case "offline":
+		override = false
+	default: // auto, ping
+		override = nil
 	}
 	tag, err := s.pool.Exec(ctx, `
-		UPDATE devices SET online_override = $2, updated_at = now()
-		WHERE id = $1`, id, val)
+		UPDATE devices SET reachability_mode = $2, online_override = $3, updated_at = now()
+		WHERE id = $1`, id, mode, override)
 	if err != nil {
 		return err
 	}

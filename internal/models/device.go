@@ -30,8 +30,10 @@ type Device struct {
 	LastPingOK             *bool      `json:"last_ping_ok,omitempty"`
 	LastPingAt             *time.Time `json:"last_ping_at,omitempty"`
 	LastPingRTTMs          *int       `json:"last_ping_rtt_ms,omitempty"`
-	/** nil = авто (ping/SNMP); true/false = ручная отметка онлайн/оффлайн */
+	/** nil = авто; true/false = ручная отметка (legacy, синхронизируется с reachability_mode) */
 	OnlineOverride *bool `json:"online_override"`
+	/** auto | ping | online | offline — как определяется «в сети» */
+	ReachabilityMode string `json:"reachability_mode"`
 	/** Когда узел стал оффлайн; nil если сейчас онлайн или момент ещё не известен */
 	OfflineSince *time.Time `json:"offline_since,omitempty"`
 	SysName      *string    `json:"sys_name,omitempty"`

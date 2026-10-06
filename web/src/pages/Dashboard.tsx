@@ -389,13 +389,13 @@ export default function Dashboard() {
 
   useEffect(() => {
     if (!typeMenuOpen) return;
-    const onDocClick = (ev: MouseEvent) => {
+    const onDocPointer = (ev: PointerEvent) => {
       if (typeMenuRef.current && !typeMenuRef.current.contains(ev.target as Node)) {
         setTypeMenuOpen(false);
       }
     };
-    document.addEventListener("mousedown", onDocClick);
-    return () => document.removeEventListener("mousedown", onDocClick);
+    document.addEventListener("pointerdown", onDocPointer, true);
+    return () => document.removeEventListener("pointerdown", onDocPointer, true);
   }, [typeMenuOpen]);
 
   useEffect(() => {

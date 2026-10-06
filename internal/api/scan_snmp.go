@@ -133,7 +133,7 @@ func (s *Server) handleScanSNMP(w http.ResponseWriter, r *http.Request) {
 			skippedKnown++
 		}
 		discID, err := s.st.UpsertDiscoveredFromScan(ctx, pr.host, pr.sysName)
-		if err == nil {
+		if err == nil && discID > 0 {
 			hit.DiscoveredID = &discID
 		}
 		hits = append(hits, hit)

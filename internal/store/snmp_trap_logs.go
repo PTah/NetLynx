@@ -89,7 +89,36 @@ type SNMPTrapPendingLink struct {
 	ReceivedAt   time.Time
 }
 
+// trapSettingsCacheTTL — каждый trap раньше бил в БД; при flood это душит пул и login.
+const trapSettingsCacheTTL = 5 * time.Second
+
+func (s *Store) invalidateTrapSettingsCache() {
+	s.trapSettingsMu.Lock()
+	s.trapSettingsCache = nil
+	s.trapSettingsMu.Unlock()
+}
+
 func (s *Store) GetSNMPTrapSettings(ctx context.Context) (SNMPTrapSettings, error) {
+	s.trapSettingsMu.Lock()
+	if s.trapSettingsCache != nil && time.Since(s.trapSettingsAt) < trapSettingsCacheTTL {
+		out := *s.trapSettingsCache
+		s.trapSettingsMu.Unlock()
+		return out, nil
+	}
+	s.trapSettingsMu.Unlock()
+
+	out, err := s.loadSNMPTrapSettings(ctx)
+	if err != nil {
+		return out, err
+	}
+	s.trapSettingsMu.Lock()
+	s.trapSettingsCache = &out
+	s.trapSettingsAt = time.Now()
+	s.trapSettingsMu.Unlock()
+	return out, nil
+}
+
+func (s *Store) loadSNMPTrapSettings(ctx context.Context) (SNMPTrapSettings, error) {
 	var out SNMPTrapSettings
 	var labels *string
 	var mode, effects string
@@ -106,6 +135,9 @@ func (s *Store) GetSNMPTrapSettings(ctx context.Context) (SNMPTrapSettings, erro
 			LinkTrapEffects:    LinkTrapEffectsNotify,
 		}, nil
 	}
+	if err != nil {
+		return SNMPTrapSettings{}, err
+	}
 	if labels != nil {
 		out.TrapIncludeLabels = *labels
 	}
@@ -114,7 +146,7 @@ func (s *Store) GetSNMPTrapSettings(ctx context.Context) (SNMPTrapSettings, erro
 	}
 	out.LinkTrapEventsMode = NormalizeLinkTrapEventsMode(mode)
 	out.LinkTrapEffects = NormalizeLinkTrapEffects(effects)
-	return out, err
+	return out, nil
 }
 
 type PatchSNMPTrapSettingsInput struct {
@@ -174,6 +206,9 @@ func (s *Store) PatchSNMPTrapSettings(ctx context.Context, in PatchSNMPTrapSetti
 			updated_at = now()`,
 		le, listenEn, port, labels, mode, effects,
 	)
+	if err == nil {
+		s.invalidateTrapSettingsCache()
+	}
 	return err
 }
 

@@ -121,6 +121,35 @@ func TestClassifyTopologyKind(t *testing.T) {
 	if got := classifyTopologyKind(false, "", "", "Dahua DH-PFS4218-16ET-190", "pfs"); got != "switch" {
 		t.Fatalf("dahua switch: %s", got)
 	}
+	// «Ventcamera» в имени — не подстрока camera; EdgeSwitch остаётся свитчем.
+	if got := classifyTopologyKind(false, "switch", "ubiquiti",
+		"EdgeSwitch 24 250W, 1.12.2", "EdgeSwitch 24 #32000 Ventcamera"); got != "switch" {
+		t.Fatalf("ventcamera switch: %s", got)
+	}
+	if got := classifyTopologyKind(false, "", "", "IP Camera", "yard-cam"); got != "camera" {
+		t.Fatalf("ip camera phrase: %s", got)
+	}
+	if got := classifyTopologyKind(false, "", "", "", "camera-01"); got != "camera" {
+		t.Fatalf("camera word boundary: %s", got)
+	}
+}
+
+func TestBlobHasWord(t *testing.T) {
+	if blobHasWord("edgeswitch 24 #32000 ventcamera", "camera") {
+		t.Fatal("ventcamera must not match camera as whole word")
+	}
+	if !blobHasWord("ip camera yard", "camera") {
+		t.Fatal("camera as separate word must match")
+	}
+	if !blobHasWord("camera-01 online", "camera") {
+		t.Fatal("camera before hyphen must match")
+	}
+	if blobHasWord("myipcam", "ipcam") {
+		t.Fatal("myipcam must not match ipcam")
+	}
+	if !blobHasWord("host ipcam lan", "ipcam") {
+		t.Fatal("ipcam as word must match")
+	}
 }
 
 func TestMergeTopologyEdgeMetaStaleFreshWins(t *testing.T) {

@@ -1,6 +1,7 @@
 package swcfg
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -62,6 +63,48 @@ func TestHostKeySameTypeMismatchEmptyWant(t *testing.T) {
 	}
 	if hostKeySameTypeMismatch(nil, dummyPubKey{}) {
 		t.Fatal("new type with no known keys should not count as same-type mismatch")
+	}
+}
+
+func TestIsLocalPortDescrOnly(t *testing.T) {
+	cases := []struct {
+		descr, name string
+		extra       []string
+		want        bool
+	}{
+		{descr: "", name: "EdgeSwitch 5XP PoE #2", want: true},
+		{descr: "EdgeSwitch 16-Port, 1.9.3-lite", name: "ES-16 #22", want: false},
+		{descr: "USW-24-PoE, 6.6.61", name: "Office-USW", want: true},
+		{descr: "UniFi Switch 8 POE-60W", name: "us-8-lobby", want: true},
+		{descr: "Linux UniFi-USW-Lite-8-PoE", name: "usw-lite-8", want: true},
+		{descr: "UAP-AC-Pro", name: "ap-hall", want: true},
+		{descr: "EdgeSwitch 24 Lite", name: "sw-core", want: false},
+		{descr: "SNR-S2989G", name: "sw", want: false},
+		// Кастомное имя без модели — ловим по sysName / баннеру в extra.
+		{descr: "Linux 3.6.5", name: "свитч кабинет", extra: []string{"US-8-150W"}, want: true},
+		{descr: "", name: "sw1", extra: []string{"Welcome to UniFi US-8-150W"}, want: true},
+	}
+	for _, tc := range cases {
+		if got := IsLocalPortDescrOnly(tc.descr, tc.name, tc.extra...); got != tc.want {
+			t.Fatalf("%q / %q / %v: got %v want %v", tc.descr, tc.name, tc.extra, got, tc.want)
+		}
+	}
+	if IsUniFiNetworkDevice("EdgeSwitch 16-Port", "sw") {
+		t.Fatal("EdgeSwitch must not be UniFi")
+	}
+	if !IsUniFiNetworkDevice("USW-Lite-8-PoE", "sw1") {
+		t.Fatal("USW should be UniFi")
+	}
+}
+
+func TestPortDescrPushImpliesLocalOnly(t *testing.T) {
+	errBusy := fmt.Errorf("не удалось записать описание на свитч (SNMP: NoAccess; SSH: cli: нет признаков configure/interface — BusyBox v1.25.1 Welcome to UniFi US-8-150W! www.ui.com)")
+	if !PortDescrPushImpliesLocalOnly(errBusy) {
+		t.Fatal("UniFi BusyBox push fail must imply local")
+	}
+	errEdge := fmt.Errorf("SSH: Invalid input on EdgeSwitch 16")
+	if PortDescrPushImpliesLocalOnly(errEdge) {
+		t.Fatal("EdgeSwitch Fastpath fail must not imply local")
 	}
 }
 

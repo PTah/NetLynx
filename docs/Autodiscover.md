@@ -217,7 +217,7 @@ sudo systemctl enable --now snmpd lldpd
 | Что | Где |
 |-----|-----|
 | Соседи на портах | `GET /devices/{id}/detail` → `neighbors`; колонка **«Сосед LLDP»** |
-| Кандидаты в inventory | страница **Обнаружено** (`/discovered`): ignore / reopen / preview / promote |
+| Кандидаты в inventory | страница **Обнаружено** (`/discovered`): ignore / reopen / preview / promote / **link**. **Ignore** скрывает узел из топологии и не даёт снова попасть в «Новые» при LLDP/скане (виден только в фильтре «Игнор» / «Все»). Слабый LLDP (без MAC/IP) на порту, где в FDB ровно один узел из Узлов, склеивается автоматически (`added`) или кнопкой «Это узел …» |
 | Карта | **Топология** (`/topology`): фильтры protocol (lldp/cdp/fdb/manual), VLAN, локация, depth, layout |
 | Настройки карты | `GET/PATCH /api/v1/settings/topology` |
 

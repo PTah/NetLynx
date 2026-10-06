@@ -142,6 +142,68 @@ func (s *Store) ListPortClients(ctx context.Context, deviceID int64, ifIndex int
 	return out, rows.Err()
 }
 
+// PortInventoryHint — ровно один узел inventory, видимый в FDB на порту свитча.
+type PortInventoryHint struct {
+	DeviceID   int64
+	Name       string
+	ChassisMAC string // aa:bb:… или пусто
+	Host       string
+}
+
+// UniqueInventoryOnPort — FDB-клиенты порта → inventory; ok только если ровно один device id.
+func (s *Store) UniqueInventoryOnPort(ctx context.Context, switchID int64, ifIndex int) (*PortInventoryHint, error) {
+	if switchID <= 0 || ifIndex <= 0 {
+		return nil, nil
+	}
+	clients, err := s.ListPortClients(ctx, switchID, ifIndex)
+	if err != nil {
+		return nil, err
+	}
+	ids := map[int64]string{}
+	for _, c := range clients {
+		if c.ExistingDeviceID == nil || *c.ExistingDeviceID <= 0 {
+			continue
+		}
+		name := ""
+		if c.ExistingDeviceName != nil {
+			name = strings.TrimSpace(*c.ExistingDeviceName)
+		}
+		ids[*c.ExistingDeviceID] = name
+	}
+	id, name, ok := uniquePortInventoryID(ids)
+	if !ok {
+		return nil, nil
+	}
+	d, err := s.GetDevice(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if d == nil {
+		return nil, nil
+	}
+	hint := &PortInventoryHint{DeviceID: id, Name: name}
+	if hint.Name == "" {
+		hint.Name = d.Name
+	}
+	if mac := strings.TrimSpace(derefStr(d.ChassisMAC)); mac != "" {
+		if full, ok := FormatFullMAC(mac); ok {
+			hint.ChassisMAC = full
+		}
+	}
+	hint.Host = strings.TrimSpace(d.Host)
+	return hint, nil
+}
+
+func uniquePortInventoryID(ids map[int64]string) (id int64, name string, ok bool) {
+	if len(ids) != 1 {
+		return 0, "", false
+	}
+	for k, v := range ids {
+		return k, v, true
+	}
+	return 0, "", false
+}
+
 // HasPortFDBEntry true, если MAC есть в текущем снимке FDB этого порта.
 func (s *Store) HasPortFDBEntry(ctx context.Context, deviceID int64, ifIndex int, mac string) (bool, error) {
 	full, ok := FormatFullMAC(mac)

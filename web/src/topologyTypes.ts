@@ -8,6 +8,7 @@ export type TopologyNode = {
   last_snmp_ok?: boolean | null;
   last_ping_ok?: boolean | null;
   online_override?: boolean | null;
+  reachability_mode?: string | null;
   uisp_device_id?: string | null;
   uisp_overview_status?: string | null;
   virtual?: boolean;

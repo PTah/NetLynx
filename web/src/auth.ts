@@ -81,12 +81,24 @@ export function notifyAuthLost(): void {
   emit("auth-lost");
 }
 
+const AUTH_FETCH_TIMEOUT_MS = 12_000;
+
+async function authFetch(path: string, init: RequestInit = {}): Promise<Response> {
+  const ac = new AbortController();
+  const timer = window.setTimeout(() => ac.abort(), AUTH_FETCH_TIMEOUT_MS);
+  try {
+    return await fetch(path, { ...init, signal: ac.signal });
+  } finally {
+    window.clearTimeout(timer);
+  }
+}
+
 export async function refreshAccessToken(): Promise<boolean> {
   if (loggingOut) return false;
   if (refreshInFlight) return refreshInFlight;
   refreshInFlight = (async () => {
     try {
-      const res = await fetch("/api/v1/auth/refresh", {
+      const res = await authFetch("/api/v1/auth/refresh", {
         method: "POST",
         credentials: "include",
         headers: { Accept: "application/json" },
@@ -96,6 +108,8 @@ export async function refreshAccessToken(): Promise<boolean> {
       if (!body.access_token) return false;
       setAccessToken(body.access_token);
       return true;
+    } catch {
+      return false;
     } finally {
       refreshInFlight = null;
     }
@@ -117,15 +131,20 @@ export type LoginResult = {
 
 export async function login(username: string, password: string): Promise<LoginResult> {
   loggingOut = false;
-  const res = await fetch("/api/v1/auth/login", {
-    method: "POST",
-    credentials: "include",
-    headers: {
-      "Content-Type": "application/json",
-      Accept: "application/json",
-    },
-    body: JSON.stringify({ username, password }),
-  });
+  let res: Response;
+  try {
+    res = await authFetch("/api/v1/auth/login", {
+      method: "POST",
+      credentials: "include",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify({ username, password }),
+    });
+  } catch {
+    throw new Error("Сервер не отвечает (таймаут). Попробуйте ещё раз.");
+  }
   if (!res.ok) {
     const t = await res.text();
     throw new Error(t || res.statusText);

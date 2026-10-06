@@ -56,40 +56,19 @@ func (s *Server) handlePatchPortDescr(w http.ResponseWriter, r *http.Request) {
 		descr = *descrPtr
 	}
 
-	// EdgeSwitch XP: ifAlias в SNMP нет, Fastpath CLI нет — только подпись в NetLynx.
-	if dev, err := s.st.GetDevice(r.Context(), deviceID); err == nil && dev != nil {
-		sys := ""
-		if dev.SysDescr != nil {
-			sys = *dev.SysDescr
-		}
-		if swcfg.IsEdgeSwitchXP(sys, dev.Name) {
-			if err := s.st.UpdateInterfaceDescrOverride(r.Context(), deviceID, ifIndex, descrPtr); err != nil {
-				if err == store.ErrDeviceNotFound {
-					writeError(w, http.StatusNotFound, "порт не найден")
-					return
-				}
-				writeError(w, http.StatusInternalServerError, err.Error())
-				return
-			}
-			details := map[string]interface{}{
-				"if_index": ifIndex,
-				"descr":    descr,
-				"via":      "local",
-			}
-			s.audit(r, "port.descr.update", "device", &deviceID, details)
-			s.emitConfigEditEvent(r, deviceID, &ifIndex, "port.descr", details)
-			writeJSON(w, http.StatusOK, map[string]interface{}{
-				"ok":             true,
-				"descr":          descr,
-				"descr_override": descrPtr,
-				"via":            "local",
-			})
-			return
-		}
+	dev, _ := s.st.GetDevice(r.Context(), deviceID)
+	if deviceWantsLocalPortDescr(dev) {
+		s.writePortDescrLocal(w, r, deviceID, ifIndex, descr, descrPtr)
+		return
 	}
 
 	via, err := s.pushPortDescription(r.Context(), deviceID, ifIndex, descr)
 	if err != nil {
+		// US-8 и др.: Name/sysDescr могут быть без «unifi», а SSH — BusyBox → пишем в БД.
+		if swcfg.PortDescrPushImpliesLocalOnly(err) {
+			s.writePortDescrLocal(w, r, deviceID, ifIndex, descr, descrPtr)
+			return
+		}
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
 	}
@@ -110,6 +89,48 @@ func (s *Server) handlePatchPortDescr(w http.ResponseWriter, r *http.Request) {
 	s.emitConfigEditEvent(r, deviceID, &ifIndex, "port.descr", details)
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"ok": true, "descr": descr, "descr_override": nil, "via": via,
+	})
+}
+
+func deviceWantsLocalPortDescr(dev *models.Device) bool {
+	if dev == nil {
+		return false
+	}
+	sys := ""
+	if dev.SysDescr != nil {
+		sys = *dev.SysDescr
+	}
+	extra := make([]string, 0, 2)
+	if dev.SysName != nil {
+		extra = append(extra, *dev.SysName)
+	}
+	if v := strings.TrimSpace(dev.SSHVendor); v != "" {
+		extra = append(extra, "vendor:"+v)
+	}
+	return swcfg.IsLocalPortDescrOnly(sys, dev.Name, extra...)
+}
+
+func (s *Server) writePortDescrLocal(w http.ResponseWriter, r *http.Request, deviceID int64, ifIndex int, descr string, descrPtr *string) {
+	if err := s.st.UpdateInterfaceDescrOverride(r.Context(), deviceID, ifIndex, descrPtr); err != nil {
+		if err == store.ErrDeviceNotFound {
+			writeError(w, http.StatusNotFound, "порт не найден")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	details := map[string]interface{}{
+		"if_index": ifIndex,
+		"descr":    descr,
+		"via":      "local",
+	}
+	s.audit(r, "port.descr.update", "device", &deviceID, details)
+	s.emitConfigEditEvent(r, deviceID, &ifIndex, "port.descr", details)
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"ok":             true,
+		"descr":          descr,
+		"descr_override": descrPtr,
+		"via":            "local",
 	})
 }
 

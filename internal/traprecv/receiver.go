@@ -135,7 +135,7 @@ func (r *Receiver) handleTrap(packet *gosnmp.SnmpPacket, addr *net.UDPAddr) {
 
 	settings, err := r.st.GetSNMPTrapSettings(cctx)
 	if err != nil {
-		r.log.Warn("trap settings", "err", err)
+		r.log.Warn("trap settings", "source_ip", sourceIP, "err", err)
 		return
 	}
 	if !settings.ListenEnabled {
