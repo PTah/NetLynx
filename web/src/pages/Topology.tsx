@@ -31,6 +31,7 @@ import type { DeviceCategoryDef } from "../deviceCategories";
 import { PromoteDiscoveredForm, type PromotePreview } from "../components/PromoteDiscoveredForm";
 import { DeviceCategoryIcon } from "../components/DeviceCategoryIcon";
 import { copyTextToClipboard, formatMacDisplay, looksLikeMac, selectElementText } from "../macUtil";
+import { formatSysUptime } from "../uptimeFormat";
 import {
   topologyCardFill,
   topologyCardStroke,
@@ -2259,6 +2260,14 @@ export default function Topology() {
                 })()}
                 <button type="button" onClick={() => setFocus(null)}>×</button>
               </div>
+              {!selected.virtual && (
+                <div style={{ color: "#c8d0e0", marginTop: 4, fontSize: "0.9rem" }}>
+                  Uptime:{" "}
+                  {selected.last_sys_uptime_cs != null && selected.last_poll_at
+                    ? formatSysUptime(selected.last_sys_uptime_cs, selected.last_poll_at)
+                    : "—"}
+                </div>
+              )}
               <div style={{ color: "#9aa3b5", marginTop: 4 }}>
                 {selected.virtual
                   ? "не в списке Узлы · виден по LLDP/CDP"

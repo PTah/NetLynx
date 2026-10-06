@@ -55,7 +55,7 @@ if [[ ! -d /root/NetLynx/.git ]]; then
   echo "ERROR: /root/NetLynx missing — clone NetLynx first"
   exit 1
 fi
-grep -q 'jdoe/NetLynx' /root/NetLynx/.git/config
+grep -q 'PapaTramp/NetLynx' /root/NetLynx/.git/config
 
 echo "[7/8] каталоги netlynx"
 install -d -m 0755 /opt/netlynx /etc/netlynx /var/lib/netlynx/web /var/backups/netlynx

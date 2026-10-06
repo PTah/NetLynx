@@ -1144,22 +1144,6 @@ export default function DeviceDetail() {
     }
   }
 
-  async function setPortAdmin(p: IfRow, up: boolean, opts?: { skipConfirm?: boolean }) {
-    if (!id || !canWrite) return;
-    if (!up && !opts?.skipConfirm) {
-      await openShutConfirm([p], async () => {
-        await applyPortAdmin(p, false);
-      });
-      return;
-    }
-    try {
-      await applyPortAdmin(p, up);
-    } catch (err) {
-      setErr(err instanceof Error ? err.message : "Ошибка admin status порта");
-      throw err;
-    }
-  }
-
   async function confirmShutApply() {
     if (!shutConfirm) return;
     const needsAck = shutConfirm.impacts.some(
@@ -1718,6 +1702,12 @@ export default function DeviceDetail() {
               <span style={{ color: deviceReachabilityLabel(data.device).color }}>
                 {deviceReachabilityLabel(data.device).text}
               </span>
+            </div>
+            <div style={{ marginTop: "0.25rem", fontSize: "0.9rem" }}>
+              Uptime:{" "}
+              {data.device.last_sys_uptime_cs != null && data.device.last_poll_at
+                ? formatSysUptime(data.device.last_sys_uptime_cs, data.device.last_poll_at)
+                : "—"}
             </div>
             <p style={{ margin: "0.35rem 0 0", color: "#9aa3b5", fontSize: "0.85rem" }}>
               «Авто (ping / SNMP)» — как раньше (свитч/роутер: SNMP; прочие: ping или SNMP). «Авто (Ping)» — только

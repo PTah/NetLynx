@@ -31,6 +31,8 @@ type TopologyNode struct {
 	Kind           string  `json:"kind"`
 	LinkCount      int     `json:"link_count"`
 	DiscoveredID   *int64  `json:"discovered_id,omitempty"`
+	LastPollAt       *time.Time `json:"last_poll_at,omitempty"`
+	LastSysUptimeCs  *int64     `json:"last_sys_uptime_cs,omitempty"`
 }
 
 type TopologyEdge struct {
@@ -119,6 +121,7 @@ func (s *Store) BuildTopologyGraphFiltered(ctx context.Context, f TopologyFilter
 			Location: d.Location, SNMPOK: d.LastSNMPOK, PingOK: d.LastPingOK,
 			OnlineOverride: d.OnlineOverride, ReachabilityMode: d.ReachabilityMode,
 			UISPDeviceID: d.UISPDeviceID, UISPStatus: d.UISPOverviewStatus,
+			LastPollAt: d.LastPollAt, LastSysUptimeCs: d.LastSysUptimeCs,
 			Kind: classifyTopologyKind(false, d.DeviceCategory, derefStr(d.CPUProfile), derefStr(d.SysDescr),
 				strings.TrimSpace(d.Name+" "+derefStr(d.SysName)+" "+d.Host)),
 		})

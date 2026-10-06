@@ -345,7 +345,7 @@ export function PortSettingsModal({
   }
 
   async function doPoEReset() {
-    if (!onPoEReset || !canWrite || resetting || saving) return;
+    if (!onPoEReset || !canWrite || resetting || saving || !primary) return;
     const sec = Math.min(60, Math.max(1, Math.round(poeResetSec) || 10));
     const label = bulkMode ? `${bulkPorts!.length} портах` : `порту ${primary.if_name?.trim() || primary.if_index}`;
     if (!window.confirm(`Сбросить PoE на ${label} на ${sec} с? Питание PD будет кратковременно отключено.`)) {

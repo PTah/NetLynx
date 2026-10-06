@@ -1,10 +1,10 @@
-/** sysUpTime из SNMP (сотые доли секунды) + момент опроса → человекочитаемый uptime. */
-export function formatSysUptime(
+/** sysUpTime (сотые доли секунды) с поправкой на время с last_poll_at; null если нет данных. */
+export function sysUptimeCsNow(
   uptimeCs: number | null | undefined,
   polledAt: string | null | undefined,
   nowMs: number = Date.now(),
-): string {
-  if (uptimeCs == null || uptimeCs < 0) return "";
+): number | null {
+  if (uptimeCs == null || uptimeCs < 0) return null;
   const polled = polledAt?.trim();
   let totalCs = uptimeCs;
   if (polled) {
@@ -13,6 +13,17 @@ export function formatSysUptime(
       totalCs += Math.max(0, Math.floor((nowMs - polledMs) / 10));
     }
   }
+  return totalCs;
+}
+
+/** sysUpTime из SNMP (сотые доли секунды) + момент опроса → человекочитаемый uptime. */
+export function formatSysUptime(
+  uptimeCs: number | null | undefined,
+  polledAt: string | null | undefined,
+  nowMs: number = Date.now(),
+): string {
+  const totalCs = sysUptimeCsNow(uptimeCs, polledAt, nowMs);
+  if (totalCs == null) return "";
   const sec = Math.floor(totalCs / 100);
   const days = Math.floor(sec / 86400);
   const hours = Math.floor((sec % 86400) / 3600);

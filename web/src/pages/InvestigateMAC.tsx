@@ -168,7 +168,7 @@ type Report = {
   likely_cause?: {
     id: string;
     title: string;
-    confidence: string;
+    confidence: Confidence;
     explanation: string;
   };
   timeline: Timeline[];

@@ -1,4 +1,4 @@
-# HTTP API NetLynx
+﻿# HTTP API NetLynx
 
 NetLynx отдаёт API **сам** — процесс `netlynxd` слушает порт из настроек (по умолчанию **8080**).
 

@@ -15,6 +15,8 @@ export type TopologyNode = {
   kind?: string;
   link_count?: number;
   discovered_id?: number | null;
+  last_poll_at?: string | null;
+  last_sys_uptime_cs?: number | null;
 };
 
 export type TopologyEdge = {

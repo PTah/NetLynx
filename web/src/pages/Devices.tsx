@@ -29,6 +29,7 @@ import { isDeviceOnline } from "../deviceOnline";
 import { formatMacDisplay, macVendorLabel } from "../macUtil";
 import { formatPageCount, formatTonerPct, tonerLetter, tonerSwatch } from "../printerMetrics";
 import { alertDeviceCreateError } from "../apiError";
+import { formatSysUptime, sysUptimeCsNow } from "../uptimeFormat";
 
 type SnmpTestResult = {
   ok: boolean;
@@ -59,7 +60,7 @@ function portLabel(h: PortSearchHit): string {
   return parts.length > 0 ? parts.join(" · ") : `ifIndex ${h.if_index}`;
 }
 
-type DeviceSortCol = "name" | "host" | "category" | "location";
+type DeviceSortCol = "name" | "host" | "category" | "location" | "uptime";
 type SortDir = "asc" | "desc";
 
 function compareHost(a: string, b: string): number {
@@ -95,6 +96,14 @@ function compareDevices(a: Device, b: Device, col: DeviceSortCol): number {
       if (!la) return 1;
       if (!lb) return -1;
       return la.localeCompare(lb, undefined, { sensitivity: "base", numeric: true });
+    }
+    case "uptime": {
+      const ua = sysUptimeCsNow(a.last_sys_uptime_cs, a.last_poll_at);
+      const ub = sysUptimeCsNow(b.last_sys_uptime_cs, b.last_poll_at);
+      if (ua == null && ub == null) return 0;
+      if (ua == null) return 1;
+      if (ub == null) return -1;
+      return ua - ub;
     }
     default:
       return 0;
@@ -186,10 +195,10 @@ export default function Devices() {
   }, [categories, categoryFilter]);
 
   const colDefaults = mfuOnlyFilter
-    ? [52, 140, 130, 110, 220, 100, 170, 72, 80, 150, 100, 88]
-    : [52, 140, 130, 110, 220, 72, 80, 150, 100, 88];
+    ? [52, 140, 130, 110, 220, 100, 170, 72, 80, 150, 120, 100, 88]
+    : [52, 140, 130, 110, 220, 72, 80, 150, 120, 100, 88];
   const { colgroup, ResizeHandle } = usePersistedColumnWidths(
-    mfuOnlyFilter ? "devices-list-mfu" : "devices-list",
+    mfuOnlyFilter ? "devices-list-mfu-v2" : "devices-list-v2",
     colDefaults,
   );
 
@@ -709,12 +718,18 @@ export default function Devices() {
               <ResizeHandle colIndex={mfuOnlyFilter ? 9 : 7} />
             </th>
             <th style={{ userSelect: "none" }}>
-              Проверка SNMP
+              <button type="button" className="devices-sort-th" onClick={() => toggleSort("uptime")}>
+                Uptime{sortIndicator(sortCol === "uptime", sortDir)}
+              </button>
               <ResizeHandle colIndex={mfuOnlyFilter ? 10 : 8} />
             </th>
             <th style={{ userSelect: "none" }}>
-              Удалить
+              Проверка SNMP
               <ResizeHandle colIndex={mfuOnlyFilter ? 11 : 9} />
+            </th>
+            <th style={{ userSelect: "none" }}>
+              Удалить
+              <ResizeHandle colIndex={mfuOnlyFilter ? 12 : 10} />
             </th>
           </tr>
         </thead>
@@ -777,6 +792,11 @@ export default function Devices() {
                           : "да"
                         : "нет"}
                   </div>
+                </td>
+                <td style={{ fontSize: "0.9rem", fontVariantNumeric: "tabular-nums", ...dim }}>
+                  {d.last_sys_uptime_cs != null && d.last_poll_at
+                    ? formatSysUptime(d.last_sys_uptime_cs, d.last_poll_at)
+                    : "—"}
                 </td>
                 <td style={dim}>
                   <button type="button" onClick={() => runSnmpTest(d.id)}>
