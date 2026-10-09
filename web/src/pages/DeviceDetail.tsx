@@ -5,7 +5,12 @@ import { apiDelete, apiGet, apiPatch, apiPost, apiPut, asArray } from "../api";
 import { DeviceSearchSelect } from "../components/DeviceSearchSelect";
 import { LocationCombobox } from "../components/LocationCombobox";
 import MetricChart from "../components/MetricChart";
-import { PortOverviewGrid, isLikelyFiberPort, showPoEIndicator } from "../components/PortOverviewGrid";
+import {
+  PortOverviewGrid,
+  formatPoeWatts,
+  isLikelyFiberPort,
+  showPoEIndicator,
+} from "../components/PortOverviewGrid";
 import { PortSettingsModal, type PortLiveSettings, type PortSettingsTarget } from "../components/PortSettingsModal";
 import { formatBitRate, TrafficSparkline } from "../components/TrafficSparkline";
 import { formatEventSummary, formatEventTypeLabel } from "../eventFormat";
@@ -407,7 +412,7 @@ export default function DeviceDetail() {
   const {
     colgroup: portsColgroup,
     ResizeHandle: PortsResizeHandle,
-  } = usePersistedColumnWidths("device-detail-ports-v4", [52, 76, 180, 72, 80, 48, 56, 72, 88, 100, 100, 100, 140, 72]);
+  } = usePersistedColumnWidths("device-detail-ports-v6", [52, 76, 180, 58, 64, 48, 96, 72, 88, 100, 100, 100, 140, 72]);
   const {
     colgroup: eventsColgroup,
     ResizeHandle: EventsResizeHandle,
@@ -470,6 +475,9 @@ export default function DeviceDetail() {
   const [portClientsCache, setPortClientsCache] = useState<Record<number, PortClient[]>>({});
   const [clientsLoadingIf, setClientsLoadingIf] = useState<number | null>(null);
   const [clientsErr, setClientsErr] = useState<string | null>(null);
+  const [clientsRefreshIf, setClientsRefreshIf] = useState<number | null>(null);
+  const [clientsRefreshErr, setClientsRefreshErr] = useState<string | null>(null);
+  const [portClientsPolledAt, setPortClientsPolledAt] = useState<Record<number, string>>({});
   const [portPromote, setPortPromote] = useState<PortPromoteTarget | null>(null);
   const [portPromoteForm, setPortPromoteForm] = useState<PromoteFormValues>(emptyPortPromote);
   const [portPromotePreview, setPortPromotePreview] = useState<PromotePreview | null>(null);
@@ -857,6 +865,7 @@ export default function DeviceDetail() {
     setPortPromotePreview(null);
     setPortPromoteMsg(null);
     setClientsErr(null);
+    setClientsRefreshErr(null);
     if (portClientsCache[ifIndex] != null) return;
     if (!id) return;
     setClientsLoadingIf(ifIndex);
@@ -881,6 +890,33 @@ export default function DeviceDetail() {
       .catch(() => {
         /* оставляем кэш */
       });
+  }
+
+  function pollPortClients(ifIndex: number) {
+    if (!id || clientsRefreshIf != null) return;
+    setClientsRefreshIf(ifIndex);
+    setClientsRefreshErr(null);
+    setClientsErr(null);
+    apiPost<{
+      clients: PortClient[];
+      polled_at?: string;
+      fdb_count?: number;
+      arp_count?: number;
+      arp_warning?: string;
+    }>(`/api/v1/devices/${id}/interfaces/${ifIndex}/clients/refresh`, {})
+      .then((r) => {
+        setPortClientsCache((prev) => ({ ...prev, [ifIndex]: Array.isArray(r.clients) ? r.clients : [] }));
+        if (r.polled_at) {
+          setPortClientsPolledAt((prev) => ({ ...prev, [ifIndex]: r.polled_at! }));
+        }
+        if (r.arp_warning) {
+          setClientsRefreshErr(`FDB обновлён; ARP: ${r.arp_warning}`);
+        }
+      })
+      .catch((e: unknown) => {
+        setClientsRefreshErr(e instanceof Error ? e.message : String(e));
+      })
+      .finally(() => setClientsRefreshIf(null));
   }
 
   function clientIPs(c: PortClient): string[] {
@@ -2469,7 +2505,8 @@ export default function DeviceDetail() {
             </label>
           </p>
           <p style={{ marginTop: 0, marginBottom: "0.75rem", fontSize: "0.85rem", color: "#9aa3b5" }}>
-            Клик по порту в сетке или ▶ в таблице — список MAC/IP на порту (данные FDB/ARP последнего опроса).
+            Клик по порту в сетке или ▶ в таблице — список MAC/IP на порту (кэш FDB/ARP последнего опроса).
+            Кнопка «Опросить порт» — живой SNMP FDB/ARP с коммутатора (как в UISP).
             Колонка «Комментарий»: {canWrite
               ? "Enter/уход с поля — запись на свитч (SNMP ifAlias, иначе SSH). Пустое поле — снять description на устройстве."
               : "подпись порта (только просмотр)."}
@@ -2869,7 +2906,10 @@ export default function DeviceDetail() {
                         VLAN
                         <PortsResizeHandle colIndex={5} />
                       </th>
-                      <th style={{ position: "relative", userSelect: "none", textAlign: "center" }}>
+                      <th
+                        style={{ position: "relative", userSelect: "none", textAlign: "left" }}
+                        title="PoE: ✓ = подача питания, рядом — потребление (Вт)"
+                      >
                         PoE
                         <PortsResizeHandle colIndex={6} />
                       </th>
@@ -2915,6 +2955,8 @@ export default function DeviceDetail() {
                             : portIgnoreRowStyle(igMode);
                       const clients = portClientsCache[p.if_index];
                       const loadingClients = clientsLoadingIf === p.if_index;
+                      const refreshingClients = clientsRefreshIf === p.if_index;
+                      const polledAt = portClientsPolledAt[p.if_index];
                       return (
                       <Fragment key={p.if_index}>
                       <tr
@@ -3001,21 +3043,34 @@ export default function DeviceDetail() {
                           {portVlanDisplay(p)}
                         </td>
                         <td
-                          style={portTableCellStyle(p, "data", { textAlign: "center" })}
+                          style={portTableCellStyle(p, "data", {
+                            textAlign: "left",
+                            whiteSpace: "nowrap",
+                            fontVariantNumeric: "tabular-nums",
+                          })}
                           title={
-                            showPoEIndicator(p) && !isLikelyFiberPort(p, data.device.sys_descr)
-                              ? p.poe_power_w != null && p.poe_power_w > 0
-                                ? `PoE активен · ${p.poe_power_w.toFixed(1)} W`
-                                : "PoE активен (SNMP/SSH или LLDP-PD)"
-                              : "PoE нет"
+                            isLikelyFiberPort(p, data.device.sys_descr)
+                              ? "SFP/оптика — PoE не применим"
+                              : showPoEIndicator(p)
+                                ? p.poe_power_w != null
+                                  ? `PoE активен · ${formatPoeWatts(p.poe_power_w)}`
+                                  : "PoE активен (потребление неизвестно)"
+                                : "PoE нет"
                           }
                         >
-                          {showPoEIndicator(p) && !isLikelyFiberPort(p, data.device.sys_descr) ? (
-                            <span style={{ color: "#00e676", fontWeight: 700 }} aria-label="PoE">
-                              ✓
-                            </span>
-                          ) : (
+                          {isLikelyFiberPort(p, data.device.sys_descr) || !showPoEIndicator(p) ? (
                             "—"
+                          ) : (
+                            <span style={{ display: "inline-flex", alignItems: "baseline", gap: 4 }}>
+                              <span style={{ color: "#00e676", fontWeight: 700 }} aria-label="PoE">
+                                ✓
+                              </span>
+                              {p.poe_power_w != null ? (
+                                <span style={{ color: p.poe_power_w > 0 ? "#7eb8ff" : undefined }}>
+                                  {formatPoeWatts(p.poe_power_w)}
+                                </span>
+                              ) : null}
+                            </span>
                           )}
                         </td>
                         <td style={portTableCellStyle(p, "data")}>
@@ -3119,11 +3174,47 @@ export default function DeviceDetail() {
                         <tr>
                           <td colSpan={PORT_TABLE_COLS} style={{ padding: 0, verticalAlign: "top" }}>
                             <div className="port-clients-panel">
-                              {loadingClients && <p style={{ margin: "0.5rem 0.75rem", color: "#9aa3b5" }}>Загрузка…</p>}
-                              {!loadingClients && clientsErr && (
+                              <div
+                                style={{
+                                  display: "flex",
+                                  flexWrap: "wrap",
+                                  alignItems: "center",
+                                  gap: "0.5rem",
+                                  margin: "0.5rem 0.75rem 0",
+                                }}
+                              >
+                                <button
+                                  type="button"
+                                  disabled={refreshingClients || clientsRefreshIf != null}
+                                  onClick={() => pollPortClients(p.if_index)}
+                                  title="Живой опрос FDB и ARP на коммутаторе (SNMP)"
+                                >
+                                  {refreshingClients ? "Опрос…" : "Опросить порт"}
+                                </button>
+                                {polledAt ? (
+                                  <span style={{ fontSize: "0.8rem", color: "#9aa3b5" }}>
+                                    Опрошено: {new Date(polledAt).toLocaleString()}
+                                  </span>
+                                ) : (
+                                  <span style={{ fontSize: "0.8rem", color: "#9aa3b5" }}>
+                                    Показан кэш последнего фонового опроса
+                                  </span>
+                                )}
+                              </div>
+                              {clientsRefreshErr && expandedIfIndex === p.if_index && (
+                                <p style={{ margin: "0.35rem 0.75rem 0", color: "#f88", fontSize: "0.85rem" }}>
+                                  {clientsRefreshErr}
+                                </p>
+                              )}
+                              {(loadingClients || refreshingClients) && (
+                                <p style={{ margin: "0.5rem 0.75rem", color: "#9aa3b5" }}>
+                                  {refreshingClients ? "Опрос коммутатора (FDB/ARP)…" : "Загрузка…"}
+                                </p>
+                              )}
+                              {!loadingClients && !refreshingClients && clientsErr && (
                                 <p style={{ margin: "0.5rem 0.75rem", color: "#f88" }}>{clientsErr}</p>
                               )}
-                              {!loadingClients && !clientsErr && clients != null && clients.length === 0 && (
+                              {!loadingClients && !refreshingClients && !clientsErr && clients != null && clients.length === 0 && (
                                 <div style={{ margin: "0.5rem 0.75rem", fontSize: "0.9rem" }}>
                                   <p style={{ margin: "0 0 0.4rem", color: "#9aa3b5" }}>
                                     На порту нет записей FDB (MAC) и часто нет ARP (IP). Камеры, МФУ, ПК за VLAN
@@ -3171,7 +3262,8 @@ export default function DeviceDetail() {
                               {!loadingClients && !clientsErr && clients != null && clients.length > 0 && (
                                 <>
                                 <p style={{ margin: "0.35rem 0.75rem 0", color: "#9aa3b5", fontSize: "0.8rem" }}>
-                                  IP берётся из ARP любого узла (обычно шлюз/L3). Если «—» — добавьте в Узлы маршрутизатор с SNMP и дождитесь опроса; рядом с MAC тогда показывается производитель по IEEE OUI (камеры, СКУД и т.п. часто не светятся в ARP).
+                                  IP берётся из ARP любого узла (обычно шлюз/L3); «Опросить порт» обновляет FDB/ARP на этом коммутаторе.
+                                  Если «—» — добавьте в Узлы маршрутизатор с SNMP и дождитесь опроса; рядом с MAC тогда показывается производитель по IEEE OUI (камеры, СКУД и т.п. часто не светятся в ARP).
                                   «Добавить устройство» создаёт узел и сразу рисует линк на топологии с этого порта (FDB, не LLDP).
                                 </p>
                                 {portPromoteMsg && expandedIfIndex === p.if_index && (

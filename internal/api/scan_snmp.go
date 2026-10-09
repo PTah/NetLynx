@@ -242,6 +242,7 @@ func (s *Server) handleScanSNMPAdd(w http.ResponseWriter, r *http.Request) {
 		}
 		created++
 		createdHosts = append(createdHosts, host)
+		_ = s.onboardSSHDevice(r.Context(), id)
 		if identity := store.DiscoveredIdentityKey("", host, ""); identity != "" {
 			if d, err := s.st.GetDiscoveredByIdentityKey(r.Context(), identity); err == nil && d != nil {
 				_ = s.st.SetDiscoveredStatus(r.Context(), d.ID, store.DiscoveredStatusAdded, &id)

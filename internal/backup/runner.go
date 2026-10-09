@@ -12,6 +12,8 @@ import (
 	"unicode"
 
 	"git.kalinamall.ru/PapaTramp/netlynx/internal/config"
+	"git.kalinamall.ru/PapaTramp/netlynx/internal/configssh"
+	"git.kalinamall.ru/PapaTramp/netlynx/internal/devssh"
 	"git.kalinamall.ru/PapaTramp/netlynx/internal/models"
 	"git.kalinamall.ru/PapaTramp/netlynx/internal/notify"
 	"git.kalinamall.ru/PapaTramp/netlynx/internal/store"
@@ -29,6 +31,7 @@ type Runner struct {
 	busy   bool
 
 	pollPauser PollPauser
+	reporter   *configssh.Reporter
 }
 
 // PollPauser — приостановка SNMP-опроса на время бэкапа (снижение RAM / OOM).
@@ -82,6 +85,10 @@ func NewRunner(log *slog.Logger, st *store.Store, cfg config.Config) *Runner {
 
 func (r *Runner) SetPollPauser(p PollPauser) {
 	r.pollPauser = p
+}
+
+func (r *Runner) SetReporter(rep *configssh.Reporter) {
+	r.reporter = rep
 }
 
 func (r *Runner) setPollingPaused(v bool) {
@@ -177,7 +184,8 @@ func (r *Runner) runLocked(ctx context.Context) (status, errMsg string) {
 	notes := []string{}
 
 	var sshSwitches []models.Device
-	if bs.SwitchCfgEnabled {
+	cfgSSHOn := bs.SwitchCfgEnabled || bs.RouterCfgEnabled
+	if cfgSSHOn {
 		devs, lerr := r.st.ListDevices(ctx)
 		if lerr != nil {
 			notes = append(notes, "список узлов: "+lerr.Error())
@@ -185,7 +193,7 @@ func (r *Runner) runLocked(ctx context.Context) (status, errMsg string) {
 		} else {
 			var allSw []models.Device
 			for _, d := range devs {
-				if wantSwitchConfig(d) {
+				if wantConfigBackup(d, bs.SwitchCfgEnabled, bs.RouterCfgEnabled) {
 					allSw = append(allSw, d)
 				}
 			}
@@ -197,7 +205,7 @@ func (r *Runner) runLocked(ctx context.Context) (status, errMsg string) {
 				}
 			}
 			r.note(ctx, fmt.Sprintf("Всего в базе %d узлов для SSH-бэкапа, онлайн - %d", len(allSw), onlineN))
-			r.note(ctx, fmt.Sprintf("Бэкапим %d узлов (коммутаторы и RouterOS-роутеры)…", onlineN))
+			r.note(ctx, fmt.Sprintf("Бэкапим %d узлов (коммутаторы / RouterOS)…", onlineN))
 		}
 	}
 
@@ -220,8 +228,15 @@ func (r *Runner) runLocked(ctx context.Context) (status, errMsg string) {
 	cfgMap := map[string][]byte{}
 	swErrs := map[string]string{}
 	swOK := []string{}
-	if bs.SwitchCfgEnabled {
-		r.note(ctx, "снимаю конфиги по SSH (коммутаторы и RouterOS-роутеры)")
+	if cfgSSHOn {
+		parts := []string{}
+		if bs.SwitchCfgEnabled {
+			parts = append(parts, "коммутаторы")
+		}
+		if bs.RouterCfgEnabled {
+			parts = append(parts, "RouterOS-роутеры")
+		}
+		r.note(ctx, "снимаю конфиги по SSH ("+strings.Join(parts, " + ")+")")
 		if len(sshSwitches) == 0 {
 			r.note(ctx, "нет онлайн-узлов для съёма конфига")
 		} else {
@@ -234,6 +249,9 @@ func (r *Runner) runLocked(ctx context.Context) (status, errMsg string) {
 				if ferr != nil {
 					swErrs[lab] = ferr.Error()
 					r.note(ctx, fmt.Sprintf("SSH %s %s: ошибка — %s", pos, lab, ferr.Error()))
+					if r.reporter != nil {
+						r.reporter.ReportFail(ctx, d.ID, d.Name, d.Host, ferr, "backup")
+					}
 					continue
 				}
 				cfgMap[name] = data
@@ -256,15 +274,25 @@ func (r *Runner) runLocked(ctx context.Context) (status, errMsg string) {
 			}
 		}
 	} else {
-		r.note(ctx, "съём конфигов свитчей выключен")
+		r.note(ctx, "съём конфигов по SSH выключен (ни коммутаторы, ни роутеры)")
 	}
 
 	manStatus := "ok"
 	if len(swErrs) > 0 && len(swOK) > 0 {
 		manStatus = "partial"
-	} else if len(swErrs) > 0 && bs.SwitchCfgEnabled && len(swOK) == 0 {
+	} else if len(swErrs) > 0 && cfgSSHOn && len(swOK) == 0 {
 		manStatus = "partial"
-		notes = append(notes, "ни один конфиг свитча не снят")
+		notes = append(notes, "ни один конфиг по SSH не снят")
+	}
+	if len(swErrs) > 0 && r.reporter != nil {
+		samples := make([]string, 0, 8)
+		for lab := range swErrs {
+			samples = append(samples, lab)
+			if len(samples) >= 8 {
+				break
+			}
+		}
+		r.reporter.ReportBackupPartial(ctx, len(swErrs), samples)
 	}
 
 	r.note(ctx, "собираю ZIP")
@@ -348,44 +376,35 @@ func (r *Runner) runLocked(ctx context.Context) (status, errMsg string) {
 }
 
 func (r *Runner) fetchOne(ctx context.Context, bs store.BackupSettings, d models.Device) (string, []byte, error) {
-	_ = ctx
-	user := strings.TrimSpace(deref(d.SSHUser))
-	pass := deref(d.SSHPassword)
-	enable := deref(d.SSHEnablePassword)
-	port := bs.SSHPort
-	if d.SSHPort != nil && *d.SSHPort > 0 {
-		port = *d.SSHPort
+	// ListDevices не open'ит at-rest секреты — берём GetDevice, иначе в SSH уходит ciphertext.
+	full, err := r.st.GetDevice(ctx, d.ID)
+	if err != nil {
+		return "", nil, fmt.Errorf("устройство: %w", err)
 	}
-	if user == "" {
-		user = strings.TrimSpace(deref(bs.SSHUser))
+	if full == nil {
+		return "", nil, fmt.Errorf("устройство id=%d не найдено", d.ID)
 	}
-	if strings.TrimSpace(pass) == "" {
-		pass = deref(bs.SSHPassword)
+	user, pass, enable, port, timeout := devssh.ResolveDevice(full, bs, r.cfg)
+	if user == "" || strings.TrimSpace(pass) == "" {
+		return "", nil, fmt.Errorf("нет SSH-логина/пароля (карточка узла, настройки бэкапа или SSH_POE_*)")
 	}
-	if strings.TrimSpace(enable) == "" {
-		enable = deref(bs.SSHEnablePassword)
-	}
-	if user == "" || pass == "" {
-		return "", nil, fmt.Errorf("нет SSH-логина/пароля (карточка узла или общие настройки)")
-	}
-	kh := KnownHostsPath(r.cfg)
-	timeout := time.Duration(bs.SSHTimeoutSeconds) * time.Second
+	kh := devssh.KnownHostsPath(r.cfg)
 	raw, err := swcfg.FetchConfig(swcfg.Creds{
-		Host:       d.Host,
+		Host:       full.Host,
 		Port:       port,
 		User:       user,
 		Password:   pass,
 		EnablePass: enable,
-		Vendor:     swcfg.Vendor(d.SSHVendor),
-		SysDescr:   deref(d.SysDescr),
-		Name:       d.Name,
+		Vendor:     swcfg.Vendor(full.SSHVendor),
+		SysDescr:   deref(full.SysDescr),
+		Name:       full.Name,
 		Timeout:    timeout,
 		KnownHosts: kh,
 	})
 	if err != nil {
 		return "", nil, err
 	}
-	return safeConfigName(d.Name, d.Host), raw, nil
+	return safeConfigName(full.Name, full.Host), raw, nil
 }
 
 func (r *Runner) sendMail(ctx context.Context, bs store.BackupSettings, fname string, zip []byte, status string, notes []string, swErrs map[string]string) error {
@@ -420,26 +439,34 @@ func (r *Runner) sendMail(ctx context.Context, bs store.BackupSettings, fname st
 	}})
 }
 
-// WantConfigBackup — SSH-съём running-config (коммутаторы + MikroTik router).
+// WantConfigBackup — узел подходит под SSH-съём (при включённых флагах в настройках).
 func WantConfigBackup(d models.Device) bool {
-	return wantConfigBackup(d)
+	return wantConfigBackup(d, true, true)
 }
 
 func wantSwitchConfig(d models.Device) bool {
-	return wantConfigBackup(d)
+	return wantConfigBackup(d, true, true)
 }
 
-// wantConfigBackup — SSH-съём конфига в архив: коммутаторы и роутеры с явным вендором MikroTik.
-func wantConfigBackup(d models.Device) bool {
+// wantConfigBackup — SSH-съём в ZIP: коммутаторы и/или роутеры MikroTik/RouterOS по флагам.
+func wantConfigBackup(d models.Device, includeSwitch, includeMikrotikRouter bool) bool {
 	if strings.TrimSpace(d.Host) == "" {
+		return false
+	}
+	if !includeSwitch && !includeMikrotikRouter {
 		return false
 	}
 	cat := store.NormalizeDeviceCategory(d.DeviceCategory)
 	if cat == store.DeviceCategorySwitch {
-		return true
+		return includeSwitch
 	}
-	return cat == store.DeviceCategoryRouter &&
-		swcfg.IsMikrotikRouterForConfigBackup(d.DeviceCategory, d.SSHVendor)
+	sys := ""
+	if d.SysDescr != nil {
+		sys = *d.SysDescr
+	}
+	return includeMikrotikRouter &&
+		cat == store.DeviceCategoryRouter &&
+		swcfg.IsMikrotikRouterForConfigBackup(d.DeviceCategory, d.SSHVendor, sys, d.Name)
 }
 
 func labelDevice(d models.Device) string {

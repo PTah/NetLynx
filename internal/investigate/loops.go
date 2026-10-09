@@ -55,11 +55,13 @@ func (b *Builder) BuildLoopReport(ctx context.Context, protocol string) (*LoopRe
 		proto = "lldp"
 	}
 
+	online := b.deviceOnlineMap(ctx)
+
 	// Предпочитаем topology blast cache (lldp+cdp+manual) — тот же скелет, что VLAN blast.
 	if proto == "" || proto == "lldp" {
 		if cache, ok, err := b.St.LoadTopologyBlastCache(ctx); err == nil && ok && cache != nil && len(cache.Adj) > 0 {
 			names := b.deviceNames(ctx)
-			links, adj := buildUndirectedFromBlast(cache)
+			links, adj := buildUndirectedFromBlast(cache, online)
 			cycles := findUndirectedCycles(adj, links, names)
 			cycles = dedupeCycles(cycles)
 			sortCycles(cycles)
@@ -106,9 +108,9 @@ func (b *Builder) BuildLoopReport(ctx context.Context, protocol string) (*LoopRe
 		}
 	}
 
-	links, adj := buildUndirectedLLDPGraph(g.Edges)
+	links, adj := buildUndirectedLLDPGraph(g.Edges, online)
 	cycles := findUndirectedCycles(adj, links, names)
-	cycles = append(cycles, parallelLinkCyclesFromEdges(g.Edges, names)...)
+	cycles = append(cycles, parallelLinkCyclesFromEdges(g.Edges, names, online)...)
 	cycles = dedupeCycles(cycles)
 	sortCycles(cycles)
 	for i := range cycles {
@@ -148,13 +150,37 @@ func (b *Builder) deviceNames(ctx context.Context) map[int64]string {
 	return names
 }
 
-func buildUndirectedFromBlast(cache *store.TopologyBlastCache) ([]topoLink, map[int64][]int64) {
+// deviceOnlineMap — id → IsOnline (как в UI «Узлы»). Нужен, чтобы не считать петли через offline.
+func (b *Builder) deviceOnlineMap(ctx context.Context) map[int64]bool {
+	online := map[int64]bool{}
+	devs, err := b.St.ListDevices(ctx)
+	if err != nil {
+		return online
+	}
+	for _, d := range devs {
+		online[d.ID] = d.IsOnline()
+	}
+	return online
+}
+
+// bothOnline: nil online = без фильтра (тесты); иначе оба конца должны быть online.
+func bothOnline(online map[int64]bool, a, b int64) bool {
+	if online == nil {
+		return true
+	}
+	return online[a] && online[b]
+}
+
+func buildUndirectedFromBlast(cache *store.TopologyBlastCache, online map[int64]bool) ([]topoLink, map[int64][]int64) {
 	links := make([]topoLink, 0, len(cache.Edges))
 	adj := map[int64][]int64{}
 	pairSeen := map[[2]int64]struct{}{}
 	for _, e := range cache.Edges {
 		a, b := e.ADeviceID, e.BDeviceID
 		if a <= 0 || b <= 0 || a == b {
+			continue
+		}
+		if !bothOnline(online, a, b) {
 			continue
 		}
 		lo, hi := a, b
@@ -245,7 +271,7 @@ func CycleKeyFor(c TopologyCycle) string {
 	return k
 }
 
-func buildUndirectedLLDPGraph(edges []store.TopologyEdge) ([]topoLink, map[int64][]int64) {
+func buildUndirectedLLDPGraph(edges []store.TopologyEdge, online map[int64]bool) ([]topoLink, map[int64][]int64) {
 	seen := map[string]topoLink{}
 	for _, e := range edges {
 		if e.RemoteDeviceID == nil || *e.RemoteDeviceID <= 0 {
@@ -255,6 +281,9 @@ func buildUndirectedLLDPGraph(edges []store.TopologyEdge) ([]topoLink, map[int64
 			continue
 		}
 		a, b := e.LocalDeviceID, *e.RemoteDeviceID
+		if !bothOnline(online, a, b) {
+			continue
+		}
 		aIf := e.LocalIfIndex
 		bIf := 0
 		bIfName := ""
@@ -449,7 +478,7 @@ func cycleKey(ids []int64) string {
 
 // parallelLinkCyclesFromEdges — ≥2 разных локальных порта с одной стороны пары устройств.
 // Обратный LLDP того же кабеля (A:10→B и B:20→A) не считается параллельным линком.
-func parallelLinkCyclesFromEdges(edges []store.TopologyEdge, names map[int64]string) []TopologyCycle {
+func parallelLinkCyclesFromEdges(edges []store.TopologyEdge, names map[int64]string, online map[int64]bool) []TopologyCycle {
 	type pair struct{ a, b int64 }
 	type sideIfs map[int64]map[int]string // device -> ifIndex -> ifName
 	sides := map[pair]sideIfs{}
@@ -459,6 +488,9 @@ func parallelLinkCyclesFromEdges(edges []store.TopologyEdge, names map[int64]str
 			continue
 		}
 		a, b := e.LocalDeviceID, *e.RemoteDeviceID
+		if !bothOnline(online, a, b) {
+			continue
+		}
 		if a > b {
 			a, b = b, a
 		}

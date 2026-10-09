@@ -131,12 +131,17 @@ func selectSSHVendorProfile(sysDescr string) sshVendorProfile {
 	}
 }
 
-// ReadPoEActiveByIfIndex выполняет вендор-специфичный SSH CLI для PoE и возвращает только порты с активной выдачей питания.
-// Карта содержит ifIndex->true. Значения false намеренно не возвращаются, чтобы не затирать состояние при неполном выводе CLI.
-// knownHostsPath — файл known_hosts (SSH_POE_KNOWN_HOSTS); без него dial запрещён (нет InsecureIgnoreHostKey).
+// ReadPoEActiveByIfIndex — SSH CLI PoE: ifIndex→active. false намеренно не возвращаются (не затирать SNMP).
 func ReadPoEActiveByIfIndex(host string, port int, user, pass, enablePass, sysDescr string, ifRows map[int]snmp.IfRow, timeout time.Duration, knownHostsPath string) (map[int]bool, error) {
+	active, _, err := ReadPoEActiveAndPowerByIfIndex(host, port, user, pass, enablePass, sysDescr, ifRows, timeout, knownHostsPath)
+	return active, err
+}
+
+// ReadPoEActiveAndPowerByIfIndex — SSH CLI PoE: active + потребление (Вт) из Consumed(W) / Power(mW).
+// knownHostsPath — SSH_POE_KNOWN_HOSTS; без него dial запрещён.
+func ReadPoEActiveAndPowerByIfIndex(host string, port int, user, pass, enablePass, sysDescr string, ifRows map[int]snmp.IfRow, timeout time.Duration, knownHostsPath string) (map[int]bool, map[int]float32, error) {
 	if strings.TrimSpace(host) == "" || strings.TrimSpace(user) == "" {
-		return nil, fmt.Errorf("ssh poe: empty host/user")
+		return nil, nil, fmt.Errorf("ssh poe: empty host/user")
 	}
 	if port <= 0 {
 		port = 22
@@ -146,7 +151,7 @@ func ReadPoEActiveByIfIndex(host string, port int, user, pass, enablePass, sysDe
 	}
 	hkcb, err := hostKeyCallback(knownHostsPath)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	cfg := &ssh.ClientConfig{
@@ -157,16 +162,17 @@ func ReadPoEActiveByIfIndex(host string, port int, user, pass, enablePass, sysDe
 	}
 	client, err := ssh.Dial("tcp", fmt.Sprintf("%s:%d", host, port), cfg)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer client.Close()
 
 	profile := selectSSHVendorProfile(sysDescr)
 	out, err := runShowPoeStatus(client, pass, enablePass, profile)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return parseUbiquitiShowPoeStatusToIfIndex(out, ifRows), nil
+	active, power := parseUbiquitiShowPoeStatusToIfIndex(out, ifRows)
+	return active, power, nil
 }
 
 func hostKeyCallback(knownHostsPath string) (ssh.HostKeyCallback, error) {
@@ -387,7 +393,7 @@ func looksLikeUnsupportedCommand(s string) bool {
 		strings.Contains(l, "unrecognized command")
 }
 
-func parseUbiquitiShowPoeStatusToIfIndex(out string, ifRows map[int]snmp.IfRow) map[int]bool {
+func parseUbiquitiShowPoeStatusToIfIndex(out string, ifRows map[int]snmp.IfRow) (map[int]bool, map[int]float32) {
 	byName := make(map[string]int)
 	for ifIdx, row := range ifRows {
 		name := strings.TrimSpace(row.IfName)
@@ -397,6 +403,7 @@ func parseUbiquitiShowPoeStatusToIfIndex(out string, ifRows map[int]snmp.IfRow) 
 	}
 
 	res := make(map[int]bool)
+	power := make(map[int]float32)
 	for _, line := range strings.Split(out, "\n") {
 		// Формат "show poe status all":
 		// Intf  Detection  Class  Consumed(W) Voltage(V) Current(mA) ...
@@ -411,6 +418,7 @@ func parseUbiquitiShowPoeStatusToIfIndex(out string, ifRows map[int]snmp.IfRow) 
 			if ifIdx <= 0 {
 				continue
 			}
+			power[ifIdx] = float32(consumedW)
 			if isPoEActiveFromDetailedColumns(detection, consumedW, voltageV, currentMA) {
 				res[ifIdx] = true
 			} else {
@@ -428,6 +436,7 @@ func parseUbiquitiShowPoeStatusToIfIndex(out string, ifRows map[int]snmp.IfRow) 
 			if ifIdx <= 0 {
 				continue
 			}
+			power[ifIdx] = float32(powerMW / 1000.0)
 			if oper == "on" || powerMW > 0 {
 				res[ifIdx] = true
 			} else {
@@ -448,13 +457,28 @@ func parseUbiquitiShowPoeStatusToIfIndex(out string, ifRows map[int]snmp.IfRow) 
 			continue
 		}
 
+		if w, ok := extractWattsFromRest(rest); ok {
+			power[ifIdx] = w
+		}
 		if isPoEDeliveringState(rest) {
 			res[ifIdx] = true
 		} else {
 			res[ifIdx] = false
 		}
 	}
-	return res
+	return res, power
+}
+
+func extractWattsFromRest(s string) (float32, bool) {
+	for _, tok := range strings.Fields(strings.ReplaceAll(s, ",", ".")) {
+		tok = strings.TrimSpace(tok)
+		if strings.HasSuffix(tok, "w") {
+			if v, err := strconv.ParseFloat(strings.TrimSuffix(tok, "w"), 64); err == nil {
+				return float32(v), true
+			}
+		}
+	}
+	return 0, false
 }
 
 func isPoEDeliveringState(s string) bool {

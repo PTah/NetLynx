@@ -9,6 +9,7 @@ import (
 
 	"git.kalinamall.ru/PapaTramp/netlynx/internal/backup"
 	"git.kalinamall.ru/PapaTramp/netlynx/internal/config"
+	"git.kalinamall.ru/PapaTramp/netlynx/internal/configssh"
 	"git.kalinamall.ru/PapaTramp/netlynx/internal/live"
 	"git.kalinamall.ru/PapaTramp/netlynx/internal/store"
 	"github.com/go-chi/chi/v5"
@@ -30,6 +31,10 @@ type Server struct {
 	wifiFilterInvalidator wifiFilterCacheInvalidator
 	runningConfigCache    sync.Map // int64 → deviceRunningConfigEntry
 	topoDirty             func(reason string)
+	sshReporter           *configssh.Reporter
+	// portClientsRefreshBusy — device_id, уже идёт ручной FDB/ARP refresh.
+	portClientsRefreshMu   sync.Mutex
+	portClientsRefreshBusy map[int64]struct{}
 }
 
 // wifiFilterCacheInvalidator — poller сбрасывает кэш WiFi MAC после PATCH настроек.
@@ -45,13 +50,14 @@ type BuildInfo struct {
 
 func NewServer(st *store.Store, cfg config.Config, bi BuildInfo, hub *live.Hub, traps TrapListener, pollPauser backup.PollPauser) *Server {
 	s := &Server{
-		st:         st,
-		cfg:        cfg,
-		bi:         bi,
-		hub:        hub,
-		traps:      traps,
-		loginLimit: newLoginLimiter(),
-		sseTickets: newSSETicketStore(),
+		st:                     st,
+		cfg:                    cfg,
+		bi:                     bi,
+		hub:                    hub,
+		traps:                  traps,
+		loginLimit:             newLoginLimiter(),
+		sseTickets:             newSSETicketStore(),
+		portClientsRefreshBusy: make(map[int64]struct{}),
 	}
 	s.backupRun = backup.NewRunner(nil, st, cfg)
 	if pollPauser != nil {
@@ -109,6 +115,7 @@ func NewServer(st *store.Store, cfg config.Config, bi BuildInfo, hub *live.Hub, 
 		r.Get("/devices/{id}", s.handleGetDevice)
 		r.Get("/devices/{id}/interfaces", s.handleListInterfaces)
 		r.Get("/devices/{id}/interfaces/{ifIndex}/clients", s.handleListPortClients)
+		r.Post("/devices/{id}/interfaces/{ifIndex}/clients/refresh", s.handleRefreshPortClients)
 		r.Get("/devices/{id}/interfaces/{ifIndex}/settings", s.handleGetPortSettings)
 		r.Get("/devices/{id}/interfaces/{ifIndex}/shut-impact", s.handlePortShutImpact)
 		r.Get("/ports/search", s.handleSearchPorts)

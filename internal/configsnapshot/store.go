@@ -21,8 +21,12 @@ func ShouldSnapshotDevice(d models.Device) bool {
 	if cat == store.DeviceCategorySwitch {
 		return true
 	}
+	sys := ""
+	if d.SysDescr != nil {
+		sys = *d.SysDescr
+	}
 	return cat == store.DeviceCategoryRouter &&
-		swcfg.IsMikrotikRouterForConfigBackup(d.DeviceCategory, d.SSHVendor)
+		swcfg.IsMikrotikRouterForConfigBackup(d.DeviceCategory, d.SSHVendor, sys, d.Name)
 }
 
 func SaveIfChanged(ctx context.Context, st *store.Store, deviceID int64, text, source string) (saved bool, id int64, err error) {

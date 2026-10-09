@@ -31,6 +31,7 @@ SNMP-мониторинг коммутаторов, веб-UI.
 - **Автообнаружение / топология LLDP:** [docs/Autodiscover.md](docs/Autodiscover.md) — на свитчах должны быть включены **SNMP** и **LLDP** (NetLynx их не включает).
 - **Опросы и кэш топологии:** [docs/Polling-and-Topology-Cache.md](docs/Polling-and-Topology-Cache.md) — непрерывный SNMP-poll, ночной/часовой blast-rebuild, FDB/config snapshots; ручной скан подсети — из Настроек (не ночной sweep).
 - **Секреты at-rest:** [docs/Secrets.md](docs/Secrets.md) — AES-GCM для community/SSH/SMTP/токенов (`NETLYNX_SECRETS_KEY`, `secrets-rewrap`).
+- **История конфигов и бэкапы:** [docs/Config-History.md](docs/Config-History.md) — снимки `show run`, бэкап `show run` / MikroTik `/export` в ZIP (`backup_router_cfg`).
 - Производители коммутаторов: [docs/Vendors.md](docs/Vendors.md)
 - Расследование MAC / flapping: [docs/MAC-Investigation.md](docs/MAC-Investigation.md)
 - Петли LLDP: [docs/Loop-Investigation.md](docs/Loop-Investigation.md)

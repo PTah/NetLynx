@@ -307,12 +307,16 @@ func (s *Server) handlePromoteDiscovered(w http.ResponseWriter, r *http.Request)
 		"location":        strings.TrimSpace(body.Location),
 		"device_category": cat,
 	})
-	writeJSON(w, http.StatusCreated, map[string]interface{}{
+	resp := map[string]interface{}{
 		"ok":              true,
 		"id":              deviceID,
 		"discovered":      id,
 		"device_category": cat,
-	})
+	}
+	if warn := s.onboardSSHDevice(r.Context(), deviceID); warn != "" {
+		resp["ssh_warning"] = warn
+	}
+	writeJSON(w, http.StatusCreated, resp)
 }
 
 // requireHost: preview SNMP — да; promote в inventory без адреса (другой офис) — нет.

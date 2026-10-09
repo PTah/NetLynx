@@ -1,6 +1,7 @@
 package swcfg
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"strings"
@@ -9,6 +10,10 @@ import (
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
 )
+
+// errHostKeyCaptured — HostKeyCallback уже получил ключ; обрываем handshake до userauth,
+// иначе сервер (RouterOS) пишет login failure и может забанить IP.
+var errHostKeyCaptured = errors.New("ssh: host key captured")
 
 // sshAlgoProfile — набор алгоритмов для одного handshake. Пробуем по очереди:
 // современные, затем переходные, затем legacy (Eltex OpenSSH 5.x).
@@ -61,7 +66,7 @@ func applyAlgoProfile(cfg *ssh.ClientConfig, p sshAlgoProfile) {
 	}
 }
 
-// FetchHostKeyLine выполняет SSH-handshake (без логина) и возвращает строку known_hosts.
+// FetchHostKeyLine снимает host key по SSH (KEX only, без userauth) и возвращает строку known_hosts.
 // Перебирает профили алгоритмов, пока пир не отдаст ключ — без группировки по вендору/подсети.
 func FetchHostKeyLine(host string, port int, timeout time.Duration) (string, error) {
 	line, _, err := FetchHostKeyLineWithProfile(host, port, timeout)
@@ -107,12 +112,14 @@ func fetchHostKeyOnce(host string, port int, timeout time.Duration, p sshAlgoPro
 			}
 		}
 		keyLine = knownhosts.Line(addrs, key)
-		return nil
+		// Обрыв до userauth: иначе RouterOS логирует login failure и банит IP (bruteforce).
+		return errHostKeyCaptured
 	}
 
 	cfg := &ssh.ClientConfig{
-		User:            "_hostkey_probe_",
-		Auth:            []ssh.AuthMethod{ssh.Password("")},
+		// User не участвует в auth — handshake рвётся в HostKeyCallback.
+		User:            "netlynx",
+		Auth:            nil,
 		HostKeyCallback: hk,
 		Timeout:         timeout,
 	}

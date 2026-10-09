@@ -21,6 +21,40 @@ func TestCPUProfileMatchCisco(t *testing.T) {
 	}
 }
 
+func TestCPUProfileMikroTikUsesLoadNotTemperature(t *testing.T) {
+	desc := "RouterOS CCR1009-7G-1C-1S+"
+	var prof cpuProfile
+	for _, p := range cpuProfiles {
+		for _, needle := range p.MatchAny {
+			if containsFold(desc, needle) {
+				prof = p
+				break
+			}
+		}
+		if prof.Name == p.Name {
+			break
+		}
+	}
+	if prof.Name != "mikrotik" {
+		t.Fatalf("expected mikrotik profile, got %q", prof.Name)
+	}
+	if len(prof.OIDs) == 0 || prof.OIDs[0] != oidCPUMikrotikLoad {
+		t.Fatalf("mikrotik must prefer %s, got %v", oidCPUMikrotikLoad, prof.OIDs)
+	}
+	for _, oid := range prof.OIDs {
+		// mtxrHlTemperature — частая ошибка в старых скриптах.
+		if oid == "1.3.6.1.4.1.14988.1.1.3.10.0" {
+			t.Fatal("mikrotik profile must not use mtxrHlTemperature as CPU")
+		}
+		if oid == "1.3.6.1.4.1.2021.11.9.0" {
+			t.Fatal("ssCpuUser (.11.9) is not idle; do not use as CPU idle OID")
+		}
+	}
+	if oidCPUIdleUCD != "1.3.6.1.4.1.2021.11.11.0" {
+		t.Fatalf("ssCpuIdle must be .11.11.0, got %s", oidCPUIdleUCD)
+	}
+}
+
 func containsFold(s, sub string) bool {
 	return len(sub) > 0 && len(s) >= len(sub) && stringContainsFold(s, sub)
 }

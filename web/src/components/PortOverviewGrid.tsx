@@ -88,6 +88,28 @@ export function showPoEIndicator(p: Pick<PortRow, "poe_active" | "poe_power_w">)
   return false;
 }
 
+/** Формат потребления PoE для таблицы / тултипа. */
+export function formatPoeWatts(w: number): string {
+  if (!Number.isFinite(w)) return "—";
+  if (w === 0) return "0 W";
+  if (Math.abs(w) < 10) return `${w.toFixed(2)} W`;
+  return `${w.toFixed(1)} W`;
+}
+
+export function portPoeTitleSuffix(
+  p: Pick<PortRow, "poe_active" | "poe_power_w">,
+  fiber: boolean,
+): string {
+  if (fiber) return "";
+  if (p.poe_power_w != null) {
+    return ` · PoE ${formatPoeWatts(p.poe_power_w)}`;
+  }
+  if (showPoEIndicator(p)) {
+    return " · PoE активен";
+  }
+  return "";
+}
+
 /**
  * Номер порта для подписи над квадратом: только число (например 5 для Ethernet1/0/5).
  * Берём последний числовой сегмент из ifName; иначе — из ifDescr; иначе ifIndex.
@@ -242,8 +264,8 @@ export function PortOverviewLegend() {
         SFP/оптика
       </span>
       {" · "}
-      <span title="PoE: SNMP/SSH (выдача питания). LLDP-PD — только если MIB и SSH молчат">
-        ⚡ — активный PoE (только фактическая подача питания)
+      <span title="PoE: SNMP/SSH. В тултипе порта — потребление в ваттах, если свитч отдаёт">
+        ⚡ — активный PoE; наведение — потребление (Вт)
       </span>
       {" · "}
       <span title="Текущая утилизация линка (max in/out) по последнему опросу">
@@ -367,7 +389,7 @@ export function PortOverviewGrid({
                   outline: expanded ? "2px solid rgba(120, 188, 255, 0.85)" : undefined,
                   outlineOffset: 2,
                 }}
-                title={`${nm || "—"} · ${portDisplayDescr(p) || "без описания"} · ${formatLinkSpeedMbps(mbps)} · oper ${p.oper_status ?? "—"}${fiber ? " · вероятно SFP/оптика" : ""}${onPortEditSettings ? " · ПКМ: настройки" : ""}`}
+                title={`${nm || "—"} · ${portDisplayDescr(p) || "без описания"} · ${formatLinkSpeedMbps(mbps)} · oper ${p.oper_status ?? "—"}${fiber ? " · вероятно SFP/оптика" : ""}${portPoeTitleSuffix(p, fiber)}${onPortEditSettings ? " · ПКМ: настройки" : ""}`}
               >
                 {fiber ? (
                   <span

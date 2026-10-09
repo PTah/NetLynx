@@ -78,6 +78,12 @@ func (h *Hub) runOnce(ctx context.Context, seedOnly bool) {
 		h.mu.Unlock()
 	}()
 
+	if marked, deleted, err := h.st.ExpireStaleNeighbors(ctx, time.Now().UTC()); err != nil {
+		h.log.Warn("loop watch expire neighbors", "err", err)
+	} else if marked > 0 || deleted > 0 {
+		h.log.Info("loop watch expired neighbors", "marked_stale", marked, "deleted", deleted)
+	}
+
 	b := &investigate.Builder{St: h.st}
 	rep, err := b.BuildLoopReport(ctx, "")
 	if err != nil {

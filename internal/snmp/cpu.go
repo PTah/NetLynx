@@ -9,13 +9,15 @@ import (
 const (
 	oidCPUUbiquiti1 = "1.3.6.1.4.1.41112.1.6.1.1.0"
 	oidCPUUbiquiti2 = "1.3.6.1.4.1.4413.1.1.1.1.5.0"
-	oidCPUMikrotik  = "1.3.6.1.4.1.14988.1.1.3.10.0"
-	oidCPUSNR       = "1.3.6.1.4.1.40418.7.100.30.1.0"
-	oidCPUCisco5Min = "1.3.6.1.4.1.9.9.109.1.1.1.1.5"
-	oidCPUJuniper   = "1.3.6.1.4.1.2636.3.1.13.1.8.0"
-	oidCPUELTEX     = "1.3.6.1.4.1.35265.1.1.1.1.1.0"
-	oidCPUIdleUCD   = "1.3.6.1.4.1.2021.11.9.0"
-	oidCPUHrBase    = "1.3.6.1.2.1.25.3.3.1.2"
+	// RouterOS ≥6.35: мгновенный CPU load (не idle). Не путать с mtxrHlTemperature (.3.10).
+	oidCPUMikrotikLoad = "1.3.6.1.4.1.2021.11.10.0"
+	oidCPUSNR          = "1.3.6.1.4.1.40418.7.100.30.1.0"
+	oidCPUCisco5Min    = "1.3.6.1.4.1.9.9.109.1.1.1.1.5"
+	oidCPUJuniper      = "1.3.6.1.4.1.2636.3.1.13.1.8.0"
+	oidCPUELTEX        = "1.3.6.1.4.1.35265.1.1.1.1.1.0"
+	// UCD-SNMP-MIB: ssCpuIdle = .11.11 (не .11.9 — это ssCpuUser).
+	oidCPUIdleUCD = "1.3.6.1.4.1.2021.11.11.0"
+	oidCPUHrBase  = "1.3.6.1.2.1.25.3.3.1.2"
 )
 
 type cpuProfile struct {
@@ -25,7 +27,7 @@ type cpuProfile struct {
 }
 
 var cpuProfiles = []cpuProfile{
-	{Name: "mikrotik", MatchAny: []string{"mikrotik", "routeros"}, OIDs: []string{oidCPUMikrotik, oidCPUIdleUCD}},
+	{Name: "mikrotik", MatchAny: []string{"mikrotik", "routeros"}, OIDs: []string{oidCPUMikrotikLoad, oidCPUHrBase}},
 	{Name: "ubiquiti", MatchAny: []string{"ubiquiti", "edgeswitch", "unifi"}, OIDs: []string{oidCPUUbiquiti1, oidCPUUbiquiti2, oidCPUIdleUCD}},
 	{Name: "snr", MatchAny: []string{"snr"}, OIDs: []string{oidCPUSNR, oidCPUIdleUCD}},
 	{Name: "huawei", MatchAny: []string{"huawei", "vrp", "quidway"}, OIDs: []string{oidCPUHrBase, oidCPUIdleUCD}},
@@ -82,7 +84,11 @@ func readCPUPercentByOID(g *gosnmp.GoSNMP, oid string) *float32 {
 	if err != nil || len(pdus.Variables) == 0 {
 		return nil
 	}
-	v := float32(pduInt64(pdus.Variables[0]))
+	p := pdus.Variables[0]
+	if p.Type == gosnmp.NoSuchObject || p.Type == gosnmp.NoSuchInstance || p.Type == gosnmp.Null {
+		return nil
+	}
+	v := float32(pduInt64(p))
 	// Для ucd ssCpuIdle возвращается idle, конвертируем в usage.
 	if normalizeOID(oid) == oidCPUIdleUCD {
 		v = 100 - v
@@ -97,6 +103,9 @@ func readHrProcessorLoad(g *gosnmp.GoSNMP) *float32 {
 	var total float32
 	var count int
 	err := g.BulkWalk(oidCPUHrBase, func(pdu gosnmp.SnmpPDU) error {
+		if pdu.Type == gosnmp.NoSuchObject || pdu.Type == gosnmp.NoSuchInstance || pdu.Type == gosnmp.Null {
+			return nil
+		}
 		v := float32(pduInt64(pdu))
 		if v >= 0 && v <= 100 {
 			total += v

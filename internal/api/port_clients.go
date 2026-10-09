@@ -30,6 +30,126 @@ func (s *Server) handleListPortClients(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleRefreshPortClients — живой SNMP FDB+ARP на коммутаторе, без событий mac-move.
+func (s *Server) handleRefreshPortClients(w http.ResponseWriter, r *http.Request) {
+	deviceID, ifIndex, ok := parseDeviceIfIndex(w, r)
+	if !ok {
+		return
+	}
+	if !s.beginPortClientsRefresh(deviceID) {
+		writeError(w, http.StatusConflict, "опрос FDB/ARP для этого устройства уже выполняется")
+		return
+	}
+	defer s.endPortClientsRefresh(deviceID)
+
+	pd, err := s.st.GetPollDevice(r.Context(), deviceID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if pd == nil {
+		writeError(w, http.StatusNotFound, "узел не найден")
+		return
+	}
+
+	g, err := snmp.NewGoSNMP(*pd)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := g.Connect(); err != nil {
+		writeError(w, http.StatusBadGateway, "SNMP connect: "+err.Error())
+		return
+	}
+	defer g.Conn.Close()
+
+	now := time.Now().UTC()
+	fdbEntries, _, err := snmp.WalkFDBWithStats(g)
+	if err != nil {
+		_ = s.st.UpdateDeviceFDBStatus(r.Context(), deviceID, "unavailable")
+		writeError(w, http.StatusBadGateway, "FDB: "+err.Error())
+		return
+	}
+	storeFDB := make(map[string]store.FDBLearnedEntry, len(fdbEntries))
+	for mac, ent := range fdbEntries {
+		storeFDB[mac] = store.FDBLearnedEntry{IfIndex: ent.IfIndex, VLANID: ent.VLANID}
+	}
+	if err := s.st.ReplaceFDBSnapshot(r.Context(), deviceID, storeFDB, now); err != nil {
+		writeError(w, http.StatusInternalServerError, "FDB snapshot: "+err.Error())
+		return
+	}
+	if len(storeFDB) > 0 {
+		_ = s.st.UpdateDeviceFDBStatus(r.Context(), deviceID, "ok")
+	} else {
+		_ = s.st.UpdateDeviceFDBStatus(r.Context(), deviceID, "learning")
+	}
+
+	arpCount := 0
+	var arpWarning string
+	if arpEntries, err := snmp.WalkARP(g); err != nil {
+		arpWarning = err.Error()
+	} else {
+		storeARP := make([]store.ARPEntry, 0, len(arpEntries))
+		for _, a := range arpEntries {
+			storeARP = append(storeARP, store.ARPEntry{IP: a.IP, MAC: a.MAC, IfIndex: a.IfIndex})
+		}
+		if err := s.st.ReplaceARPSnapshot(r.Context(), deviceID, storeARP, now); err != nil {
+			arpWarning = "ARP snapshot: " + err.Error()
+		} else {
+			arpCount = len(storeARP)
+			_, _ = s.st.BackfillEmptyChassisFromARP(r.Context(), storeARP)
+		}
+	}
+
+	clients, err := s.st.ListPortClients(r.Context(), deviceID, ifIndex)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if clients == nil {
+		clients = []store.PortClient{}
+	}
+
+	s.audit(r, "port_clients.refresh", "device", &deviceID, map[string]interface{}{
+		"if_index":  ifIndex,
+		"fdb_count": len(storeFDB),
+		"arp_count": arpCount,
+		"clients":   len(clients),
+	})
+
+	resp := map[string]interface{}{
+		"device_id": deviceID,
+		"if_index":  ifIndex,
+		"clients":   clients,
+		"polled_at": now.Format(time.RFC3339),
+		"fdb_count": len(storeFDB),
+		"arp_count": arpCount,
+	}
+	if arpWarning != "" {
+		resp["arp_warning"] = arpWarning
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (s *Server) beginPortClientsRefresh(deviceID int64) bool {
+	s.portClientsRefreshMu.Lock()
+	defer s.portClientsRefreshMu.Unlock()
+	if s.portClientsRefreshBusy == nil {
+		s.portClientsRefreshBusy = make(map[int64]struct{})
+	}
+	if _, busy := s.portClientsRefreshBusy[deviceID]; busy {
+		return false
+	}
+	s.portClientsRefreshBusy[deviceID] = struct{}{}
+	return true
+}
+
+func (s *Server) endPortClientsRefresh(deviceID int64) {
+	s.portClientsRefreshMu.Lock()
+	defer s.portClientsRefreshMu.Unlock()
+	delete(s.portClientsRefreshBusy, deviceID)
+}
+
 type promotePortClientBody struct {
 	discoveredSNMPBody
 	MAC string `json:"mac"`
@@ -230,14 +350,20 @@ func (s *Server) handlePromotePortClient(w http.ResponseWriter, r *http.Request)
 	if already {
 		status = http.StatusOK
 	}
-	writeJSON(w, status, map[string]interface{}{
+	resp := map[string]interface{}{
 		"ok":              true,
 		"id":              newID,
 		"already":         already,
 		"linked":          inFDB,
 		"mac":             mac,
 		"device_category": cat,
-	})
+	}
+	if !already {
+		if warn := s.onboardSSHDevice(r.Context(), newID); warn != "" {
+			resp["ssh_warning"] = warn
+		}
+	}
+	writeJSON(w, status, resp)
 }
 
 func syntheticDiscoveredFromClient(mac, host string) *store.DiscoveredDevice {

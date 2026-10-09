@@ -186,7 +186,11 @@ func (s *Server) handleCreateDevice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.audit(r, "device.create", "device", &id, map[string]interface{}{"name": body.Name, "host": body.Host})
-	writeJSON(w, http.StatusCreated, map[string]int64{"id": id})
+	resp := map[string]interface{}{"id": id}
+	if warn := s.onboardSSHDevice(r.Context(), id); warn != "" {
+		resp["ssh_warning"] = warn
+	}
+	writeJSON(w, http.StatusCreated, resp)
 }
 
 func (s *Server) handlePatchDevice(w http.ResponseWriter, r *http.Request) {

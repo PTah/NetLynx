@@ -18,16 +18,19 @@ func TestIsMikrotikRouterDevice(t *testing.T) {
 }
 
 func TestIsMikrotikRouterForConfigBackup(t *testing.T) {
-	if !IsMikrotikRouterForConfigBackup("router", "mikrotik") {
+	if !IsMikrotikRouterForConfigBackup("router", "mikrotik", "", "") {
 		t.Fatal("explicit mikrotik")
 	}
-	if IsMikrotikRouterForConfigBackup("router", "auto") {
-		t.Fatal("auto vendor")
+	if !IsMikrotikRouterForConfigBackup("router", "auto", "RouterOS 7.12", "gate") {
+		t.Fatal("auto + RouterOS sysDescr")
 	}
-	if IsMikrotikRouterForConfigBackup("router", "") {
-		t.Fatal("empty vendor")
+	if !IsMikrotikRouterForConfigBackup("router", "", "", "CCR1009-edge") {
+		t.Fatal("CCR in name")
 	}
-	if IsMikrotikRouterForConfigBackup("switch", "mikrotik") {
+	if IsMikrotikRouterForConfigBackup("router", "auto", "Cisco IOS", "ISR") {
+		t.Fatal("cisco must stay out")
+	}
+	if IsMikrotikRouterForConfigBackup("switch", "mikrotik", "", "") {
 		t.Fatal("switch")
 	}
 }

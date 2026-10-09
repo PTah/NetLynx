@@ -12,10 +12,8 @@ func IsMikrotikRouterDevice(category, sshVendor, sysDescr, name string) bool {
 	return DetectVendor(sshVendor, sysDescr, name) == VendorMikrotik
 }
 
-// IsMikrotikRouterForConfigBackup — роутер в SSH-бэкап конфигов только при явно выбранном вендоре MikroTik.
-func IsMikrotikRouterForConfigBackup(category, sshVendor string) bool {
-	if strings.ToLower(strings.TrimSpace(category)) != "router" {
-		return false
-	}
-	return strings.ToLower(strings.TrimSpace(sshVendor)) == string(VendorMikrotik)
+// IsMikrotikRouterForConfigBackup — роутер RouterOS в ZIP/снимки конфига.
+// Явный ssh_vendor=mikrotik или автодетект по sysDescr/имени (RouterOS, CCR, RouterBOARD…).
+func IsMikrotikRouterForConfigBackup(category, sshVendor, sysDescr, name string) bool {
+	return IsMikrotikRouterDevice(category, sshVendor, sysDescr, name)
 }

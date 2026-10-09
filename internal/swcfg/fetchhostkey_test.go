@@ -1,6 +1,18 @@
 package swcfg
 
-import "testing"
+import (
+	"errors"
+	"testing"
+)
+
+func TestErrHostKeyCapturedDistinct(t *testing.T) {
+	if errHostKeyCaptured == nil || errHostKeyCaptured.Error() == "" {
+		t.Fatal("sentinel required")
+	}
+	if errors.Is(errors.New("unable to authenticate"), errHostKeyCaptured) {
+		t.Fatal("must not match auth errors")
+	}
+}
 
 func TestSSHHostKeyProfilesOrder(t *testing.T) {
 	ps := sshHostKeyProfiles()

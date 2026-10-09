@@ -143,6 +143,31 @@ func (s *Store) UpsertPortNeighbors(ctx context.Context, deviceID int64, protoco
 	return tx.Commit(ctx)
 }
 
+// ExpireStaleNeighbors — глобальный age-out: offline-свитч не опрашивается → Upsert не
+// помечает его соседей stale, и зомби-LLDP держат «живые» рёбра бесконечно.
+// Помечает stale=true и удаляет записи с last_seen_at старше NeighborStaleTTL.
+func (s *Store) ExpireStaleNeighbors(ctx context.Context, at time.Time) (marked, deleted int64, err error) {
+	if at.IsZero() {
+		at = time.Now().UTC()
+	}
+	cutoff := at.Add(-NeighborStaleTTL)
+	tag, err := s.pool.Exec(ctx, `
+		UPDATE port_neighbors SET stale = true, updated_at = $1
+		WHERE stale = false AND last_seen_at < $2`, at, cutoff)
+	if err != nil {
+		return 0, 0, err
+	}
+	marked = tag.RowsAffected()
+	tag, err = s.pool.Exec(ctx, `
+		DELETE FROM port_neighbors
+		WHERE stale = true AND last_seen_at < $1`, cutoff)
+	if err != nil {
+		return marked, 0, err
+	}
+	deleted = tag.RowsAffected()
+	return marked, deleted, nil
+}
+
 func neighborKey(ifIndex, remIndex int) string {
 	return strconv.Itoa(ifIndex) + ":" + strconv.Itoa(remIndex)
 }

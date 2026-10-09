@@ -688,6 +688,36 @@ func (s *Store) HasEventSince(ctx context.Context, deviceID int64, eventType str
 	return ok, err
 }
 
+// HasEventTypeSince — debounce системных событий (device_id IS NULL) по типу.
+func (s *Store) HasEventTypeSince(ctx context.Context, eventType string, since time.Time) (bool, error) {
+	if eventType == "" || since.IsZero() {
+		return false, nil
+	}
+	var ok bool
+	err := s.pool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM events
+			WHERE event_type = $1 AND created_at >= $2
+		)`, eventType, since,
+	).Scan(&ok)
+	return ok, err
+}
+
+// HasConfigSSHFailSince — debounce CONFIG_SSH_FAIL по device + err_class в payload.
+func (s *Store) HasConfigSSHFailSince(ctx context.Context, deviceID int64, eventType, errClass string, since time.Time) (bool, error) {
+	if deviceID <= 0 || eventType == "" || errClass == "" || since.IsZero() {
+		return false, nil
+	}
+	var ok bool
+	err := s.pool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM events
+			WHERE device_id = $1 AND event_type = $2 AND created_at >= $3
+			  AND COALESCE(payload->>'err_class', '') = $4
+		)`, deviceID, eventType, since, errClass).Scan(&ok)
+	return ok, err
+}
+
 func (s *Store) ListEventsByDevice(ctx context.Context, deviceID int64, limit int, eventType string) ([]models.Event, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 100

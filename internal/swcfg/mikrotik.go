@@ -94,23 +94,13 @@ func applyMikrotikPortChange(c Creds, ch PortChange) error {
 	if host == "" || user == "" {
 		return fmt.Errorf("нет host или ssh user")
 	}
-	port := c.Port
-	if port <= 0 {
-		port = 22
-	}
 	timeout := c.Timeout
 	if timeout <= 0 {
 		timeout = 30 * time.Second
 	}
-	hk, err := HostKeyCallback(c.KnownHosts)
+	client, err := DialSwitch(c)
 	if err != nil {
 		return err
-	}
-	cfg := switchSSHConfig(user, c.Password, timeout, hk)
-	addr := fmt.Sprintf("%s:%d", host, port)
-	client, err := ssh.Dial("tcp", addr, cfg)
-	if err != nil {
-		return fmt.Errorf("ssh %s: %w", host, err)
 	}
 	defer client.Close()
 

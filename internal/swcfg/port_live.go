@@ -243,27 +243,17 @@ func FetchPortLiveSettings(c Creds, iface string) (PortLiveSettings, string, err
 	if v == VendorAuto {
 		v = DetectVendor("", c.SysDescr, c.Name)
 	}
-	port := c.Port
-	if port <= 0 {
-		port = 22
-	}
 	timeout := c.Timeout
 	if timeout <= 0 {
 		timeout = 25 * time.Second
-	}
-	hk, err := HostKeyCallback(c.KnownHosts)
-	if err != nil {
-		return PortLiveSettings{}, "", err
 	}
 	enable := strings.TrimSpace(c.EnablePass)
 	if enable == "" {
 		enable = c.Password
 	}
-	cfg := switchSSHConfig(user, c.Password, timeout, hk)
-	addr := fmt.Sprintf("%s:%d", host, port)
-	client, err := ssh.Dial("tcp", addr, cfg)
+	client, err := DialSwitch(c)
 	if err != nil {
-		return PortLiveSettings{}, "", fmt.Errorf("ssh %s: %w", host, err)
+		return PortLiveSettings{}, "", err
 	}
 	defer client.Close()
 

@@ -1,7 +1,8 @@
 import type { CSSProperties } from "react";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { apiDelete, apiGet, apiPost } from "../api";
+import { useEventStream } from "../hooks/useEventStream";
 import { usePersistedColumnWidths } from "../hooks/usePersistedColumnWidths";
 import { deviceLinkState } from "../navigation";
 import {
@@ -225,12 +226,32 @@ export default function Devices() {
     return y > 0 ? y : null;
   });
 
-  const reload = (signal?: AbortSignal) =>
-    apiGet<Device[] | null>("/api/v1/devices", signal ? { signal } : undefined)
+  const reload = useCallback((signal?: AbortSignal) => {
+    return apiGet<Device[] | null>("/api/v1/devices", signal ? { signal } : undefined)
       .then((rows) => setList(Array.isArray(rows) ? rows : []))
       .catch((e: Error) => {
         if (e.name !== "AbortError") setErr(e.message);
       });
+  }, []);
+
+  const reachabilityReloadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduleReachabilityReload = useCallback(() => {
+    if (reachabilityReloadTimer.current != null) {
+      clearTimeout(reachabilityReloadTimer.current);
+    }
+    // Короткий debounce: poller пишет флаги до события, но даём БД/API догнать.
+    reachabilityReloadTimer.current = setTimeout(() => {
+      reachabilityReloadTimer.current = null;
+      void reload();
+    }, 400);
+  }, [reload]);
+
+  useEventStream((ev) => {
+    const t = (ev.event_type ?? "").toUpperCase();
+    if (t === "DEVICE_ONLINE" || t === "DEVICE_OFFLINE") {
+      scheduleReachabilityReload();
+    }
+  });
 
   const removeDevice = (id: number, name: string) => {
     if (!window.confirm(`Удалить узел «${name}» (id ${id})? События и порты по этому узлу будут удалены из базы.`)) {
@@ -259,10 +280,24 @@ export default function Devices() {
   };
 
   useEffect(() => {
-    const ac = new AbortController();
-    void reload(ac.signal);
-    return () => ac.abort();
-  }, []);
+    let request: AbortController | null = null;
+    const refresh = () => {
+      request?.abort();
+      request = new AbortController();
+      void reload(request.signal);
+    };
+    refresh();
+    // Список раньше грузился один раз — Telegram уже «ONLINE», а таблица оставалась серой.
+    const t = setInterval(refresh, 15000);
+    return () => {
+      clearInterval(t);
+      request?.abort();
+      if (reachabilityReloadTimer.current != null) {
+        clearTimeout(reachabilityReloadTimer.current);
+        reachabilityReloadTimer.current = null;
+      }
+    };
+  }, [reload]);
 
   useEffect(() => {
     if (sessionStorage.getItem(DEVICES_LIST_SCROLL_RESTORE_KEY) !== "1") {

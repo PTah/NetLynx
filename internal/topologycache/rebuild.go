@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"git.kalinamall.ru/PapaTramp/netlynx/internal/investigate"
 	"git.kalinamall.ru/PapaTramp/netlynx/internal/models"
@@ -29,6 +30,8 @@ func Rebuild(ctx context.Context, st *store.Store, trigger string) (RebuildResul
 	if st == nil {
 		return out, fmt.Errorf("store is nil")
 	}
+	// Сначала age-out зомби-соседей offline-узлов (иначе blast держит мёртвые рёбра).
+	_, _, _ = st.ExpireStaleNeighbors(ctx, time.Now().UTC())
 	includeStale := false
 	g, err := st.BuildTopologyGraphFiltered(ctx, store.TopologyFilter{
 		Dedup:        true,

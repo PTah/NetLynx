@@ -111,6 +111,7 @@ type BackupSettings = {
   share_retain_days: number;
   has_share_password?: boolean;
   switch_cfg_enabled: boolean;
+  router_cfg_enabled: boolean;
   ssh_user?: string | null;
   ssh_port: number;
   ssh_timeout_seconds: number;
@@ -312,6 +313,7 @@ export default function Settings() {
   const [bkHasSharePass, setBkHasSharePass] = useState(false);
   const [bkShareDays, setBkShareDays] = useState("3");
   const [bkSwitchEn, setBkSwitchEn] = useState(false);
+  const [bkRouterEn, setBkRouterEn] = useState(false);
   const [bkSshUser, setBkSshUser] = useState("");
   const [bkSshPass, setBkSshPass] = useState("");
   const [bkSshPort, setBkSshPort] = useState("22");
@@ -357,6 +359,7 @@ export default function Settings() {
     setBkHasSharePass(Boolean(x.has_share_password));
     setBkShareDays(String(x.share_retain_days > 0 ? x.share_retain_days : 3));
     setBkSwitchEn(Boolean(x.switch_cfg_enabled));
+    setBkRouterEn(Boolean(x.router_cfg_enabled));
     setBkSshUser(x.ssh_user ?? "");
     setBkSshPass("");
     setBkSshEnable("");
@@ -961,6 +964,7 @@ export default function Settings() {
       share_domain: bkShareDomain.trim(),
       share_retain_days: shareDays,
       switch_cfg_enabled: bkSwitchEn,
+      router_cfg_enabled: bkRouterEn,
       ssh_user: bkSshUser.trim(),
       ssh_port: sshPort,
       ssh_timeout_seconds: sshTimeout,
@@ -2071,7 +2075,7 @@ export default function Settings() {
               <section className="settings-card">
                 <h2>Резервные копии</h2>
           <p style={{ color: "#9aa3b5", fontSize: "0.9rem", maxWidth: 720 }}>
-            Архив: дамп БД, файл окружения сервера и (опционально) running-config коммутаторов по SSH.
+            Архив: дамп БД, файл окружения сервера и (опционально) running-config /export по SSH.
             Локально и на шаре старые ZIP удаляются по сроку в днях. Почта — без ограничения срока: письмо
             уходит и дальше живёт в ящике получателя.
           </p>
@@ -2206,14 +2210,19 @@ export default function Settings() {
               />
             </label>
 
-            <h3 style={{ margin: "0.5rem 0 0" }}>Конфиги коммутаторов (SSH)</h3>
+            <h3 style={{ margin: "0.5rem 0 0" }}>Конфиги устройств (SSH)</h3>
             <label>
               <input type="checkbox" checked={bkSwitchEn} onChange={(e) => setBkSwitchEn(e.target.checked)} /> Снимать
-              running-config только у коммутаторов (категория switch)
+              running-config у коммутаторов (категория switch)
+            </label>
+            <label>
+              <input type="checkbox" checked={bkRouterEn} onChange={(e) => setBkRouterEn(e.target.checked)} /> Снимать
+              /export у роутеров MikroTik (категория router, RouterOS)
             </label>
             <p style={{ margin: 0, color: "#9aa3b5", fontSize: "0.85rem" }}>
-              Сначала учётка из карточки узла, иначе эти поля. Неизвестный SSH-ключ хоста при первом подключении
-              принимается; при смене ключа — ошибка.
+              Галочки независимы: можно бэкапить только свитчи, только MikroTik или оба. Сначала учётка из карточки
+              узла, иначе поля ниже. Неизвестный SSH-ключ хоста при первом подключении принимается; при смене ключа —
+              ошибка.
             </p>
             <label>
               Пользователь

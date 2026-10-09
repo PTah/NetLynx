@@ -7,16 +7,18 @@ import (
 	"time"
 
 	"git.kalinamall.ru/PapaTramp/netlynx/internal/config"
+	"git.kalinamall.ru/PapaTramp/netlynx/internal/configssh"
 	"git.kalinamall.ru/PapaTramp/netlynx/internal/models"
 	"git.kalinamall.ru/PapaTramp/netlynx/internal/store"
 )
 
 type Scheduler struct {
-	log *slog.Logger
-	st  *store.Store
-	cfg config.Config
-	mu  sync.Mutex
-	busy bool
+	log      *slog.Logger
+	st       *store.Store
+	cfg      config.Config
+	reporter *configssh.Reporter
+	mu       sync.Mutex
+	busy     bool
 }
 
 func NewScheduler(log *slog.Logger, st *store.Store, cfg config.Config) *Scheduler {
@@ -24,6 +26,10 @@ func NewScheduler(log *slog.Logger, st *store.Store, cfg config.Config) *Schedul
 		log = slog.Default()
 	}
 	return &Scheduler{log: log, st: st, cfg: cfg}
+}
+
+func (s *Scheduler) SetReporter(rep *configssh.Reporter) {
+	s.reporter = rep
 }
 
 func (s *Scheduler) Run(ctx context.Context) {
@@ -97,11 +103,19 @@ func (s *Scheduler) runOnce(ctx context.Context) {
 			return
 		default:
 		}
-		dev := d
-		ok, _, err := FetchAndStore(ctx, s.st, s.cfg, bs, &dev, "scheduled")
+		full, gerr := s.st.GetDevice(ctx, d.ID)
+		if gerr != nil || full == nil {
+			failed++
+			s.log.Warn("config snapshot get device", "device_id", d.ID, "err", gerr)
+			continue
+		}
+		ok, _, err := FetchAndStore(ctx, s.st, s.cfg, bs, full, "scheduled")
 		if err != nil {
 			failed++
-			s.log.Warn("config snapshot fetch", "device_id", dev.ID, "host", dev.Host, "err", err)
+			s.log.Warn("config snapshot fetch", "device_id", full.ID, "host", full.Host, "err", err)
+			if s.reporter != nil {
+				s.reporter.ReportFail(ctx, full.ID, full.Name, full.Host, err, "scheduled")
+			}
 			continue
 		}
 		if ok {

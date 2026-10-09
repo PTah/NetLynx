@@ -98,27 +98,17 @@ func vlanDBAttempts(v Vendor) []vlanDBAttempt {
 }
 
 func applyVLANDatabaseOnce(c Creds, v Vendor, ch VLANDatabaseChange, style vlanCLIStyle, enterConfig bool) error {
-	port := c.Port
-	if port <= 0 {
-		port = 22
-	}
 	timeout := c.Timeout
 	if timeout <= 0 {
 		timeout = 30 * time.Second
-	}
-	hk, err := HostKeyCallback(c.KnownHosts)
-	if err != nil {
-		return err
 	}
 	enable := strings.TrimSpace(c.EnablePass)
 	if enable == "" {
 		enable = c.Password
 	}
-	cfg := switchSSHConfig(c.User, c.Password, timeout, hk)
-	addr := fmt.Sprintf("%s:%d", strings.TrimSpace(c.Host), port)
-	client, err := ssh.Dial("tcp", addr, cfg)
+	client, err := DialSwitch(c)
 	if err != nil {
-		return fmt.Errorf("ssh %s: %w", c.Host, err)
+		return err
 	}
 	defer client.Close()
 

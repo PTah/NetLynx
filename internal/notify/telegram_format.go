@@ -72,6 +72,18 @@ func telegramEventLine(eventType string, payload map[string]interface{}, at time
 		return "<b><u>DEVICE OFFLINE</u></b> с " + telegramClock(payloadEventClock(eventType, payload, at))
 	case "DEVICE_ONLINE":
 		return "<b><u>DEVICE ONLINE</u></b> с " + telegramClock(at.Local())
+	case "CONFIG_SSH_FAIL":
+		line := "<b><u>CONFIG SSH FAIL</u></b>"
+		if cls, ok := payload["err_class"].(string); ok && strings.TrimSpace(cls) != "" {
+			line += " · " + escapeTelegramHTML(strings.TrimSpace(cls))
+		}
+		return line
+	case "BACKUP_SSH_PARTIAL":
+		line := "<b><u>BACKUP SSH PARTIAL</u></b>"
+		if n, ok := payload["failed_count"].(float64); ok {
+			line += fmt.Sprintf(" · %d", int(n))
+		}
+		return line
 	default:
 		line := escapeTelegramHTML(strings.TrimSpace(eventType))
 		if mac, ok := payload["mac"].(string); ok && strings.TrimSpace(mac) != "" {

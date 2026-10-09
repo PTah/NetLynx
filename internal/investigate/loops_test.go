@@ -13,7 +13,7 @@ func TestFindUndirectedCyclesTriangle(t *testing.T) {
 		{LocalDeviceID: 2, LocalIfIndex: 20, RemoteDeviceID: rid(3), Protocol: "lldp"},
 		{LocalDeviceID: 3, LocalIfIndex: 30, RemoteDeviceID: rid(1), Protocol: "lldp"},
 	}
-	links, adj := buildUndirectedLLDPGraph(edges)
+	links, adj := buildUndirectedLLDPGraph(edges, nil)
 	if len(links) != 3 {
 		t.Fatalf("links=%d want 3", len(links))
 	}
@@ -33,10 +33,48 @@ func TestFindUndirectedCyclesNoLoop(t *testing.T) {
 		{LocalDeviceID: 1, LocalIfIndex: 1, RemoteDeviceID: rid(2), Protocol: "lldp"},
 		{LocalDeviceID: 2, LocalIfIndex: 2, RemoteDeviceID: rid(3), Protocol: "lldp"},
 	}
-	links, adj := buildUndirectedLLDPGraph(edges)
+	links, adj := buildUndirectedLLDPGraph(edges, nil)
 	cycles := findUndirectedCycles(adj, links, map[int64]string{1: "a", 2: "b", 3: "c"})
 	if len(cycles) != 0 {
 		t.Fatalf("expected no cycles, got %+v", cycles)
+	}
+}
+
+func TestOfflineEndpointBreaksFalseTriangle(t *testing.T) {
+	// MES(1)→Upper(2)→Lower(3)→MES(1); Upper offline — зомби-LLDP не должен давать петлю.
+	rid := func(id int64) *int64 { return &id }
+	edges := []store.TopologyEdge{
+		{LocalDeviceID: 1, LocalIfIndex: 15, RemoteDeviceID: rid(2), Protocol: "lldp"},
+		{LocalDeviceID: 2, LocalIfIndex: 26, RemoteDeviceID: rid(3), Protocol: "lldp"},
+		{LocalDeviceID: 3, LocalIfIndex: 25, RemoteDeviceID: rid(1), Protocol: "lldp"},
+	}
+	online := map[int64]bool{1: true, 2: false, 3: true}
+	links, adj := buildUndirectedLLDPGraph(edges, online)
+	if len(links) != 1 {
+		t.Fatalf("links=%d want 1 (only Lower↔MES)", len(links))
+	}
+	cycles := findUndirectedCycles(adj, links, map[int64]string{1: "MES", 2: "Upper", 3: "Lower"})
+	if len(cycles) != 0 {
+		t.Fatalf("offline Upper must not create cycle: %+v", cycles)
+	}
+}
+
+func TestBlastOfflineEndpointSkipped(t *testing.T) {
+	cache := &store.TopologyBlastCache{
+		Edges: []store.TopologyBlastEdge{
+			{ADeviceID: 1, BDeviceID: 2, AIfIndex: 15, BIfIndex: 25},
+			{ADeviceID: 2, BDeviceID: 3, AIfIndex: 26, BIfIndex: 25},
+			{ADeviceID: 3, BDeviceID: 1, AIfIndex: 25, BIfIndex: 63},
+		},
+	}
+	online := map[int64]bool{1: true, 2: false, 3: true}
+	links, adj := buildUndirectedFromBlast(cache, online)
+	if len(links) != 1 {
+		t.Fatalf("links=%d want 1", len(links))
+	}
+	cycles := findUndirectedCycles(adj, links, map[int64]string{1: "MES", 2: "Upper", 3: "Lower"})
+	if len(cycles) != 0 {
+		t.Fatalf("want no cycles, got %+v", cycles)
 	}
 }
 
@@ -46,7 +84,7 @@ func TestParallelLinksCycle(t *testing.T) {
 		{LocalDeviceID: 1, LocalIfIndex: 10, RemoteDeviceID: rid(2), Protocol: "lldp"},
 		{LocalDeviceID: 1, LocalIfIndex: 11, RemoteDeviceID: rid(2), Protocol: "lldp"},
 	}
-	cycles := parallelLinkCyclesFromEdges(edges, map[int64]string{1: "SW1", 2: "SW2"})
+	cycles := parallelLinkCyclesFromEdges(edges, map[int64]string{1: "SW1", 2: "SW2"}, nil)
 	if len(cycles) < 1 {
 		t.Fatal("want parallel-link cycle from two local ports")
 	}
@@ -55,7 +93,7 @@ func TestParallelLinksCycle(t *testing.T) {
 		store.TopologyEdge{LocalDeviceID: 2, LocalIfIndex: 20, RemoteDeviceID: rid(1), Protocol: "lldp"},
 		store.TopologyEdge{LocalDeviceID: 2, LocalIfIndex: 21, RemoteDeviceID: rid(1), Protocol: "lldp"},
 	)
-	cycles2 := parallelLinkCyclesFromEdges(edges2, map[int64]string{1: "SW1", 2: "SW2"})
+	cycles2 := parallelLinkCyclesFromEdges(edges2, map[int64]string{1: "SW1", 2: "SW2"}, nil)
 	if len(cycles2) != 1 {
 		t.Fatalf("want 1 parallel cycle, got %d", len(cycles2))
 	}
@@ -67,7 +105,7 @@ func TestBidirectionalSingleLinkNotParallel(t *testing.T) {
 		{LocalDeviceID: 1, LocalIfIndex: 10, RemoteDeviceID: rid(2), Protocol: "lldp"},
 		{LocalDeviceID: 2, LocalIfIndex: 20, RemoteDeviceID: rid(1), Protocol: "lldp"},
 	}
-	cycles := parallelLinkCyclesFromEdges(edges, map[int64]string{1: "SW1", 2: "SW2"})
+	cycles := parallelLinkCyclesFromEdges(edges, map[int64]string{1: "SW1", 2: "SW2"}, nil)
 	if len(cycles) != 0 {
 		t.Fatalf("single cable both directions must not be parallel: %+v", cycles)
 	}

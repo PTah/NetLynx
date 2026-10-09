@@ -140,6 +140,9 @@ func (s *Server) handleFetchDeviceConfigSnapshot(w http.ResponseWriter, r *http.
 	bs, _ := s.st.GetBackupSettings(r.Context())
 	saved, id, err := configsnapshot.FetchAndStore(r.Context(), s.st, s.cfg, bs, dev, "manual")
 	if err != nil {
+		if s.sshReporter != nil {
+			s.sshReporter.ReportFail(r.Context(), deviceID, dev.Name, dev.Host, err, "manual")
+		}
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
 	}

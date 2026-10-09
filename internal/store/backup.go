@@ -28,6 +28,7 @@ type BackupSettings struct {
 	ShareDomain       *string
 	ShareRetainDays   int
 	SwitchCfgEnabled  bool
+	RouterCfgEnabled  bool
 	SSHUser           *string
 	SSHPassword       *string
 	SSHPort           int
@@ -60,7 +61,7 @@ func (s *Store) GetBackupSettings(ctx context.Context) (BackupSettings, error) {
 		       local_enabled, local_dir, local_retain_days,
 		       email_enabled, email_to,
 		       share_enabled, share_kind, share_url, share_username, share_password, share_domain, share_retain_days,
-		       switch_cfg_enabled, ssh_user, ssh_password, ssh_port, ssh_enable_password, ssh_timeout_seconds,
+		       switch_cfg_enabled, router_cfg_enabled, ssh_user, ssh_password, ssh_port, ssh_enable_password, ssh_timeout_seconds,
 		       last_run_at, last_status, last_error, last_log
 		FROM backup_settings WHERE id = 1`,
 	).Scan(
@@ -68,7 +69,7 @@ func (s *Store) GetBackupSettings(ctx context.Context) (BackupSettings, error) {
 		&r.LocalEnabled, &r.LocalDir, &r.LocalRetainDays,
 		&r.EmailEnabled, &r.EmailTo,
 		&r.ShareEnabled, &r.ShareKind, &r.ShareURL, &r.ShareUsername, &r.SharePassword, &r.ShareDomain, &r.ShareRetainDays,
-		&r.SwitchCfgEnabled, &r.SSHUser, &r.SSHPassword, &r.SSHPort, &r.SSHEnablePassword, &r.SSHTimeoutSeconds,
+		&r.SwitchCfgEnabled, &r.RouterCfgEnabled, &r.SSHUser, &r.SSHPassword, &r.SSHPort, &r.SSHEnablePassword, &r.SSHTimeoutSeconds,
 		&r.LastRunAt, &r.LastStatus, &r.LastError, &r.LastLog,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -142,14 +143,14 @@ func (s *Store) UpsertBackupSettings(ctx context.Context, in BackupSettings) err
 			local_enabled, local_dir, local_retain_days,
 			email_enabled, email_to,
 			share_enabled, share_kind, share_url, share_username, share_password, share_domain, share_retain_days,
-			switch_cfg_enabled, ssh_user, ssh_password, ssh_port, ssh_enable_password, ssh_timeout_seconds,
+			switch_cfg_enabled, router_cfg_enabled, ssh_user, ssh_password, ssh_port, ssh_enable_password, ssh_timeout_seconds,
 			updated_at
 		) VALUES (
 			1, $1, $2, $3,
 			$4, $5, $6,
 			$7, $8,
 			$9, $10, $11, $12, $13, $14, $15,
-			$16, $17, $18, $19, $20, $21,
+			$16, $17, $18, $19, $20, $21, $22,
 			now()
 		)
 		ON CONFLICT (id) DO UPDATE SET
@@ -169,6 +170,7 @@ func (s *Store) UpsertBackupSettings(ctx context.Context, in BackupSettings) err
 			share_domain = EXCLUDED.share_domain,
 			share_retain_days = EXCLUDED.share_retain_days,
 			switch_cfg_enabled = EXCLUDED.switch_cfg_enabled,
+			router_cfg_enabled = EXCLUDED.router_cfg_enabled,
 			ssh_user = EXCLUDED.ssh_user,
 			ssh_password = EXCLUDED.ssh_password,
 			ssh_port = EXCLUDED.ssh_port,
@@ -179,7 +181,7 @@ func (s *Store) UpsertBackupSettings(ctx context.Context, in BackupSettings) err
 		in.LocalEnabled, in.LocalDir, in.LocalRetainDays,
 		in.EmailEnabled, in.EmailTo,
 		in.ShareEnabled, in.ShareKind, in.ShareURL, in.ShareUsername, in.SharePassword, in.ShareDomain, in.ShareRetainDays,
-		in.SwitchCfgEnabled, in.SSHUser, in.SSHPassword, in.SSHPort, in.SSHEnablePassword, in.SSHTimeoutSeconds,
+		in.SwitchCfgEnabled, in.RouterCfgEnabled, in.SSHUser, in.SSHPassword, in.SSHPort, in.SSHEnablePassword, in.SSHTimeoutSeconds,
 	)
 	return err
 }

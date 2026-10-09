@@ -34,6 +34,7 @@ type publicBackupSettings struct {
 	ShareRetainDays   int        `json:"share_retain_days"`
 	HasSharePassword  bool       `json:"has_share_password"`
 	SwitchCfgEnabled  bool       `json:"switch_cfg_enabled"`
+	RouterCfgEnabled  bool       `json:"router_cfg_enabled"`
 	SSHUser           *string    `json:"ssh_user"`
 	SSHPort           int        `json:"ssh_port"`
 	SSHTimeoutSeconds int        `json:"ssh_timeout_seconds"`
@@ -67,6 +68,7 @@ func toPublicBackup(b store.BackupSettings) publicBackupSettings {
 		ShareRetainDays:   b.ShareRetainDays,
 		HasSharePassword:  b.SharePassword != nil && strings.TrimSpace(*b.SharePassword) != "",
 		SwitchCfgEnabled:  b.SwitchCfgEnabled,
+		RouterCfgEnabled:  b.RouterCfgEnabled,
 		SSHUser:           b.SSHUser,
 		SSHPort:           b.SSHPort,
 		SSHTimeoutSeconds: b.SSHTimeoutSeconds,
@@ -133,6 +135,7 @@ type patchBackupBody struct {
 	ShareDomain       *string `json:"share_domain"`
 	ShareRetainDays   *int    `json:"share_retain_days"`
 	SwitchCfgEnabled  *bool   `json:"switch_cfg_enabled"`
+	RouterCfgEnabled  *bool   `json:"router_cfg_enabled"`
 	SSHUser           *string `json:"ssh_user"`
 	SSHPassword       *string `json:"ssh_password"`
 	SSHPort           *int    `json:"ssh_port"`
@@ -227,6 +230,9 @@ func (s *Server) handlePatchBackupSettings(w http.ResponseWriter, r *http.Reques
 	}
 	if body.SwitchCfgEnabled != nil {
 		cur.SwitchCfgEnabled = *body.SwitchCfgEnabled
+	}
+	if body.RouterCfgEnabled != nil {
+		cur.RouterCfgEnabled = *body.RouterCfgEnabled
 	}
 	if body.SSHUser != nil {
 		t := strings.TrimSpace(*body.SSHUser)

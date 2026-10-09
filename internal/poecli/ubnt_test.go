@@ -34,7 +34,7 @@ Port  Admin  Oper  Power  Device
 0/2   Auto   Searching   0.0W   --
 0/3   Auto   On          2.1W   Phone
 `
-	got := parseUbiquitiShowPoeStatusToIfIndex(out, ifRows)
+	got, watts := parseUbiquitiShowPoeStatusToIfIndex(out, ifRows)
 	if !got[9] {
 		t.Fatalf("expected ifIndex 9 active")
 	}
@@ -43,6 +43,12 @@ Port  Admin  Oper  Power  Device
 	}
 	if !got[11] {
 		t.Fatalf("expected ifIndex 11 active")
+	}
+	if watts[9] < 6.4 || watts[9] > 6.6 {
+		t.Fatalf("expected ~6.5W on 0/1, got %v", watts[9])
+	}
+	if watts[11] < 2.0 || watts[11] > 2.2 {
+		t.Fatalf("expected ~2.1W on 0/3, got %v", watts[11])
 	}
 }
 
@@ -59,7 +65,7 @@ Intf      Detection      Class   Consumed(W) Voltage(V) Current(mA) Consumed Met
 0/4       Short          Unknown        0.00       0.00        0.00               0.00             35
 0/15      Good           Class4         6.93      53.46      129.63               1.95             31
 `
-	got := parseUbiquitiShowPoeStatusToIfIndex(out, ifRows)
+	got, watts := parseUbiquitiShowPoeStatusToIfIndex(out, ifRows)
 	if !got[21] {
 		t.Fatalf("expected ifIndex 21 active (0/3)")
 	}
@@ -68,6 +74,12 @@ Intf      Detection      Class   Consumed(W) Voltage(V) Current(mA) Consumed Met
 	}
 	if !got[23] {
 		t.Fatalf("expected ifIndex 23 active (0/15)")
+	}
+	if watts[21] < 2.3 || watts[21] > 2.32 {
+		t.Fatalf("expected 2.31W on 0/3, got %v", watts[21])
+	}
+	if watts[23] < 6.9 || watts[23] > 7.0 {
+		t.Fatalf("expected 6.93W on 0/15, got %v", watts[23])
 	}
 }
 
@@ -82,12 +94,15 @@ Interface       Status  Oper   Power(mW) Max-type Max(mW) Current(mA) Volt(V) Pr
 Ethernet1/0/37   enable     on      2900    class   33000          48      55      low     3
 Ethernet1/0/38   enable    off         0    class   33000           0       0      low     0
 `
-	got := parseUbiquitiShowPoeStatusToIfIndex(out, ifRows)
+	got, watts := parseUbiquitiShowPoeStatusToIfIndex(out, ifRows)
 	if !got[37] {
 		t.Fatalf("expected ifIndex 37 active (Ethernet1/0/37)")
 	}
 	if got[38] {
 		t.Fatalf("expected ifIndex 38 inactive (Ethernet1/0/38)")
+	}
+	if watts[37] < 2.8 || watts[37] > 3.0 {
+		t.Fatalf("expected 2.9W from 2900 mW, got %v", watts[37])
 	}
 }
 

@@ -16,6 +16,7 @@ import (
 	"git.kalinamall.ru/PapaTramp/netlynx/internal/api"
 	"git.kalinamall.ru/PapaTramp/netlynx/internal/config"
 	"git.kalinamall.ru/PapaTramp/netlynx/internal/configsnapshot"
+	"git.kalinamall.ru/PapaTramp/netlynx/internal/configssh"
 	ddb "git.kalinamall.ru/PapaTramp/netlynx/internal/db"
 	"git.kalinamall.ru/PapaTramp/netlynx/internal/fdbsnapshot"
 	"git.kalinamall.ru/PapaTramp/netlynx/internal/live"
@@ -137,6 +138,9 @@ func main() {
 	}, hub, trapMgr, eng)
 	apiSrv.SetTopologyDirty(topoHub.NotifyDirty)
 
+	sshRep := configssh.NewReporter(slog.Default(), st, cfg, hub, hook)
+	apiSrv.SetSSHReporter(sshRep)
+
 	emitServiceStarted(ctx, st, hub, version, commit, builtAt)
 
 	workers.Add(1)
@@ -146,6 +150,7 @@ func main() {
 	}()
 
 	cfgSnapSched := configsnapshot.NewScheduler(slog.Default(), st, cfg)
+	cfgSnapSched.SetReporter(sshRep)
 	workers.Add(1)
 	go func() {
 		defer workers.Done()

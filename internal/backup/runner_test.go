@@ -28,8 +28,8 @@ func TestWantSwitchConfigOnlySwitch(t *testing.T) {
 		SSHVendor:      "auto",
 	}
 	patio.SysDescr = strPtr("RouterOS 7.12")
-	if wantSwitchConfig(patio) {
-		t.Fatal("router without explicit mikrotik vendor should skip backup")
+	if !wantSwitchConfig(patio) {
+		t.Fatal("RouterOS router with ssh_vendor=auto should be backed up")
 	}
 	for _, cat := range []string{"router", "ap", "server", "camera"} {
 		d := models.Device{DeviceCategory: cat, Host: "10.0.0.1", Name: cat}
@@ -48,6 +48,18 @@ func TestWantSwitchConfigOnlySwitch(t *testing.T) {
 	emptyHost := models.Device{DeviceCategory: "switch", Host: ""}
 	if wantSwitchConfig(emptyHost) {
 		t.Fatal("no host")
+	}
+	if wantConfigBackup(ok, false, true) {
+		t.Fatal("switch excluded when switch flag off")
+	}
+	if !wantConfigBackup(ok, true, false) {
+		t.Fatal("switch included when switch flag on")
+	}
+	if wantConfigBackup(mk, true, false) {
+		t.Fatal("mikrotik router excluded when router flag off")
+	}
+	if !wantConfigBackup(mk, false, true) {
+		t.Fatal("mikrotik router included when router flag on")
 	}
 }
 

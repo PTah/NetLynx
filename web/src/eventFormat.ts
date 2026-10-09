@@ -63,6 +63,10 @@ export function formatEventTypeLabel(eventType: string): string {
       return "Ручная связь заменена LLDP/CDP";
     case "CONFIG_EDIT":
       return "Правка конфига";
+    case "CONFIG_SSH_FAIL":
+      return "Ошибка SSH (конфиг / бэкап)";
+    case "BACKUP_SSH_PARTIAL":
+      return "Бэкап: часть свитчей без конфига";
     case "SERVICE_STARTED":
       return "Старт / рестарт NetLynx";
     case "PORT_ADMIN_DOWN_ACTION":
@@ -386,6 +390,28 @@ export function formatEventSummary(ev: Pick<EventRow, "event_type" | "payload" |
       const detail = formatConfigEditDetail(p);
       if (detail) return `${user}: ${change} — ${detail}`;
       return `${user}: ${change}`;
+    }
+    case "CONFIG_SSH_FAIL": {
+      const cls = str(p.err_class) || "other";
+      const src = str(p.source) || "";
+      const err = str(p.err);
+      const clsRu =
+        cls === "auth"
+          ? "пароль/логин"
+          : cls === "hostkey"
+            ? "ключ хоста"
+            : cls === "timeout"
+              ? "таймаут"
+              : cls;
+      const head = src ? `SSH (${src}, ${clsRu})` : `SSH (${clsRu})`;
+      return err ? `${head}: ${err}` : head;
+    }
+    case "BACKUP_SSH_PARTIAL": {
+      const n = asNum(p.failed_count);
+      const samples = Array.isArray(p.samples) ? p.samples.map(String).slice(0, 5).join(", ") : "";
+      if (n != null && samples) return `Не снято конфигов: ${n} (${samples})`;
+      if (n != null) return `Не снято конфигов: ${n}`;
+      return "Часть конфигов свитчей не снята по SSH";
     }
     case "SERVICE_STARTED": {
       const ver = str(p.version) || "?";

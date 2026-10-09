@@ -61,30 +61,20 @@ func fetchConfigOnce(c Creds) ([]byte, error) {
 	if host == "" || user == "" {
 		return nil, fmt.Errorf("нет host или ssh user")
 	}
-	port := c.Port
-	if port <= 0 {
-		port = 22
-	}
 	timeout := c.Timeout
 	if timeout <= 0 {
 		timeout = 30 * time.Second
 	}
-	hk, err := HostKeyCallback(c.KnownHosts)
-	if err != nil {
-		return nil, err
-	}
-	addr := fmt.Sprintf("%s:%d", host, port)
 	v := DetectVendor(string(c.Vendor), c.SysDescr, c.Name)
 	enable := strings.TrimSpace(c.EnablePass)
 	if enable == "" {
 		enable = c.Password
 	}
-	cfg := switchSSHConfig(user, c.Password, timeout, hk)
 
 	if v == VendorMikrotik || DetectVendor("", c.SysDescr, c.Name) == VendorMikrotik {
-		client, err := ssh.Dial("tcp", addr, cfg)
+		client, err := DialSwitch(c)
 		if err != nil {
-			return nil, fmt.Errorf("ssh %s: %w", host, err)
+			return nil, err
 		}
 		out, ferr := fetchMikrotikExport(client, timeout)
 		_ = client.Close()
@@ -95,9 +85,9 @@ func fetchConfigOnce(c Creds) ([]byte, error) {
 	}
 
 	if preferBusybox(c, v) {
-		bb, err := ssh.Dial("tcp", addr, cfg)
+		bb, err := DialSwitch(c)
 		if err != nil {
-			return nil, fmt.Errorf("ssh %s: %w", host, err)
+			return nil, err
 		}
 		out, berr := dumpBusyboxCfg(bb, timeout)
 		_ = bb.Close()
@@ -112,9 +102,9 @@ func fetchConfigOnce(c Creds) ([]byte, error) {
 		}
 	}
 
-	client, err := ssh.Dial("tcp", addr, cfg)
+	client, err := DialSwitch(c)
 	if err != nil {
-		return nil, fmt.Errorf("ssh %s: %w", host, err)
+		return nil, err
 	}
 	defer client.Close()
 

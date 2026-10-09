@@ -658,7 +658,7 @@ func (e *Engine) pollOne(ctx context.Context, d store.PollDevice) error {
 	}
 	sshGot := false
 	if e.shouldTrySSHPoeFallback(sysDescr, poeByIf) {
-		sshPoe, sshErr := poecli.ReadPoEActiveByIfIndex(
+		sshPoe, sshPower, sshErr := poecli.ReadPoEActiveAndPowerByIfIndex(
 			d.Host,
 			e.cfg.SSHPOEPort,
 			e.cfg.SSHPOEUser,
@@ -671,12 +671,16 @@ func (e *Engine) pollOne(ctx context.Context, d store.PollDevice) error {
 		)
 		if sshErr != nil {
 			e.log.Warn("poe ssh fallback", "device_id", d.ID, "host", d.Host, "err", sshErr)
-		} else if len(sshPoe) > 0 {
-			sshGot = true
-			if poeByIf == nil {
-				poeByIf = make(map[int]bool)
+		} else if len(sshPoe) > 0 || len(sshPower) > 0 {
+			sshGot = len(sshPoe) > 0
+			if len(sshPoe) > 0 {
+				if poeByIf == nil {
+					poeByIf = make(map[int]bool)
+				}
+				mergePoeMap(poeByIf, sshPoe)
 			}
-			mergePoeMap(poeByIf, sshPoe)
+			// SNMP watts приоритетнее; SSH заполняет дыры (EdgeSwitch *-lite* без 4413).
+			poePowerByIf = mergePoePowerMap(poePowerByIf, sshPower)
 		}
 	}
 	// LLDP-PD только если PSE-MIB и SSH ничего не сказали (карта пустая/nil).
@@ -1113,6 +1117,23 @@ func mergePoeMap(dst, src map[int]bool) {
 			dst[k] = false
 		}
 	}
+}
+
+// mergePoePowerMap — SNMP имеет приоритет; SSH/CLI дополняет отсутствующие ifIndex.
+func mergePoePowerMap(dst, src map[int]float32) map[int]float32 {
+	if len(src) == 0 {
+		return dst
+	}
+	if dst == nil {
+		dst = make(map[int]float32, len(src))
+	}
+	for k, v := range src {
+		if _, ok := dst[k]; ok {
+			continue
+		}
+		dst[k] = v
+	}
+	return dst
 }
 
 func (e *Engine) shouldPollFDB(d store.PollDevice, last *time.Time, now time.Time) bool {
