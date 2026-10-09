@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/store"
+	"github.com/PTah/netlynx/internal/store"
 )
 
 func TestTryAddSendDuringShutdown(t *testing.T) {

@@ -3,7 +3,7 @@ package investigate
 import (
 	"testing"
 
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/store"
+	"github.com/PTah/netlynx/internal/store"
 )
 
 func TestFindUndirectedCyclesTriangle(t *testing.T) {

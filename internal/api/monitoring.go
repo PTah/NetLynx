@@ -6,8 +6,8 @@ import (
 	"strconv"
 	"strings"
 
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/models"
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/store"
+	"github.com/PTah/netlynx/internal/models"
+	"github.com/PTah/netlynx/internal/store"
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 )

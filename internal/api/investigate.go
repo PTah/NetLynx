@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/investigate"
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/store"
+	"github.com/PTah/netlynx/internal/investigate"
+	"github.com/PTah/netlynx/internal/store"
 )
 
 func (s *Server) handleInvestigateMAC(w http.ResponseWriter, r *http.Request) {

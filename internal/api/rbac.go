@@ -4,7 +4,7 @@ import (
 	"context"
 	"net/http"
 
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/store"
+	"github.com/PTah/netlynx/internal/store"
 )
 
 type authRoleKey struct{}

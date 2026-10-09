@@ -21,12 +21,12 @@ func TestFormatTelegramFromCardOffline(t *testing.T) {
 		Category:   "computer",
 		Attachment: "на коммутаторе «EdgeSwitch 8 #9 (Operatory-2)», порт 0/1",
 	}
-	got := formatTelegramFromCard(card, "192.168.160.118", "DEVICE_OFFLINE", payload, at)
+	got := formatTelegramFromCard(card, "10.0.0.1", "DEVICE_OFFLINE", payload, at)
 	offlineClock := telegramClock(payloadEventClock("DEVICE_OFFLINE", payload, at))
 	wantParts := []string{
 		"<b>NetLynx</b>",
 		"<b><u>DEVICE OFFLINE</u></b> с " + offlineClock,
-		"Компьютер: Operator-3 (192.168.160.118)",
+		"Компьютер: Operator-3 (10.0.0.1)",
 		"(Закреплено на коммутаторе «EdgeSwitch 8 #9 (Operatory-2)», порт 0/1)",
 	}
 	for _, p := range wantParts {
@@ -54,13 +54,13 @@ func TestFormatTelegramFromCardOnline(t *testing.T) {
 		Category:   "computer",
 		Attachment: "на коммутаторе «EdgeSwitch 8 #9 (Operatory-2)», порт 0/1",
 	}
-	got := formatTelegramFromCard(card, "192.168.162.33", "DEVICE_ONLINE", payload, at)
+	got := formatTelegramFromCard(card, "10.0.0.1", "DEVICE_ONLINE", payload, at)
 	onlineClock := telegramClock(at.Local())
 	wantParts := []string{
 		"<b>NetLynx</b>",
 		"<b><u>DEVICE ONLINE</u></b> с " + onlineClock,
 		"(время оффлайна: 62 часа 51 минута)",
-		"Компьютер: COMM-PC (192.168.162.33)",
+		"Компьютер: COMM-PC (10.0.0.1)",
 		"(Закреплено на коммутаторе «EdgeSwitch 8 #9 (Operatory-2)», порт 0/1)",
 	}
 	for _, p := range wantParts {

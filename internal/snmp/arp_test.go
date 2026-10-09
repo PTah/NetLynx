@@ -4,11 +4,11 @@ import "testing"
 
 func TestParseIpNetToMediaIndex(t *testing.T) {
 	base := oidIpNetToMediaPhysAddress
-	ifIdx, ip, err := parseIpNetToMediaIndex(base+".12.192.168.1.50", base)
+	ifIdx, ip, err := parseIpNetToMediaIndex(base+".12.10.0.0.1", base)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ifIdx != 12 || ip != "192.168.1.50" {
+	if ifIdx != 12 || ip != "10.0.0.1" {
 		t.Fatalf("got if=%d ip=%s", ifIdx, ip)
 	}
 	if _, _, err := parseIpNetToMediaIndex(base+".1.10.0.0", base); err == nil {

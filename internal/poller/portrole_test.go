@@ -3,9 +3,9 @@ package poller
 import (
 	"testing"
 
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/config"
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/snmp"
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/store"
+	"github.com/PTah/netlynx/internal/config"
+	"github.com/PTah/netlynx/internal/snmp"
+	"github.com/PTah/netlynx/internal/store"
 )
 
 func TestInferRoleFromSnapshotCLIPortMode(t *testing.T) {

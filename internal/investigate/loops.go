@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/store"
+	"github.com/PTah/netlynx/internal/store"
 )
 
 // LoopReport — отдельный отчёт о петлях в топологии (не смешивать с MAC flapping).

@@ -6,13 +6,13 @@ import (
 	"strings"
 	"time"
 
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/config"
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/devssh"
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/live"
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/models"
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/notify"
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/store"
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/swcfg"
+	"github.com/PTah/netlynx/internal/config"
+	"github.com/PTah/netlynx/internal/devssh"
+	"github.com/PTah/netlynx/internal/live"
+	"github.com/PTah/netlynx/internal/models"
+	"github.com/PTah/netlynx/internal/notify"
+	"github.com/PTah/netlynx/internal/store"
+	"github.com/PTah/netlynx/internal/swcfg"
 )
 
 const (

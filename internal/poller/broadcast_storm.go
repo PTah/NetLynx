@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/config"
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/store"
+	"github.com/PTah/netlynx/internal/config"
+	"github.com/PTah/netlynx/internal/store"
 )
 
 // stormUtilPort — порт с высокой утилизацией в текущем опросе (для эвристики broadcast storm).

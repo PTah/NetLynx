@@ -1,4 +1,4 @@
-module git.kalinamall.ru/PapaTramp/netlynx
+module github.com/PTah/netlynx
 
 go 1.22
 

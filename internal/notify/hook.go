@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/netutil"
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/store"
+	"github.com/PTah/netlynx/internal/netutil"
+	"github.com/PTah/netlynx/internal/store"
 )
 
 const emailBatchWindow = 25 * time.Second

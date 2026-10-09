@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/postmortem"
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/store"
+	"github.com/PTah/netlynx/internal/postmortem"
+	"github.com/PTah/netlynx/internal/store"
 )
 
 func (s *Server) handleGetPostmortem(w http.ResponseWriter, r *http.Request) {

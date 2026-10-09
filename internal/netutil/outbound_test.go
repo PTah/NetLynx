@@ -13,7 +13,7 @@ func TestValidateOutboundURL_Webhook(t *testing.T) {
 	if err := ValidateOutboundURL("https://127.0.0.1/hook", p); err == nil {
 		t.Fatal("loopback must fail")
 	}
-	if err := ValidateOutboundURL("https://192.168.1.1/hook", p); err == nil {
+	if err := ValidateOutboundURL("https://10.0.0.1/hook", p); err == nil {
 		t.Fatal("private must fail for webhook")
 	}
 	if err := ValidateOutboundURL("https://169.254.169.254/latest", p); err == nil {
@@ -23,7 +23,7 @@ func TestValidateOutboundURL_Webhook(t *testing.T) {
 
 func TestValidateOutboundURL_UISP(t *testing.T) {
 	p := UISPPolicy()
-	if err := ValidateOutboundURL("http://192.168.1.50:8443", p); err != nil {
+	if err := ValidateOutboundURL("http://10.0.0.1:8443", p); err != nil {
 		t.Fatalf("LAN UISP http: %v", err)
 	}
 	if err := ValidateOutboundURL("https://8.8.8.8", p); err != nil {
@@ -38,7 +38,7 @@ func TestValidateOutboundURL_UISP(t *testing.T) {
 }
 
 func TestValidateDeviceHost(t *testing.T) {
-	if err := ValidateDeviceHost("192.168.1.10"); err != nil {
+	if err := ValidateDeviceHost("10.0.0.1"); err != nil {
 		t.Fatalf("LAN: %v", err)
 	}
 	if err := ValidateDeviceHost("127.0.0.1"); err == nil {

@@ -3,8 +3,8 @@ package api
 import (
 	"strings"
 
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/models"
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/store"
+	"github.com/PTah/netlynx/internal/models"
+	"github.com/PTah/netlynx/internal/store"
 )
 
 // redactDeviceForAPI убирает SNMP community из JSON; выставляет has_community.

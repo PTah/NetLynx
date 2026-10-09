@@ -4,9 +4,9 @@ import "testing"
 
 func TestApplyLLDPChassisNetworkAddress(t *testing.T) {
 	var n NeighborInfo
-	// family=1 + 192.168.170.73
+	// family=1 + 10.0.0.1
 	applyLLDPChassis(&n, lldpChassisSubtypeNetwork, []byte{1, 192, 168, 170, 73})
-	if n.RemoteMgmtAddr != "192.168.170.73" {
+	if n.RemoteMgmtAddr != "10.0.0.1" {
 		t.Fatalf("mgmt=%q", n.RemoteMgmtAddr)
 	}
 	if n.RemoteChassisID != "" {
@@ -23,10 +23,10 @@ func TestApplyLLDPChassisMAC(t *testing.T) {
 }
 
 func TestDecodeNetworkAddressHex(t *testing.T) {
-	if got := decodeNetworkAddressHex("01c0a8aa49"); got != "192.168.170.73" {
+	if got := decodeNetworkAddressHex("01c0a8aa49"); got != "10.0.0.1" {
 		t.Fatalf("got %q", got)
 	}
-	if got := decodeNetworkAddressHex("01:c0:a8:aa:49"); got != "192.168.170.73" {
+	if got := decodeNetworkAddressHex("01:c0:a8:aa:49"); got != "10.0.0.1" {
 		t.Fatalf("colon got %q", got)
 	}
 	if got := decodeNetworkAddressHex("0c383e5af156"); got != "" {

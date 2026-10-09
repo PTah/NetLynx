@@ -3,7 +3,7 @@ package backup
 import (
 	"testing"
 
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/models"
+	"github.com/PTah/netlynx/internal/models"
 )
 
 func TestWantSwitchConfigOnlySwitch(t *testing.T) {
@@ -13,7 +13,7 @@ func TestWantSwitchConfigOnlySwitch(t *testing.T) {
 	}
 	mk := models.Device{
 		DeviceCategory: "router",
-		Host:           "192.168.1.1",
+		Host:           "10.0.0.1",
 		Name:           "RB2011-GATE",
 		SSHVendor:      "mikrotik",
 	}
@@ -23,7 +23,7 @@ func TestWantSwitchConfigOnlySwitch(t *testing.T) {
 	}
 	patio := models.Device{
 		DeviceCategory: "router",
-		Host:           "192.168.1.2",
+		Host:           "10.0.0.1",
 		Name:           "Mikrot-Il Patio",
 		SSHVendor:      "auto",
 	}

@@ -8,16 +8,16 @@ import (
 
 func TestBuildAlertEmailSingleOnline(t *testing.T) {
 	t.Parallel()
-	mail := BuildAlertEmail("papatramp@example.com", []EmailDeviceCard{{
+	mail := BuildAlertEmail("jdoe@example.com", []EmailDeviceCard{{
 		DeviceID:   7,
 		Title:      "Voevodina-PC",
-		Subtitle:   "192.168.160.50 · Компьютеры",
+		Subtitle:   "10.0.0.1 · Компьютеры",
 		Detail:     "Офис УК - Приемная",
 		Attachment: "на коммутаторе «EdgeSwitch 48 #10 (Berloga)», порт 0/12",
 		StatusLine: "Компьютер снова в сети с 8:58 после 16ч 18м 37с отсутствия в сети",
 		Kind:       "DEVICE_ONLINE",
 		Category:   "computer",
-		URL:        "http://192.168.160.121:8080/devices/7",
+		URL:        "http://10.0.0.1:8080/devices/7",
 	}}, time.Date(2026, 8, 21, 8, 58, 0, 0, time.Local))
 	if !strings.Contains(mail.Subject, "онлайн") {
 		t.Fatalf("subject: %s", mail.Subject)
@@ -28,7 +28,7 @@ func TestBuildAlertEmailSingleOnline(t *testing.T) {
 	if !strings.Contains(mail.HTMLBody, "Voevodina-PC") {
 		t.Fatal("missing device name")
 	}
-	if !strings.Contains(mail.HTMLBody, "192.168.160.50") {
+	if !strings.Contains(mail.HTMLBody, "10.0.0.1") {
 		t.Fatal("missing host/IP")
 	}
 	if !strings.Contains(mail.HTMLBody, "Офис УК - Приемная") {
@@ -62,10 +62,10 @@ func TestBuildAlertEmailSingleOnline(t *testing.T) {
 	if !strings.Contains(mail.HTMLBody, "/devices/7") {
 		t.Fatal("missing device link")
 	}
-	if !strings.Contains(mail.HTMLBody, "Здравствуйте, papatramp") {
+	if !strings.Contains(mail.HTMLBody, "Здравствуйте, jdoe") {
 		t.Fatalf("greeting: %s", mail.HTMLBody)
 	}
-	if !strings.Contains(mail.TextBody, "Здравствуйте, papatramp") {
+	if !strings.Contains(mail.TextBody, "Здравствуйте, jdoe") {
 		t.Fatalf("text greeting: %s", mail.TextBody)
 	}
 }

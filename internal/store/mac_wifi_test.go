@@ -3,7 +3,7 @@ package store
 import "testing"
 
 func TestValidateWiFiClientIPPrefix(t *testing.T) {
-	if err := ValidateWiFiClientIPPrefix("192.168.120.0/24"); err != nil {
+	if err := ValidateWiFiClientIPPrefix("10.0.0.1/24"); err != nil {
 		t.Fatalf("valid prefix: %v", err)
 	}
 	if err := ValidateWiFiClientIPPrefix(""); err != nil {
@@ -15,13 +15,13 @@ func TestValidateWiFiClientIPPrefix(t *testing.T) {
 }
 
 func TestAnyIPInCIDR(t *testing.T) {
-	if !anyIPInCIDR([]string{"192.168.120.226"}, "192.168.120.0/24") {
+	if !anyIPInCIDR([]string{"10.0.0.1"}, "10.0.0.1/24") {
 		t.Fatal("wifi IP expected in prefix")
 	}
-	if anyIPInCIDR([]string{"192.168.160.35"}, "192.168.120.0/24") {
+	if anyIPInCIDR([]string{"10.0.0.1"}, "10.0.0.1/24") {
 		t.Fatal("LAN IP not in wifi prefix")
 	}
-	if anyIPInCIDR([]string{"192.168.120.226", "10.0.0.1"}, "192.168.120.0/24") {
+	if anyIPInCIDR([]string{"10.0.0.1", "10.0.0.1"}, "10.0.0.1/24") {
 		// any match counts
 	} else {
 		t.Fatal("mixed list should match wifi")

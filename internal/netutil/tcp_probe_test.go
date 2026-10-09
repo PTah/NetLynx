@@ -6,7 +6,7 @@ import (
 )
 
 func TestTCPProbe_invalidPort(t *testing.T) {
-	res := TCPProbe(nil, "192.168.1.1", 0, time.Second)
+	res := TCPProbe(nil, "10.0.0.1", 0, time.Second)
 	if res.Error == "" {
 		t.Fatal("expected port error")
 	}

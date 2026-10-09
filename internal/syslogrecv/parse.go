@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/store"
+	"github.com/PTah/netlynx/internal/store"
 )
 
 // MACFlapMsg — разобранное сообщение о MAC flapping.

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/netutil"
+	"github.com/PTah/netlynx/internal/netutil"
 	"github.com/go-chi/chi/v5"
 )
 

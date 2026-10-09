@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/netutil"
+	"github.com/PTah/netlynx/internal/netutil"
 )
 
 // SwitchRow — данные коммутатора из UISP NMS API для импорта в NetLynx.

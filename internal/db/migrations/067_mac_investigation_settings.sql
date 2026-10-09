@@ -2,7 +2,7 @@
 CREATE TABLE IF NOT EXISTS mac_investigation_settings (
     id SMALLINT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
     track_wifi_clients BOOLEAN NOT NULL DEFAULT false,
-    wifi_client_ip_prefix TEXT NOT NULL DEFAULT '192.168.120.0/24',
+    wifi_client_ip_prefix TEXT NOT NULL DEFAULT '10.0.0.1/24',
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 

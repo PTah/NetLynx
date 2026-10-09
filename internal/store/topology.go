@@ -10,7 +10,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/models"
+	"github.com/PTah/netlynx/internal/models"
 )
 
 type TopologyNode struct {
@@ -1459,7 +1459,7 @@ func expandNameKeys(raw string) []string {
 	}
 	lower := strings.ToLower(s)
 	out := []string{lower}
-	// Для IP не отрезаем «домен» по первой точке: иначе 192.168.1.10 и 48.47.50.52
+	// Для IP не отрезаем «домен» по первой точке: иначе 10.0.0.1 и 48.47.50.52
 	// дают ключи "192"/"48" и ложно схлопывают соседей на первый device с таким префиксом.
 	if looksLikeIPKey(lower) {
 		return out

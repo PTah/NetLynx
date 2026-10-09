@@ -3,7 +3,7 @@ package poller
 import (
 	"testing"
 
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/store"
+	"github.com/PTah/netlynx/internal/store"
 )
 
 func TestQEMULocallyAdminMACIsFullMAC(t *testing.T) {

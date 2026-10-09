@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/models"
+	"github.com/PTah/netlynx/internal/models"
 )
 
 // MACMatchesWiFiPrefix — MAC привязан к IP из подсети (ARP на любом узле).

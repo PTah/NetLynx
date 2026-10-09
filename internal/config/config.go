@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/secrets"
+	"github.com/PTah/netlynx/internal/secrets"
 )
 
 // Config загружается из переменных окружения (см. .env.example).

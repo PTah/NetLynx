@@ -6,7 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/config"
+	"github.com/PTah/netlynx/internal/config"
 )
 
 func TestResolveAuthRoleBasicBootstrap(t *testing.T) {

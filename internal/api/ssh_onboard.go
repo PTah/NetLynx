@@ -3,7 +3,7 @@ package api
 import (
 	"context"
 
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/configssh"
+	"github.com/PTah/netlynx/internal/configssh"
 )
 
 // SetSSHReporter подключает алерты CONFIG_SSH_FAIL и onboard-probe.

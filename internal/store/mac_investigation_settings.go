@@ -8,7 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-const defaultWiFiClientIPPrefix = "192.168.120.0/24"
+const defaultWiFiClientIPPrefix = "10.0.0.1/24"
 
 // MACInvestigationSettings — глобальные настройки расследования MAC (id=1).
 type MACInvestigationSettings struct {

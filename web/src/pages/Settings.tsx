@@ -226,7 +226,7 @@ export default function Settings() {
   const [uispOk, setUispOk] = useState<string | null>(null);
 
   const [macTrackWiFi, setMacTrackWiFi] = useState(false);
-  const [macWiFiPrefix, setMacWiFiPrefix] = useState("192.168.120.0/24");
+  const [macWiFiPrefix, setMacWiFiPrefix] = useState("10.0.0.1/24");
   const [macInvErr, setMacInvErr] = useState<string | null>(null);
   const [macInvOk, setMacInvOk] = useState<string | null>(null);
 
@@ -462,7 +462,7 @@ export default function Settings() {
       .map((s) => s.trim())
       .filter(Boolean);
     if (!scanCidr.trim() && hosts.length === 0) {
-      setScanErr("Укажите CIDR (например 192.168.1.0/24) или список IP");
+      setScanErr("Укажите CIDR (например 10.0.0.1/24) или список IP");
       return;
     }
     if (!scanCommunity.trim()) {
@@ -817,7 +817,7 @@ export default function Settings() {
     apiGet<MacInvestigationSettings>("/api/v1/settings/mac-investigation")
       .then((x) => {
         setMacTrackWiFi(Boolean(x.track_wifi_clients));
-        setMacWiFiPrefix(x.wifi_client_ip_prefix?.trim() || "192.168.120.0/24");
+        setMacWiFiPrefix(x.wifi_client_ip_prefix?.trim() || "10.0.0.1/24");
       })
       .catch((e: Error) => setMacInvErr(e.message));
   }, []);
@@ -866,7 +866,7 @@ export default function Settings() {
     })
       .then((x) => {
         setMacTrackWiFi(Boolean(x.track_wifi_clients));
-        setMacWiFiPrefix(x.wifi_client_ip_prefix?.trim() || "192.168.120.0/24");
+        setMacWiFiPrefix(x.wifi_client_ip_prefix?.trim() || "10.0.0.1/24");
         setMacInvOk("Сохранено");
       })
       .catch((e: Error) => setMacInvErr(e.message));
@@ -1315,7 +1315,7 @@ export default function Settings() {
             <h2>Сканирование сети</h2>
             <p>
               Массовый обход подсети или списка IP по SNMP (sysName/sysDescr). Лимит — 256 адресов (например{" "}
-              <code>192.168.1.0/24</code>). Ответившие хосты попадают в «Обнаружено»; в Узлы добавляются только
+              <code>10.0.0.1/24</code>). Ответившие хосты попадают в «Обнаружено»; в Узлы добавляются только
               выбранные (тип «Иное» — потом можно сменить в карточке). SNMPv3 в скане не поддерживается — только
               v1/v2c.
             </p>
@@ -1329,7 +1329,7 @@ export default function Settings() {
                   style={{ width: 180 }}
                   value={scanCidr}
                   onChange={(e) => setScanCidr(e.target.value)}
-                  placeholder="192.168.1.0/24"
+                  placeholder="10.0.0.1/24"
                   disabled={scanBusy || !canWrite}
                 />
               </label>
@@ -1375,7 +1375,7 @@ export default function Settings() {
                 style={{ width: "100%", maxWidth: 520, fontFamily: "inherit" }}
                 value={scanHostsText}
                 onChange={(e) => setScanHostsText(e.target.value)}
-                placeholder={"192.168.1.10\n192.168.1.20"}
+                placeholder={"10.0.0.1\n10.0.0.1"}
                 disabled={scanBusy || !canWrite}
               />
             </label>
@@ -1644,7 +1644,7 @@ export default function Settings() {
                   style={{ width: "100%" }}
                   value={macWiFiPrefix}
                   onChange={(e) => setMacWiFiPrefix(e.target.value)}
-                  placeholder="192.168.120.0/24"
+                  placeholder="10.0.0.1/24"
                   disabled={!canWrite}
                 />
               </label>
@@ -2392,14 +2392,14 @@ export default function Settings() {
                 <dd>
                   Freeware: бесплатно для личного и некоммерческого использования.
                   Коммерция и модификации — по письменному разрешению автора (
-                  <a href="mailto:papatramp@gmail.com">papatramp@gmail.com</a>
+                  <a href="mailto:jdoe@gmail.com">jdoe@gmail.com</a>
                   ). Подробности — файл <code>LICENSE</code> в репозитории.
                 </dd>
               </div>
               <div>
                 <dt>Обратная связь</dt>
                 <dd>
-                  <a href="mailto:papatramp@gmail.com">papatramp@gmail.com</a>
+                  <a href="mailto:jdoe@gmail.com">jdoe@gmail.com</a>
                   <span className="settings-about-muted"> — глюки и предложения</span>
                 </dd>
               </div>

@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/store"
+	"github.com/PTah/netlynx/internal/store"
 )
 
 func TestLooksLikeVirtualMAC(t *testing.T) {

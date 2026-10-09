@@ -6,7 +6,7 @@ import (
 )
 
 func TestExpandScanTargets_CIDR30(t *testing.T) {
-	hosts, err := ExpandScanTargets("192.168.1.0/30", nil)
+	hosts, err := ExpandScanTargets("10.0.0.1/30", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -14,7 +14,7 @@ func TestExpandScanTargets_CIDR30(t *testing.T) {
 	if len(hosts) != 2 {
 		t.Fatalf("got %v", hosts)
 	}
-	if hosts[0] != "192.168.1.1" || hosts[1] != "192.168.1.2" {
+	if hosts[0] != "10.0.0.1" || hosts[1] != "10.0.0.1" {
 		t.Fatalf("got %v", hosts)
 	}
 }
@@ -47,7 +47,7 @@ func TestExpandScanTargets_TooLarge(t *testing.T) {
 }
 
 func TestExpandScanTargets_CIDR24OK(t *testing.T) {
-	hosts, err := ExpandScanTargets("192.168.10.0/24", nil)
+	hosts, err := ExpandScanTargets("10.0.0.1/24", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

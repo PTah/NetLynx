@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/store"
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/swcfg"
+	"github.com/PTah/netlynx/internal/store"
+	"github.com/PTah/netlynx/internal/swcfg"
 )
 
 func TestVLANBlastSummaryNames(t *testing.T) {

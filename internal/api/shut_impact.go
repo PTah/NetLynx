@@ -6,10 +6,10 @@ import (
 	"strconv"
 	"strings"
 
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/investigate"
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/models"
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/snmp"
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/store"
+	"github.com/PTah/netlynx/internal/investigate"
+	"github.com/PTah/netlynx/internal/models"
+	"github.com/PTah/netlynx/internal/snmp"
+	"github.com/PTah/netlynx/internal/store"
 )
 
 // GET /devices/{id}/interfaces/{ifIndex}/shut-impact

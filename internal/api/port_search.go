@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/store"
+	"github.com/PTah/netlynx/internal/store"
 )
 
 func (s *Server) handleSearchPorts(w http.ResponseWriter, r *http.Request) {
@@ -16,7 +16,7 @@ func (s *Server) handleSearchPorts(w http.ResponseWriter, r *http.Request) {
 	}
 	kind, _ := store.ClassifySearchQuery(q)
 	if kind == store.SearchQueryIP && len(q) < 7 {
-		writeError(w, http.StatusBadRequest, "укажите полный IPv4, например 192.168.1.50")
+		writeError(w, http.StatusBadRequest, "укажите полный IPv4, например 10.0.0.1")
 		return
 	}
 	limit := 100

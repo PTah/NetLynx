@@ -10,11 +10,11 @@ import (
 	"strings"
 	"time"
 
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/netutil"
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/notify"
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/snmp"
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/store"
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/uisp"
+	"github.com/PTah/netlynx/internal/netutil"
+	"github.com/PTah/netlynx/internal/notify"
+	"github.com/PTah/netlynx/internal/snmp"
+	"github.com/PTah/netlynx/internal/store"
+	"github.com/PTah/netlynx/internal/uisp"
 	"github.com/go-chi/chi/v5"
 )
 

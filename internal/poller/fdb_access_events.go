@@ -3,7 +3,7 @@ package poller
 import (
 	"strings"
 
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/store"
+	"github.com/PTah/netlynx/internal/store"
 )
 
 type fdbAccessEvent struct {

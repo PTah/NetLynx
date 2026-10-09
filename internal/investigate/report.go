@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/macvendor"
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/store"
+	"github.com/PTah/netlynx/internal/macvendor"
+	"github.com/PTah/netlynx/internal/store"
 )
 
 type Confidence string

@@ -3,7 +3,7 @@ package api
 import (
 	"testing"
 
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/swcfg"
+	"github.com/PTah/netlynx/internal/swcfg"
 )
 
 func TestMatchVLANInInventory(t *testing.T) {

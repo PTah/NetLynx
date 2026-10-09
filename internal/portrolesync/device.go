@@ -3,8 +3,8 @@ package portrolesync
 import (
 	"strings"
 
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/models"
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/swcfg"
+	"github.com/PTah/netlynx/internal/models"
+	"github.com/PTah/netlynx/internal/swcfg"
 )
 
 func SwitchLikeCategory(cat string) bool {

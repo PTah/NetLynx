@@ -3,7 +3,7 @@ package store
 import (
 	"testing"
 
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/models"
+	"github.com/PTah/netlynx/internal/models"
 )
 
 func TestDiscoveredIdentityKey(t *testing.T) {
@@ -16,7 +16,7 @@ func TestDiscoveredIdentityKey(t *testing.T) {
 		want    string
 	}{
 		{"sysname", "SW-A.lan", "", "", "", "name:sw-a.lan"},
-		{"mgmt over model name", "SIP-T41S", "192.168.170.29", "", "", "addr:192.168.170.29"},
+		{"mgmt over model name", "SIP-T41S", "10.0.0.1", "", "", "addr:10.0.0.1"},
 		{"chassis over model name", "SIP-T41S", "", "00:15:65:c7:6e:7f", "", "chassis:001565c76e7f"},
 		{"port mac as chassis", "SIP-T41S", "", "", "00:15:65:c7:6e:7f", "chassis:001565c76e7f"},
 		{"mgmt fallback", "", "10.1.2.3", "aa:bb", "", "addr:10.1.2.3"},
@@ -52,22 +52,22 @@ func TestDiscoveredChassisMAC(t *testing.T) {
 
 func TestVirtualPeerIdentity(t *testing.T) {
 	sys := "SIP-T41S"
-	mgmt := "192.168.170.29"
+	mgmt := "10.0.0.1"
 	port := "00:15:65:c7:6e:7f"
 	e := TopologyEdge{RemoteSysName: &sys, RemoteMgmtAddr: &mgmt, RemotePortID: &port}
 	key, label := virtualPeerIdentity(e)
 	if key != "chassis:001565c76e7f" {
 		t.Fatalf("port MAC should win: key=%q label=%q", key, label)
 	}
-	if label != "SIP-T41S · 192.168.170.29" {
+	if label != "SIP-T41S · 10.0.0.1" {
 		t.Fatalf("label: %q", label)
 	}
 	e2 := TopologyEdge{RemoteSysName: &sys, RemoteMgmtAddr: &mgmt}
 	key2, label2 := virtualPeerIdentity(e2)
-	if key2 != "addr:192.168.170.29" {
+	if key2 != "addr:10.0.0.1" {
 		t.Fatalf("mgmt key: %q", key2)
 	}
-	if label2 != "SIP-T41S · 192.168.170.29" {
+	if label2 != "SIP-T41S · 10.0.0.1" {
 		t.Fatalf("label: %q", label2)
 	}
 	// Without mgmt/MAC — last resort model name (may still collapse identical models).
@@ -80,11 +80,11 @@ func TestVirtualPeerIdentity(t *testing.T) {
 
 func TestDiscoveredIgnoreKeyMatch(t *testing.T) {
 	ignored := map[string]struct{}{}
-	addDiscoveredIgnoreKeys(ignored, "chassis:001565c76e7f", "00:15:65:c7:6e:7f", "192.168.170.29", "SIP-T41S")
+	addDiscoveredIgnoreKeys(ignored, "chassis:001565c76e7f", "00:15:65:c7:6e:7f", "10.0.0.1", "SIP-T41S")
 
 	// Тот же chassis под другим identity (mgmt) — тоже ignored.
 	sys := "SIP-T41S"
-	mgmt := "192.168.170.29"
+	mgmt := "10.0.0.1"
 	ch := "00:15:65:c7:6e:7f"
 	nb := PortNeighbor{RemoteSysName: &sys, RemoteMgmtAddr: &mgmt, RemoteChassisID: &ch}
 	if !discoveredKeySetHits(ignored, neighborDiscoveredIgnoreKeys(nb)) {
@@ -136,7 +136,7 @@ func TestShouldOfferDiscovered(t *testing.T) {
 
 func TestHideDiscoveredAlreadyInInventory(t *testing.T) {
 	mac := "00:15:65:c7:6e:7f"
-	ip := "192.168.170.29"
+	ip := "10.0.0.1"
 	devices := []models.Device{
 		{ID: 10, Name: "Phone", Host: ip, ChassisMAC: &mac},
 		{ID: 11, Name: "Core", Host: "10.0.0.1"},
@@ -145,7 +145,7 @@ func TestHideDiscoveredAlreadyInInventory(t *testing.T) {
 	otherIP := "10.9.8.7"
 	list := []DiscoveredDevice{
 		{ID: 1, Status: DiscoveredStatusNew, IdentityKey: "chassis:001565c76e7f", RemoteChassisID: &mac},
-		{ID: 2, Status: DiscoveredStatusNew, IdentityKey: "addr:192.168.170.29", RemoteMgmtAddr: &ip},
+		{ID: 2, Status: DiscoveredStatusNew, IdentityKey: "addr:10.0.0.1", RemoteMgmtAddr: &ip},
 		{ID: 3, Status: DiscoveredStatusNew, IdentityKey: "chassis:aabbccddeeff", RemoteChassisID: &otherMAC},
 		{ID: 4, Status: DiscoveredStatusNew, IdentityKey: "addr:10.9.8.7", RemoteMgmtAddr: &otherIP},
 		{ID: 5, Status: DiscoveredStatusAdded, IdentityKey: "chassis:001565c76e7f", RemoteChassisID: &mac, PromotedDeviceID: int64Ptr(10)},
@@ -178,8 +178,8 @@ func TestDiscoveredLacksStrongIdentityAndPortAnchor(t *testing.T) {
 	if discoveredLacksStrongIdentity(strongMAC) {
 		t.Fatal("full chassis must be strong")
 	}
-	ip := "192.168.160.111"
-	strongIP := DiscoveredDevice{IdentityKey: "addr:192.168.160.111", RemoteMgmtAddr: &ip}
+	ip := "10.0.0.1"
+	strongIP := DiscoveredDevice{IdentityKey: "addr:10.0.0.1", RemoteMgmtAddr: &ip}
 	if discoveredLacksStrongIdentity(strongIP) {
 		t.Fatal("mgmt IP must be strong")
 	}
@@ -240,10 +240,10 @@ func TestFilterUnknownNeighbors(t *testing.T) {
 }
 
 func TestSuggestDiscoveredHostAndName(t *testing.T) {
-	mgmt := "192.168.1.50"
+	mgmt := "10.0.0.1"
 	sys := "leaf-50"
 	d := &DiscoveredDevice{RemoteMgmtAddr: &mgmt, RemoteSysName: &sys, IdentityKey: "name:leaf-50"}
-	if SuggestDiscoveredHost(d) != "192.168.1.50" {
+	if SuggestDiscoveredHost(d) != "10.0.0.1" {
 		t.Fatalf("host: %q", SuggestDiscoveredHost(d))
 	}
 	if SuggestDiscoveredName(d) != "leaf-50" {

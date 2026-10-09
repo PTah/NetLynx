@@ -5,7 +5,7 @@ import (
 	"errors"
 	"strings"
 
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/models"
+	"github.com/PTah/netlynx/internal/models"
 	"github.com/jackc/pgx/v5"
 )
 

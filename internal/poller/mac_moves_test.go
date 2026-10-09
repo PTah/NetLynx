@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/snmp"
+	"github.com/PTah/netlynx/internal/snmp"
 )
 
 func TestComputeMACFDBMoves(t *testing.T) {

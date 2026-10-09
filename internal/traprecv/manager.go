@@ -7,9 +7,9 @@ import (
 	"sync"
 	"time"
 
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/live"
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/notify"
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/store"
+	"github.com/PTah/netlynx/internal/live"
+	"github.com/PTah/netlynx/internal/notify"
+	"github.com/PTah/netlynx/internal/store"
 )
 
 // Manager — hot-reload SNMP trap UDP listener по настройкам из БД.

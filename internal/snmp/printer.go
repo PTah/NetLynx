@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/models"
+	"github.com/PTah/netlynx/internal/models"
 	"github.com/gosnmp/gosnmp"
 )
 

@@ -3,7 +3,7 @@ package investigate
 import (
 	"context"
 
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/store"
+	"github.com/PTah/netlynx/internal/store"
 )
 
 // BlastGraph — единый скелет из topology blast cache (lldp+cdp+manual).

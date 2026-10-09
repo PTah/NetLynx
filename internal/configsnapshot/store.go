@@ -6,11 +6,11 @@ import (
 	"strings"
 	"time"
 
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/config"
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/devssh"
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/models"
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/store"
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/swcfg"
+	"github.com/PTah/netlynx/internal/config"
+	"github.com/PTah/netlynx/internal/devssh"
+	"github.com/PTah/netlynx/internal/models"
+	"github.com/PTah/netlynx/internal/store"
+	"github.com/PTah/netlynx/internal/swcfg"
 )
 
 func ShouldSnapshotDevice(d models.Device) bool {

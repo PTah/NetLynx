@@ -36,13 +36,13 @@ func TestIsHostKeyRecoverableNotAuth(t *testing.T) {
 }
 
 func TestKnownHostsLineMatchesHost(t *testing.T) {
-	if !knownHostsLineMatchesHost("192.168.160.11 ssh-rsa AAAA", "192.168.160.11", 22) {
+	if !knownHostsLineMatchesHost("10.0.0.1 ssh-rsa AAAA", "10.0.0.1", 22) {
 		t.Fatal("expected match")
 	}
-	if knownHostsLineMatchesHost("192.168.160.12 ssh-rsa AAAA", "192.168.160.11", 22) {
+	if knownHostsLineMatchesHost("10.0.0.1 ssh-rsa AAAA", "10.0.0.1", 22) {
 		t.Fatal("unexpected match")
 	}
-	if !knownHostsLineMatchesHost("[192.168.160.11]:2222 ssh-rsa AAAA", "192.168.160.11", 2222) {
+	if !knownHostsLineMatchesHost("[10.0.0.1]:2222 ssh-rsa AAAA", "10.0.0.1", 2222) {
 		t.Fatal("expected ported match")
 	}
 }

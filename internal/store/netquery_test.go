@@ -14,7 +14,7 @@ func TestFormatFullMAC(t *testing.T) {
 	if _, ok := FormatFullMAC("aabbcc"); ok {
 		t.Fatal("partial must fail")
 	}
-	if _, ok := FormatFullMAC("192.168.1.1"); ok {
+	if _, ok := FormatFullMAC("10.0.0.1"); ok {
 		t.Fatal("ip must fail")
 	}
 }
@@ -24,8 +24,8 @@ func TestSplitHostOrMAC(t *testing.T) {
 	if h != "" || m != "aa:bb:cc:dd:ee:ff" {
 		t.Fatalf("mac field: host=%q mac=%q", h, m)
 	}
-	h, m = SplitHostOrMAC("192.168.10.20")
-	if h != "192.168.10.20" || m != "" {
+	h, m = SplitHostOrMAC("10.0.0.1")
+	if h != "10.0.0.1" || m != "" {
 		t.Fatalf("ip field: host=%q mac=%q", h, m)
 	}
 	h, m = SplitHostOrMAC("")
@@ -35,8 +35,8 @@ func TestSplitHostOrMAC(t *testing.T) {
 }
 
 func TestClassifySearchQuery(t *testing.T) {
-	k, n := ClassifySearchQuery("192.168.1.50")
-	if k != SearchQueryIP || n != "192.168.1.50" {
+	k, n := ClassifySearchQuery("10.0.0.1")
+	if k != SearchQueryIP || n != "10.0.0.1" {
 		t.Fatalf("ip %v %q", k, n)
 	}
 	k, n = ClassifySearchQuery("aa:bb:cc:dd:ee:ff")

@@ -8,9 +8,9 @@ import (
 	"sync"
 	"time"
 
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/netutil"
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/snmp"
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/store"
+	"github.com/PTah/netlynx/internal/netutil"
+	"github.com/PTah/netlynx/internal/snmp"
+	"github.com/PTah/netlynx/internal/store"
 )
 
 const snmpScanParallel = 20

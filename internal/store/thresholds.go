@@ -1,6 +1,6 @@
 package store
 
-import "git.kalinamall.ru/PapaTramp/netlynx/internal/config"
+import "github.com/PTah/netlynx/internal/config"
 
 type UtilThresholds struct {
 	HighPct float64

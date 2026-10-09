@@ -3,7 +3,7 @@ package portrolesync
 import (
 	"testing"
 
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/models"
+	"github.com/PTah/netlynx/internal/models"
 )
 
 func TestShouldSyncPortRolesFromConfig(t *testing.T) {

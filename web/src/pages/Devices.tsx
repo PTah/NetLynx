@@ -612,7 +612,7 @@ export default function Devices() {
           <input
             value={portQ}
             onChange={(e) => setPortQ(e.target.value)}
-            placeholder="DAK-PC / aa:bb:cc:dd:ee:ff / 192.168.1.50"
+            placeholder="DAK-PC / aa:bb:cc:dd:ee:ff / 10.0.0.1"
             style={{ flex: "1 1 280px", minWidth: 200, maxWidth: 480 }}
           />
           <button type="submit" disabled={portSearching}>

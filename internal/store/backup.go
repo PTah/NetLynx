@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/secrets"
+	"github.com/PTah/netlynx/internal/secrets"
 	"github.com/jackc/pgx/v5"
 )
 

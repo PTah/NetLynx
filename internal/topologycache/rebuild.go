@@ -7,10 +7,10 @@ import (
 	"strings"
 	"time"
 
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/investigate"
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/models"
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/store"
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/swcfg"
+	"github.com/PTah/netlynx/internal/investigate"
+	"github.com/PTah/netlynx/internal/models"
+	"github.com/PTah/netlynx/internal/store"
+	"github.com/PTah/netlynx/internal/swcfg"
 )
 
 // RebuildResult — итог пересборки кэша.

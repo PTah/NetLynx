@@ -9,10 +9,10 @@ import (
 	"strings"
 	"time"
 
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/live"
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/notify"
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/snmp"
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/store"
+	"github.com/PTah/netlynx/internal/live"
+	"github.com/PTah/netlynx/internal/notify"
+	"github.com/PTah/netlynx/internal/snmp"
+	"github.com/PTah/netlynx/internal/store"
 	"github.com/gosnmp/gosnmp"
 )
 

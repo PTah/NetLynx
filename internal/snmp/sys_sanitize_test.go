@@ -18,7 +18,7 @@ func TestSanitizeSNMPBytes(t *testing.T) {
 		t.Fatalf("ifName 0/24: %q", got)
 	}
 	// Сырой IPv4 (непечатные октеты) по-прежнему как dotted-quad
-	if got := sanitizeSNMPBytes([]byte{192, 168, 1, 10}); got != "192.168.1.10" {
+	if got := sanitizeSNMPBytes([]byte{192, 168, 1, 10}); got != "10.0.0.1" {
 		t.Fatalf("raw ipv4: %q", got)
 	}
 	if got := sanitizeSNMPBytes([]byte{1, 10, 0, 0, 1}); got != "10.0.0.1" {

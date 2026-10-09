@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/store"
+	"github.com/PTah/netlynx/internal/store"
 )
 
 // Investigator — расширяемое правило поверх MAC-отчёта (фаза 8).

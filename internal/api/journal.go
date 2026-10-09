@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/journallog"
+	"github.com/PTah/netlynx/internal/journallog"
 )
 
 func (s *Server) handleJournalMeta(w http.ResponseWriter, r *http.Request) {

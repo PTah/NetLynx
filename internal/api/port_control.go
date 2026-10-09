@@ -8,12 +8,12 @@ import (
 	"net/http"
 	"strings"
 
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/backup"
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/models"
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/portrolesync"
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/snmp"
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/store"
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/swcfg"
+	"github.com/PTah/netlynx/internal/backup"
+	"github.com/PTah/netlynx/internal/models"
+	"github.com/PTah/netlynx/internal/portrolesync"
+	"github.com/PTah/netlynx/internal/snmp"
+	"github.com/PTah/netlynx/internal/store"
+	"github.com/PTah/netlynx/internal/swcfg"
 	"github.com/jackc/pgx/v5"
 )
 

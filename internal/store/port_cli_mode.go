@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/swcfg"
+	"github.com/PTah/netlynx/internal/swcfg"
 )
 
 // CLIPortModeUpdate — обновление роли порта из show running-config.

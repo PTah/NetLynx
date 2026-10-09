@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"time"
 
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/netutil"
+	"github.com/PTah/netlynx/internal/netutil"
 )
 
 // Webhook отправляет JSON POST на настроенный URL (интеграции: Slack, n8n, свой скрипт).

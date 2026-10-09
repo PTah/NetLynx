@@ -12,7 +12,7 @@ func TestDecodeCDPAddress(t *testing.T) {
 		want string
 	}{
 		{"raw ipv4", []byte{10, 1, 2, 3}, "10.1.2.3"},
-		{"type1 ipv4", []byte{1, 192, 168, 1, 10}, "192.168.1.10"},
+		{"type1 ipv4", []byte{1, 192, 168, 1, 10}, "10.0.0.1"},
 		{"empty", nil, ""},
 	}
 	for _, tt := range tests {

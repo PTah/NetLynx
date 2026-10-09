@@ -6,11 +6,11 @@ import (
 	"sync"
 	"time"
 
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/config"
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/investigate"
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/live"
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/notify"
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/store"
+	"github.com/PTah/netlynx/internal/config"
+	"github.com/PTah/netlynx/internal/investigate"
+	"github.com/PTah/netlynx/internal/live"
+	"github.com/PTah/netlynx/internal/notify"
+	"github.com/PTah/netlynx/internal/store"
 )
 
 // Hub — периодический DFS петель; L2_LOOP_APPEARED только на новый cycle key.

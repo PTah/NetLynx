@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"sort"
 
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/store"
+	"github.com/PTah/netlynx/internal/store"
 )
 
 // L2Path — путь по топологии от корня (blast root / эвристика) до access с MAC.

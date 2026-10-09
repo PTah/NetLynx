@@ -12,7 +12,7 @@ func TestNormalizeChassisMAC(t *testing.T) {
 	if got := normalizeChassisMAC("aabbccddeeff"); got != "aa:bb:cc:dd:ee:ff" {
 		t.Fatalf("compact: %q", got)
 	}
-	if got := normalizeChassisMAC("192.168.1.1"); got != "" {
+	if got := normalizeChassisMAC("10.0.0.1"); got != "" {
 		t.Fatalf("IP must not be MAC: %q", got)
 	}
 	if got := normalizeChassisMAC(""); got != "" {
@@ -21,7 +21,7 @@ func TestNormalizeChassisMAC(t *testing.T) {
 }
 
 func TestParseIPv4Host(t *testing.T) {
-	if got := parseIPv4Host("192.168.128.5"); got == nil || got.String() != "192.168.128.5" {
+	if got := parseIPv4Host("10.0.0.1"); got == nil || got.String() != "10.0.0.1" {
 		t.Fatalf("got %v", got)
 	}
 	if parseIPv4Host("papasha") != nil {
@@ -36,11 +36,11 @@ func TestParseIPv4Host(t *testing.T) {
 }
 
 func TestPhysAddressOIDForHost(t *testing.T) {
-	ip := parseIPv4Host("192.168.128.5")
+	ip := parseIPv4Host("10.0.0.1")
 	if ip == nil {
 		t.Fatal("parse")
 	}
-	want := "1.3.6.1.2.1.4.20.1.2.192.168.128.5"
+	want := "1.3.6.1.2.1.4.20.1.2.10.0.0.1"
 	got := fmt.Sprintf("%s.%d.%d.%d.%d", oidIpAdEntIfIndex, ip[0], ip[1], ip[2], ip[3])
 	if got != want {
 		t.Fatalf("got %q want %q", got, want)

@@ -5,8 +5,8 @@ import (
 	"log/slog"
 	"time"
 
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/config"
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/store"
+	"github.com/PTah/netlynx/internal/config"
+	"github.com/PTah/netlynx/internal/store"
 )
 
 const defaultMinInterval = 20 * time.Hour

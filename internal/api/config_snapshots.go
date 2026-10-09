@@ -6,9 +6,9 @@ import (
 	"strconv"
 	"time"
 
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/configsnapshot"
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/store"
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/swcfg"
+	"github.com/PTah/netlynx/internal/configsnapshot"
+	"github.com/PTah/netlynx/internal/store"
+	"github.com/PTah/netlynx/internal/swcfg"
 	"github.com/go-chi/chi/v5"
 )
 

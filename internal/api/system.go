@@ -3,7 +3,7 @@ package api
 import (
 	"net/http"
 
-	"git.kalinamall.ru/PapaTramp/netlynx/internal/sysmon"
+	"github.com/PTah/netlynx/internal/sysmon"
 )
 
 func (s *Server) handleSystemStats(w http.ResponseWriter, _ *http.Request) {
