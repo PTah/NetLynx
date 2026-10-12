@@ -6,11 +6,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/PTah/netlynx/internal/config"
-	"github.com/PTah/netlynx/internal/devssh"
-	"github.com/PTah/netlynx/internal/models"
-	"github.com/PTah/netlynx/internal/store"
-	"github.com/PTah/netlynx/internal/swcfg"
+	"git.kalinamall.ru/PapaTramp/netlynx/internal/config"
+	"git.kalinamall.ru/PapaTramp/netlynx/internal/devssh"
+	"git.kalinamall.ru/PapaTramp/netlynx/internal/models"
+	"git.kalinamall.ru/PapaTramp/netlynx/internal/store"
+	"git.kalinamall.ru/PapaTramp/netlynx/internal/swcfg"
 )
 
 func ShouldSnapshotDevice(d models.Device) bool {
@@ -25,8 +25,8 @@ func ShouldSnapshotDevice(d models.Device) bool {
 	if d.SysDescr != nil {
 		sys = *d.SysDescr
 	}
-	return cat == store.DeviceCategoryRouter &&
-		swcfg.IsMikrotikRouterForConfigBackup(d.DeviceCategory, d.SSHVendor, sys, d.Name)
+	// RouterOS: router и AP (wAP/cAP), не только категория router.
+	return swcfg.IsMikrotikRouterForConfigBackup(d.DeviceCategory, d.SSHVendor, sys, d.Name)
 }
 
 func SaveIfChanged(ctx context.Context, st *store.Store, deviceID int64, text, source string) (saved bool, id int64, err error) {

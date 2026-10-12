@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/PTah/netlynx/internal/models"
+	"git.kalinamall.ru/PapaTramp/netlynx/internal/models"
 	"github.com/jackc/pgx/v5"
 )
 

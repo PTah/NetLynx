@@ -6,8 +6,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/PTah/netlynx/internal/config"
-	"github.com/PTah/netlynx/internal/store"
+	"git.kalinamall.ru/PapaTramp/netlynx/internal/config"
+	"git.kalinamall.ru/PapaTramp/netlynx/internal/store"
 )
 
 type Scheduler struct {

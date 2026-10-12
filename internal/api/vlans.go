@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/PTah/netlynx/internal/models"
-	"github.com/PTah/netlynx/internal/store"
-	"github.com/PTah/netlynx/internal/swcfg"
+	"git.kalinamall.ru/PapaTramp/netlynx/internal/models"
+	"git.kalinamall.ru/PapaTramp/netlynx/internal/store"
+	"git.kalinamall.ru/PapaTramp/netlynx/internal/swcfg"
 	"github.com/go-chi/chi/v5"
 )
 

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/PTah/netlynx/internal/store"
+	"git.kalinamall.ru/PapaTramp/netlynx/internal/store"
 )
 
 // RunOverviewSync периодически подтягивает overview.status коммутаторов из UISP и пишет в devices.uisp_overview_status.

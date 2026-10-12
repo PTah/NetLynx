@@ -2354,7 +2354,15 @@ export default function Topology() {
                       </div>
                     )}
                     {other && !other.virtual && (
-                      <Link to={`/devices/${other.id}`} state={deviceLinkState({ path: "/topology", label: "Топология" })}>карточка</Link>
+                      <Link
+                        to={`/devices/${other.id}`}
+                        state={deviceLinkState({
+                          path: isLocView ? "/topology?view=locations" : "/topology",
+                          label: "Топология",
+                        })}
+                      >
+                        карточка
+                      </Link>
                     )}
                   </div>
                 );

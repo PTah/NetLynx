@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/PTah/netlynx/internal/models"
-	"github.com/PTah/netlynx/internal/secrets"
+	"git.kalinamall.ru/PapaTramp/netlynx/internal/models"
+	"git.kalinamall.ru/PapaTramp/netlynx/internal/secrets"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )

@@ -6,8 +6,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/PTah/netlynx/internal/store"
-	"github.com/PTah/netlynx/internal/swcfg"
+	"git.kalinamall.ru/PapaTramp/netlynx/internal/store"
+	"git.kalinamall.ru/PapaTramp/netlynx/internal/swcfg"
 )
 
 // Глубина обхода нижестоящих с VLAN (fallback, если MaxDepth не задан).

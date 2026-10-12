@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/PTah/netlynx/internal/swcfg"
+	"git.kalinamall.ru/PapaTramp/netlynx/internal/swcfg"
 )
 
 func main() {

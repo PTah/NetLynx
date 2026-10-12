@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PTah/netlynx/internal/netutil"
+	"git.kalinamall.ru/PapaTramp/netlynx/internal/netutil"
 )
 
 func TestExpandScanTargets_APILimits(t *testing.T) {

@@ -17,7 +17,7 @@ import { formatEventSummary, formatEventTypeLabel } from "../eventFormat";
 import { usePersistedColumnWidths } from "../hooks/usePersistedColumnWidths";
 import { useAuthRole } from "../hooks/useAuthRole";
 import { formatPortSpeedFromRow, linkMbps } from "../linkSpeedFormat";
-import { DEVICE_BACK_DEFAULT, type DeviceBackRef, deviceLinkState } from "../navigation";
+import { deviceLinkState, resolveDeviceBack } from "../navigation";
 import {
   type DeviceCategory,
   isPrinterCategory,
@@ -100,7 +100,26 @@ function devicePortSettingsWritable(d: {
   return false;
 }
 
-/** RouterOS-роутер MikroTik: без периодического SSH sync; конфиг — только в бэкапе. */
+/** RouterOS по вендору/sysDescr (без фильтра категории). */
+function isMikrotikRouterOS(d: {
+  name?: string;
+  sys_descr?: string | null;
+  sys_name?: string | null;
+  ssh_vendor?: string | null;
+}): boolean {
+  const vendor = (d.ssh_vendor ?? "auto").trim().toLowerCase();
+  if (vendor === "mikrotik") return true;
+  const blob = `${d.sys_descr ?? ""} ${d.sys_name ?? ""} ${d.name ?? ""}`.toLowerCase();
+  return (
+    blob.includes("mikrotik") ||
+    blob.includes("routeros") ||
+    blob.includes("routerboard") ||
+    blob.includes("rbwap") ||
+    /\brb\d/.test(blob)
+  );
+}
+
+/** RouterOS-роутер MikroTik: без периодического SSH sync; порты только для просмотра. */
 function isMikrotikRouter(d: {
   device_category?: string;
   name?: string;
@@ -108,15 +127,19 @@ function isMikrotikRouter(d: {
   sys_name?: string | null;
   ssh_vendor?: string | null;
 }): boolean {
-  if (normalizeDeviceCategory(d.device_category) !== "router") return false;
-  const vendor = (d.ssh_vendor ?? "auto").trim().toLowerCase();
-  if (vendor === "mikrotik") return true;
-  const blob = `${d.sys_descr ?? ""} ${d.sys_name ?? ""} ${d.name ?? ""}`.toLowerCase();
-  return (
-    blob.includes("mikrotik") ||
-    blob.includes("routeros") ||
-    blob.includes("routerboard")
-  );
+  return normalizeDeviceCategory(d.device_category) === "router" && isMikrotikRouterOS(d);
+}
+
+/** Снимки/бэкап /export: router и AP на RouterOS (wAP и т.п.). */
+function isMikrotikConfigDevice(d: {
+  device_category?: string;
+  name?: string;
+  sys_descr?: string | null;
+  sys_name?: string | null;
+  ssh_vendor?: string | null;
+}): boolean {
+  const cat = normalizeDeviceCategory(d.device_category);
+  return (cat === "router" || cat === "ap") && isMikrotikRouterOS(d);
 }
 
 function devicePoE24VSupported(d: {
@@ -396,8 +419,7 @@ export default function DeviceDetail() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { canWrite } = useAuthRole();
   const { categories } = useDeviceCategories();
-  const back: DeviceBackRef =
-    (location.state as { deviceBack?: DeviceBackRef } | null)?.deviceBack ?? DEVICE_BACK_DEFAULT;
+  const back = resolveDeviceBack(location.state);
   const detailTab = parseDeviceDetailTab(searchParams.get("tab"));
   const setDetailTab = (next: DeviceDetailTab) => {
     setSearchParams(
@@ -406,7 +428,7 @@ export default function DeviceDetail() {
         p.set("tab", next);
         return p;
       },
-      { replace: true },
+      { replace: true, state: location.state },
     );
   };
   const {
@@ -540,9 +562,9 @@ export default function DeviceDetail() {
         p.set("tab", "ports");
         return p;
       },
-      { replace: true },
+      { replace: true, state: location.state },
     );
-  }, [location.hash, id, setSearchParams]);
+  }, [location.hash, id, location.state, setSearchParams]);
 
   const runCliPortSync = (force: boolean) => {
     if (!id) return;
@@ -2329,7 +2351,10 @@ export default function DeviceDetail() {
                     <tr key={ml.id}>
                       <td>if{localIf}</td>
                       <td>
-                        <Link to={`/devices/${peerId}`}>{peerName || `#${peerId}`}</Link> / if{peerIf}
+                        <Link to={`/devices/${peerId}`} state={deviceLinkState(back)}>
+                          {peerName || `#${peerId}`}
+                        </Link>{" "}
+                        / if{peerIf}
                       </td>
                       <td>
                         {ml.status}
@@ -2474,7 +2499,7 @@ export default function DeviceDetail() {
             {cliSyncMsg ? (
               <span style={{ fontSize: "0.85rem", color: "#9aa3b5" }}>{cliSyncMsg}</span>
             ) : null}
-            {!isMikrotikRouter(data.device) ? (
+            {!isMikrotikConfigDevice(data.device) ? (
               <button
                 type="button"
                 disabled={cliSyncBusy || !canWrite}
@@ -2485,7 +2510,8 @@ export default function DeviceDetail() {
               </button>
             ) : (
               <span style={{ fontSize: "0.85rem", color: "#9aa3b5" }}>
-                RouterOS: конфиг снимается при резервном копировании; порты только для просмотра.
+                RouterOS: конфиг — снимки истории и бэкап (/export)
+                {isMikrotikRouter(data.device) ? "; порты только для просмотра" : ""}.
               </span>
             )}
           </p>
@@ -3129,7 +3155,9 @@ export default function DeviceDetail() {
                                   {proto}:{" "}
                                   {rid != null && rid > 0 ? (
                                     <>
-                                      <Link to={`/devices/${rid}`}>{name}</Link>
+                                      <Link to={`/devices/${rid}`} state={deviceLinkState(back)}>
+                                        {name}
+                                      </Link>
                                       {port}
                                       {" "}
                                       <Link

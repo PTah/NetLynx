@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/PTah/netlynx/internal/store"
+	"git.kalinamall.ru/PapaTramp/netlynx/internal/store"
 )
 
 // NotifyPortFlapAfterLink — после LINK_UP/DOWN (poll или trap): проверить bounce-окно.

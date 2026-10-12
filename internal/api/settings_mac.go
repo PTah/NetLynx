@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/PTah/netlynx/internal/store"
+	"git.kalinamall.ru/PapaTramp/netlynx/internal/store"
 )
 
 func (s *Server) handleGetMACInvestigationSettings(w http.ResponseWriter, r *http.Request) {

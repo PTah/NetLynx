@@ -3,7 +3,7 @@ package topologycache
 import (
 	"testing"
 
-	"github.com/PTah/netlynx/internal/store"
+	"git.kalinamall.ru/PapaTramp/netlynx/internal/store"
 )
 
 func TestBlastEdgeProtocolOK(t *testing.T) {

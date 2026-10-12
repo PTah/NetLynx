@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/PTah/netlynx/internal/models"
+	"git.kalinamall.ru/PapaTramp/netlynx/internal/models"
 )
 
 // attachmentNeighborMaxAge — для оффлайн-оповещений: stale FDB-соседи и недавний FDB.

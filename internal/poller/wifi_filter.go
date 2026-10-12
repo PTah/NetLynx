@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/PTah/netlynx/internal/store"
+	"git.kalinamall.ru/PapaTramp/netlynx/internal/store"
 )
 
 const wifiFilterCacheTTL = 2 * time.Minute

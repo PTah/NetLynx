@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PTah/netlynx/internal/snmp"
+	"git.kalinamall.ru/PapaTramp/netlynx/internal/snmp"
 )
 
 func TestSelectSSHVendorProfile(t *testing.T) {

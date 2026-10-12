@@ -3,7 +3,7 @@ package backup
 import (
 	"testing"
 
-	"github.com/PTah/netlynx/internal/models"
+	"git.kalinamall.ru/PapaTramp/netlynx/internal/models"
 )
 
 func TestWantSwitchConfigOnlySwitch(t *testing.T) {
@@ -13,7 +13,7 @@ func TestWantSwitchConfigOnlySwitch(t *testing.T) {
 	}
 	mk := models.Device{
 		DeviceCategory: "router",
-		Host:           "10.0.0.1",
+		Host:           "192.168.1.1",
 		Name:           "RB2011-GATE",
 		SSHVendor:      "mikrotik",
 	}
@@ -23,7 +23,7 @@ func TestWantSwitchConfigOnlySwitch(t *testing.T) {
 	}
 	patio := models.Device{
 		DeviceCategory: "router",
-		Host:           "10.0.0.1",
+		Host:           "192.168.1.2",
 		Name:           "Mikrot-Il Patio",
 		SSHVendor:      "auto",
 	}
@@ -31,14 +31,32 @@ func TestWantSwitchConfigOnlySwitch(t *testing.T) {
 	if !wantSwitchConfig(patio) {
 		t.Fatal("RouterOS router with ssh_vendor=auto should be backed up")
 	}
+	wap := models.Device{
+		DeviceCategory: "ap",
+		Host:           "192.168.1.3",
+		Name:           "wAP AC-Accounts",
+		SSHVendor:      "auto",
+	}
+	wap.SysDescr = strPtr("RouterOS RBwAPG-5HacT2HnD")
+	if !wantSwitchConfig(wap) {
+		t.Fatal("MikroTik wAP AP should be backed up")
+	}
 	for _, cat := range []string{"router", "ap", "server", "camera"} {
 		d := models.Device{DeviceCategory: cat, Host: "10.0.0.1", Name: cat}
 		if cat == "router" {
 			continue // non-mikrotik tested below
 		}
+		if cat == "ap" {
+			continue // non-mikrotik AP: no RouterOS → skip
+		}
 		if wantSwitchConfig(d) {
 			t.Fatalf("should skip %s", cat)
 		}
+	}
+	unifiAP := models.Device{DeviceCategory: "ap", Host: "10.0.0.9", Name: "UAP"}
+	unifiAP.SysDescr = strPtr("UAP-AC-Pro")
+	if wantSwitchConfig(unifiAP) {
+		t.Fatal("UniFi AP should skip backup")
 	}
 	cisco := models.Device{DeviceCategory: "router", Host: "10.0.0.2", Name: "ISR"}
 	cisco.SysDescr = strPtr("Cisco IOS Software")

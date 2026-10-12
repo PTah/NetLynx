@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/PTah/netlynx/internal/store"
+	"git.kalinamall.ru/PapaTramp/netlynx/internal/store"
 )
 
 type deviceRunningConfigEntry struct {

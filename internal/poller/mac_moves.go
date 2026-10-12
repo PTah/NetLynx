@@ -4,8 +4,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/PTah/netlynx/internal/snmp"
-	"github.com/PTah/netlynx/internal/store"
+	"git.kalinamall.ru/PapaTramp/netlynx/internal/snmp"
+	"git.kalinamall.ru/PapaTramp/netlynx/internal/store"
 )
 
 // computeMACFDBMoves — diff prev→cur FDB (все порты): appear / move / leave.

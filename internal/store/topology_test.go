@@ -3,7 +3,7 @@ package store
 import (
 	"testing"
 
-	"github.com/PTah/netlynx/internal/models"
+	"git.kalinamall.ru/PapaTramp/netlynx/internal/models"
 )
 
 func TestExpandNameKeys(t *testing.T) {
@@ -11,8 +11,8 @@ func TestExpandNameKeys(t *testing.T) {
 	if len(got) < 2 || got[0] != "sw-core.example.com" || got[1] != "sw-core" {
 		t.Fatalf("unexpected keys: %#v", got)
 	}
-	ipKeys := expandNameKeys("10.0.0.1")
-	if len(ipKeys) != 1 || ipKeys[0] != "10.0.0.1" {
+	ipKeys := expandNameKeys("192.168.160.54")
+	if len(ipKeys) != 1 || ipKeys[0] != "192.168.160.54" {
 		t.Fatalf("IP must not strip first octet: %#v", ipKeys)
 	}
 	ipKeys = expandNameKeys("48.47.50.52")
@@ -45,8 +45,8 @@ func TestResolveRemoteDeviceID(t *testing.T) {
 func TestResolveRemoteByChassisMAC(t *testing.T) {
 	mac := "f0:9f:c2:64:fe:5c"
 	devices := []models.Device{
-		{ID: 70, Name: "ES48-4", Host: "10.0.0.1", ChassisMAC: &mac},
-		{ID: 36, Name: "ES24-2", Host: "10.0.0.1"},
+		{ID: 70, Name: "ES48-4", Host: "192.168.160.21", ChassisMAC: &mac},
+		{ID: 36, Name: "ES24-2", Host: "192.168.160.64"},
 	}
 	idx := buildDeviceNameIndex(devices)
 	ch := "F0:9F:C2:64:FE:5C"

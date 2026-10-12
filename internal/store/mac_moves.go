@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/PTah/netlynx/internal/macvendor"
+	"git.kalinamall.ru/PapaTramp/netlynx/internal/macvendor"
 	"github.com/jackc/pgx/v5"
 )
 

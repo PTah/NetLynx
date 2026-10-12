@@ -4,8 +4,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/PTah/netlynx/internal/live"
-	"github.com/PTah/netlynx/internal/store"
+	"git.kalinamall.ru/PapaTramp/netlynx/internal/live"
+	"git.kalinamall.ru/PapaTramp/netlynx/internal/store"
 )
 
 // EventTypeConfigEdit — правка конфига свича/порта пользователем UI.

@@ -3,7 +3,7 @@ package poller
 import (
 	"testing"
 
-	"github.com/PTah/netlynx/internal/config"
+	"git.kalinamall.ru/PapaTramp/netlynx/internal/config"
 )
 
 func TestFDBGrowing(t *testing.T) {

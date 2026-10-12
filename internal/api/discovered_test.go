@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PTah/netlynx/internal/store"
+	"git.kalinamall.ru/PapaTramp/netlynx/internal/store"
 )
 
 func TestPollDeviceFromDiscoveredBody(t *testing.T) {

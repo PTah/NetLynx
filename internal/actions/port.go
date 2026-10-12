@@ -4,8 +4,8 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/PTah/netlynx/internal/snmp"
-	"github.com/PTah/netlynx/internal/store"
+	"git.kalinamall.ru/PapaTramp/netlynx/internal/snmp"
+	"git.kalinamall.ru/PapaTramp/netlynx/internal/store"
 )
 
 // TryPortAdminDown выключает порт administratively down через IF-MIB SET (ifAdminStatus=2).

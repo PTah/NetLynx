@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/PTah/netlynx/internal/macvendor"
+	"git.kalinamall.ru/PapaTramp/netlynx/internal/macvendor"
 )
 
 // PortSearchHit — результат поиска порта на узлах.

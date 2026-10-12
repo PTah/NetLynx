@@ -7,8 +7,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/PTah/netlynx/internal/store"
-	"github.com/PTah/netlynx/internal/traprecv"
+	"git.kalinamall.ru/PapaTramp/netlynx/internal/store"
+	"git.kalinamall.ru/PapaTramp/netlynx/internal/traprecv"
 )
 
 // TrapListener — hot-reload UDP-приёмника SNMP traps.

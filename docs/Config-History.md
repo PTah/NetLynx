@@ -13,9 +13,11 @@
 Снимки делаются только если:
 
 - категория **switch**, или
-- **MikroTik router** (категория router + вендор MikroTik: явно в карточке или автодетект по sysDescr/имени — RouterOS, CCR, RouterBOARD…).
+- **MikroTik RouterOS** — категория **router** или **ap** (wAP, cAP…) + вендор MikroTik: явно в карточке или автодетект по sysDescr/имени (RouterOS, CCR, RouterBOARD, RBwAP…).
 
 Съём MikroTik: SSH `/export compact` (fallback `/export`) → файл в ZIP и снимок истории.
+
+Пример: `sysDescr: RouterOS RBwAPG-5HacT2HnD`, категория «точка доступа» — снимок разрешён (с **0.13.6**).
 
 Нужны SSH-учётные данные на узле (или общие из Настройки → Резервные копии), либо `SSH_POE_*` в `/etc/netlynx/netlynx.env`.
 

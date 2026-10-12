@@ -27,6 +27,15 @@ func TestIsMikrotikRouterForConfigBackup(t *testing.T) {
 	if !IsMikrotikRouterForConfigBackup("router", "", "", "CCR1009-edge") {
 		t.Fatal("CCR in name")
 	}
+	if !IsMikrotikRouterForConfigBackup("ap", "auto", "RouterOS RBwAPG-5HacT2HnD", "wAP AC-Accounts") {
+		t.Fatal("MikroTik wAP AP with RouterOS sysDescr")
+	}
+	if !IsMikrotikRouterForConfigBackup("ap", "mikrotik", "", "wAP-AC") {
+		t.Fatal("explicit mikrotik AP")
+	}
+	if IsMikrotikRouterForConfigBackup("ap", "auto", "UAP-AC-Pro", "unifi-hall") {
+		t.Fatal("UniFi AP must stay out")
+	}
 	if IsMikrotikRouterForConfigBackup("router", "auto", "Cisco IOS", "ISR") {
 		t.Fatal("cisco must stay out")
 	}

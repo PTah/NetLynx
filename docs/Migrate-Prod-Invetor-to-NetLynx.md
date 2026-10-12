@@ -6,7 +6,7 @@
 
 | Было (Invetor) | Стало (NetLynx) |
 |----------------|-----------------|
-| git `PapaTramp/Invetor` | `PapaTramp/NetLynx` |
+| git `jdoe/Invetor` | `jdoe/NetLynx` |
 | `/opt/Invetor` (клон) | `/opt/NetLynx` |
 | `Invetor.service` | `NetLynx.service` |
 | `/usr/local/bin/invetord` | `/usr/local/bin/netlynxd` |

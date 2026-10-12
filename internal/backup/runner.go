@@ -11,13 +11,13 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/PTah/netlynx/internal/config"
-	"github.com/PTah/netlynx/internal/configssh"
-	"github.com/PTah/netlynx/internal/devssh"
-	"github.com/PTah/netlynx/internal/models"
-	"github.com/PTah/netlynx/internal/notify"
-	"github.com/PTah/netlynx/internal/store"
-	"github.com/PTah/netlynx/internal/swcfg"
+	"git.kalinamall.ru/PapaTramp/netlynx/internal/config"
+	"git.kalinamall.ru/PapaTramp/netlynx/internal/configssh"
+	"git.kalinamall.ru/PapaTramp/netlynx/internal/devssh"
+	"git.kalinamall.ru/PapaTramp/netlynx/internal/models"
+	"git.kalinamall.ru/PapaTramp/netlynx/internal/notify"
+	"git.kalinamall.ru/PapaTramp/netlynx/internal/store"
+	"git.kalinamall.ru/PapaTramp/netlynx/internal/swcfg"
 )
 
 type Runner struct {
@@ -234,7 +234,7 @@ func (r *Runner) runLocked(ctx context.Context) (status, errMsg string) {
 			parts = append(parts, "коммутаторы")
 		}
 		if bs.RouterCfgEnabled {
-			parts = append(parts, "RouterOS-роутеры")
+			parts = append(parts, "RouterOS (роутеры/AP)")
 		}
 		r.note(ctx, "снимаю конфиги по SSH ("+strings.Join(parts, " + ")+")")
 		if len(sshSwitches) == 0 {
@@ -264,7 +264,8 @@ func (r *Runner) runLocked(ctx context.Context) (status, errMsg string) {
 				if d.SysDescr != nil {
 					sys = *d.SysDescr
 				}
-				if !swcfg.IsMikrotikRouterDevice(d.DeviceCategory, d.SSHVendor, sys, d.Name) {
+				// RouterOS (/export): не разбираем switchport-роли (роутер и AP).
+				if !swcfg.IsMikrotikRouterForConfigBackup(d.DeviceCategory, d.SSHVendor, sys, d.Name) {
 					if res, syncErr := r.st.ApplyConfigPortRoles(ctx, d.ID, data); syncErr != nil {
 						r.log.Warn("port roles from config", "device_id", d.ID, "err", syncErr)
 					} else if res.Total() > 0 {
@@ -465,7 +466,6 @@ func wantConfigBackup(d models.Device, includeSwitch, includeMikrotikRouter bool
 		sys = *d.SysDescr
 	}
 	return includeMikrotikRouter &&
-		cat == store.DeviceCategoryRouter &&
 		swcfg.IsMikrotikRouterForConfigBackup(d.DeviceCategory, d.SSHVendor, sys, d.Name)
 }
 

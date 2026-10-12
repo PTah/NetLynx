@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/PTah/netlynx/internal/store"
+	"git.kalinamall.ru/PapaTramp/netlynx/internal/store"
 )
 
 // FlapHandler обрабатывает разобранный MAC flap (обычно poller.EmitMACFlappingFromSyslog).

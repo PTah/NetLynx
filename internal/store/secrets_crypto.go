@@ -3,8 +3,8 @@ package store
 import (
 	"fmt"
 
-	"github.com/PTah/netlynx/internal/models"
-	"github.com/PTah/netlynx/internal/secrets"
+	"git.kalinamall.ru/PapaTramp/netlynx/internal/models"
+	"git.kalinamall.ru/PapaTramp/netlynx/internal/secrets"
 )
 
 // SetSecretsBox задаёт AES-GCM box для at-rest секретов (nil = plaintext compat).

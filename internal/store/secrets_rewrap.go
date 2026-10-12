@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/PTah/netlynx/internal/secrets"
+	"git.kalinamall.ru/PapaTramp/netlynx/internal/secrets"
 	"github.com/jackc/pgx/v5"
 )
 
