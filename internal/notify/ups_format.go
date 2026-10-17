@@ -18,6 +18,14 @@ var upsEventTypes = map[string]struct{}{
 	"UPS_ALARM_CLEAR":      {},
 	"UPS_LOAD_HIGH":        {},
 	"UPS_LOAD_OK":          {},
+
+	"UPS_CHARGE_LOW":      {},
+	"UPS_CHARGE_CRITICAL": {},
+	"UPS_CHARGE_OK":       {},
+	"UPS_CHARGE_DROP":     {},
+	"UPS_DISCHARGE_FAST":  {},
+	"UPS_RUNTIME_LOW":     {},
+	"UPS_ON_BATTERY_LONG": {},
 }
 
 func isUPSEvent(eventType string) bool {
@@ -44,6 +52,9 @@ func upsPayloadDetail(payload map[string]interface{}) string {
 	}
 	if _, ok := payload["runtime_min"]; ok {
 		parts = append(parts, fmt.Sprintf("%.0f мин", payloadFloat(payload, "runtime_min")))
+	}
+	if _, ok := payload["discharge_pct_per_min"]; ok {
+		parts = append(parts, fmt.Sprintf("разряд %.1f %%/мин", payloadFloat(payload, "discharge_pct_per_min")))
 	}
 	if _, ok := payload["battery_voltage_v"]; ok {
 		parts = append(parts, fmt.Sprintf("АКБ %.1f В", payloadFloat(payload, "battery_voltage_v")))

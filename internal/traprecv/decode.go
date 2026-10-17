@@ -144,6 +144,14 @@ func lookupTrapLabel(oid string) (label, summary string) {
 		return "enterpriseSpecific", "Enterprise-specific trap (v1)"
 	}
 
+	// ИБП: EPPC/Ippon (enterprise 935) и APC/Schneider (318) — тревоги карты ИБП.
+	if strings.HasPrefix(oid, "1.3.6.1.4.1.935.") {
+		return "upsTrapEppc", "ИБП (EPPC/Ippon): тревога карты, OID " + oid
+	}
+	if strings.HasPrefix(oid, "1.3.6.1.4.1.318.0.") {
+		return "upsTrapApc", "ИБП (APC/Schneider): тревога карты, OID " + oid
+	}
+
 	// Ubiquiti EdgeSwitch — EdgeSwitch-SWITCHING-MIB (4413.1.1.1.0.*).
 	if strings.HasPrefix(oid, "1.3.6.1.4.1.4413.1.1.1.0.") {
 		suffix := strings.TrimPrefix(oid, "1.3.6.1.4.1.4413.1.1.1.0.")

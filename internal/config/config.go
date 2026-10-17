@@ -17,6 +17,14 @@ type Config struct {
 	HTTPAddr    string
 	// PollSchedulerSeconds — как часто планировщик проверяет, какие узлы пора опросить (не путать с poll_interval_seconds устройства в БД).
 	PollSchedulerSeconds int
+	// CriticalPollInterval — верхняя граница интервала лёгкого опроса для критичных типов
+	// (роутер, коммутатор, сервер): их пропажу нужно видеть сразу, даже если у устройства
+	// в БД интервал больше.
+	CriticalPollInterval time.Duration
+	// HeavyPollInterval — как часто делать тяжёлый опрос (LLDP/CDP/ARP/PoE/STP/FDB, роли портов).
+	HeavyPollInterval time.Duration
+	// MetricsUtilInterval — как часто писать util/rate сэмплы (опрос может идти чаще).
+	MetricsUtilInterval time.Duration
 	// AccessPortLongIdle — порог «порт был пуст N времени», затем появился MAC (событие ACCESS_PORT_LONG_IDLE_DEVICE).
 	AccessPortLongIdle time.Duration
 	FDBPollInterval    time.Duration
@@ -132,6 +140,24 @@ func Load() (Config, error) {
 		c.PollSchedulerSeconds = n
 	} else {
 		c.PollSchedulerSeconds = 10
+	}
+	if v := os.Getenv("POLL_CRITICAL_INTERVAL_SECONDS"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 5 || n > 600 {
+			return Config{}, fmt.Errorf("POLL_CRITICAL_INTERVAL_SECONDS: invalid value %q (ожидается 5–600)", v)
+		}
+		c.CriticalPollInterval = time.Duration(n) * time.Second
+	} else {
+		c.CriticalPollInterval = 15 * time.Second
+	}
+	if v := os.Getenv("POLL_HEAVY_SECONDS"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 60 || n > 86400 {
+			return Config{}, fmt.Errorf("POLL_HEAVY_SECONDS: invalid value %q (ожидается 60–86400)", v)
+		}
+		c.HeavyPollInterval = time.Duration(n) * time.Second
+	} else {
+		c.HeavyPollInterval = 5 * time.Minute
 	}
 	if v := os.Getenv("ACCESS_PORT_LONG_IDLE_HOURS"); v != "" {
 		f, err := strconv.ParseFloat(v, 64)
@@ -263,6 +289,16 @@ func Load() (Config, error) {
 	c.SNMPTrapCommunity = strings.TrimSpace(os.Getenv("SNMP_TRAP_COMMUNITY"))
 
 	c.MetricsEnabled = !strings.EqualFold(strings.TrimSpace(getenv("METRICS_ENABLED", "true")), "false")
+	// Util/rate — отдельный интервал записи: лёгкий опрос идёт каждые 15–20 с, а графику
+	// хватает минуты; иначе в metric_samples уходят десятки миллионов строк в сутки.
+	c.MetricsUtilInterval = 60 * time.Second
+	if v := os.Getenv("METRICS_UTIL_INTERVAL_SECONDS"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 15 || n > 3600 {
+			return Config{}, fmt.Errorf("METRICS_UTIL_INTERVAL_SECONDS: invalid value %q (ожидается 15–3600)", v)
+		}
+		c.MetricsUtilInterval = time.Duration(n) * time.Second
+	}
 	c.MetricsRetentionDays = 7
 	if v := os.Getenv("METRICS_RETENTION_DAYS"); v != "" {
 		n, err := strconv.Atoi(v)

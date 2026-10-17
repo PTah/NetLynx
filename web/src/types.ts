@@ -54,6 +54,9 @@
   util_high_pct?: number | null;
   util_ok_pct?: number | null;
   fdb_poll_interval_seconds?: number | null;
+  /** Тяжёлый опрос: LLDP/CDP/ARP/PoE/STP/FDB и роли портов; null = POLL_HEAVY_SECONDS */
+  heavy_poll_interval_seconds?: number | null;
+  last_heavy_poll_at?: string | null;
 };
 
 export type PrinterToner = {

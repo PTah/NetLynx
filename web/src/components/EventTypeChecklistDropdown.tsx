@@ -40,6 +40,13 @@ export const NOTIFY_EVENT_TYPE_OPTIONS: { value: string; label: string }[] = [
   { value: "UPS_ALARM_CLEAR", label: formatEventTypeLabel("UPS_ALARM_CLEAR") },
   { value: "UPS_LOAD_HIGH", label: formatEventTypeLabel("UPS_LOAD_HIGH") },
   { value: "UPS_LOAD_OK", label: formatEventTypeLabel("UPS_LOAD_OK") },
+  { value: "UPS_CHARGE_LOW", label: formatEventTypeLabel("UPS_CHARGE_LOW") },
+  { value: "UPS_CHARGE_CRITICAL", label: formatEventTypeLabel("UPS_CHARGE_CRITICAL") },
+  { value: "UPS_CHARGE_OK", label: formatEventTypeLabel("UPS_CHARGE_OK") },
+  { value: "UPS_CHARGE_DROP", label: formatEventTypeLabel("UPS_CHARGE_DROP") },
+  { value: "UPS_DISCHARGE_FAST", label: formatEventTypeLabel("UPS_DISCHARGE_FAST") },
+  { value: "UPS_RUNTIME_LOW", label: formatEventTypeLabel("UPS_RUNTIME_LOW") },
+  { value: "UPS_ON_BATTERY_LONG", label: formatEventTypeLabel("UPS_ON_BATTERY_LONG") },
 ];
 
 export function parseEventTypesCSV(raw: string): string[] {

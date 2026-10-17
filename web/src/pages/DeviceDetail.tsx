@@ -510,6 +510,8 @@ export default function DeviceDetail() {
   const [devUtilHigh, setDevUtilHigh] = useState("");
   const [devUtilOk, setDevUtilOk] = useState("");
   const [devFdbPoll, setDevFdbPoll] = useState("");
+  /** Интервал тяжёлого опроса (LLDP/CDP/ARP/PoE/STP/FDB, роли портов); пусто = POLL_HEAVY_SECONDS */
+  const [devHeavyPoll, setDevHeavyPoll] = useState("");
   const [monMsg, setMonMsg] = useState<string | null>(null);
   const [ignoreMsg, setIgnoreMsg] = useState<string | null>(null);
   const [expandedIfIndex, setExpandedIfIndex] = useState<number | null>(null);
@@ -858,6 +860,9 @@ export default function DeviceDetail() {
     setDevFdbPoll(
       data.device.fdb_poll_interval_seconds != null ? String(data.device.fdb_poll_interval_seconds) : "",
     );
+    setDevHeavyPoll(
+      data.device.heavy_poll_interval_seconds != null ? String(data.device.heavy_poll_interval_seconds) : "",
+    );
   }, [data]);
 
   useEffect(() => {
@@ -932,6 +937,8 @@ export default function DeviceDetail() {
     else body.util_ok_pct = null;
     if (devFdbPoll.trim()) body.fdb_poll_interval_seconds = Number(devFdbPoll);
     else body.fdb_poll_interval_seconds = null;
+    if (devHeavyPoll.trim()) body.heavy_poll_interval_seconds = Number(devHeavyPoll);
+    else body.heavy_poll_interval_seconds = null;
     try {
       await apiPatch(`/api/v1/devices/${id}/monitoring`, body);
       setMonMsg("Сохранено");
@@ -1973,6 +1980,22 @@ export default function DeviceDetail() {
               FDB poll (с)
               <br />
               <input value={devFdbPoll} onChange={(e) => setDevFdbPoll(e.target.value)} placeholder="900" style={{ width: 88 }} />
+            </label>
+            <label
+              title={
+                "Тяжёлый опрос: LLDP/CDP-соседи, ARP, PoE, STP, chassis MAC и роли портов — большие таблицы, " +
+                "которые не нужно гонять каждые 15 секунд. Лёгкий опрос (ping, sysUpTime, статусы портов, " +
+                "счётчики, CPU, ИБП/тонер) идёт отдельно и чаще. Пусто = значение по умолчанию (POLL_HEAVY_SECONDS, 300 с)."
+              }
+            >
+              Тяжёлый опрос (с)
+              <br />
+              <input
+                value={devHeavyPoll}
+                onChange={(e) => setDevHeavyPoll(e.target.value)}
+                placeholder="300"
+                style={{ width: 88 }}
+              />
             </label>
             <button type="submit">Сохранить</button>
             {monMsg && <span style={{ color: "#8d8", fontSize: "0.9rem" }}>{monMsg}</span>}

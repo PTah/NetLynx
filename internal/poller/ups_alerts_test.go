@@ -153,3 +153,130 @@ func TestUPSMetricDue(t *testing.T) {
 		t.Fatal("интервал прошёл — нужен семпл")
 	}
 }
+
+func TestUPSAlertsChargeThresholds(t *testing.T) {
+	full := upsBase() // 100%
+	full.PolledAt = time.Now().Add(-2 * time.Minute)
+
+	low := upsBase()
+	low.BatteryChargePct = f32(45)
+	low.PolledAt = time.Now().Add(-time.Minute)
+	if got := upsAlertEvents(full, low); !hasAlert(got, "UPS_CHARGE_LOW") {
+		t.Fatalf("UPS_CHARGE_LOW: %v", alertTypes(got))
+	}
+	// Внутри того же порога повторов быть не должно.
+	lower := upsBase()
+	lower.BatteryChargePct = f32(35)
+	if got := upsAlertEvents(low, lower); hasAlert(got, "UPS_CHARGE_LOW") {
+		t.Fatalf("повтор UPS_CHARGE_LOW: %v", alertTypes(got))
+	}
+
+	crit := upsBase()
+	crit.BatteryChargePct = f32(15)
+	if got := upsAlertEvents(lower, crit); !hasAlert(got, "UPS_CHARGE_CRITICAL") {
+		t.Fatalf("UPS_CHARGE_CRITICAL: %v", alertTypes(got))
+	}
+
+	back := upsBase()
+	back.BatteryChargePct = f32(75)
+	if got := upsAlertEvents(crit, back); !hasAlert(got, "UPS_CHARGE_OK") {
+		t.Fatalf("UPS_CHARGE_OK: %v", alertTypes(got))
+	}
+}
+
+func TestUPSAlertsChargeDropWithoutBattery(t *testing.T) {
+	prev := upsBase() // не на батарее, 100%
+	cur := upsBase()
+	cur.BatteryChargePct = f32(85) // падение на 15% на сети — похоже на проблему АКБ
+	if got := upsAlertEvents(prev, cur); !hasAlert(got, "UPS_CHARGE_DROP") {
+		t.Fatalf("UPS_CHARGE_DROP: %v", alertTypes(got))
+	}
+	// Небольшое падение (5%) — тишина.
+	small := upsBase()
+	small.BatteryChargePct = f32(95)
+	if got := upsAlertEvents(prev, small); hasAlert(got, "UPS_CHARGE_DROP") {
+		t.Fatalf("лишний UPS_CHARGE_DROP: %v", alertTypes(got))
+	}
+}
+
+func TestUPSAlertsDischargeFast(t *testing.T) {
+	now := time.Now()
+	prev := upsBase()
+	prev.BatteryChargePct = f32(100)
+	prev.PolledAt = now.Add(-2 * time.Minute)
+	prev.OnBattery = true
+	prev.SecondsOnBattery = iptr(120)
+
+	cur := upsBase()
+	cur.BatteryChargePct = f32(90) // -10% за 2 минуты = 5%/мин
+	cur.PolledAt = now
+	cur.OnBattery = true
+	cur.SecondsOnBattery = iptr(240)
+
+	rate, drop, ok := upsDischargeRate(prev, cur)
+	if !ok || drop != 10 || rate < 4.9 || rate > 5.1 {
+		t.Fatalf("rate=%v drop=%v ok=%v", rate, drop, ok)
+	}
+	alerts := upsAlertEvents(prev, cur)
+	if !hasAlert(alerts, "UPS_DISCHARGE_FAST") {
+		t.Fatalf("UPS_DISCHARGE_FAST: %v", alertTypes(alerts))
+	}
+	for _, a := range alerts {
+		if a.EventType == "UPS_DISCHARGE_FAST" && a.Payload["discharge_pct_per_min"] == nil {
+			t.Fatal("в payload нет скорости разряда")
+		}
+	}
+	// Окно меньше минуты — не считаем.
+	short := upsBase()
+	short.BatteryChargePct = f32(95)
+	short.PolledAt = now.Add(-30 * time.Second)
+	short.OnBattery = true
+	if _, _, ok := upsDischargeRate(short, cur); ok {
+		t.Fatal("окно < 1 мин не должно считаться")
+	}
+	// На сети быстрый разряд не считаем.
+	mains := upsBase()
+	mains.BatteryChargePct = f32(95)
+	mains.PolledAt = now.Add(-2 * time.Minute)
+	mains.OnBattery = false
+	mains.SecondsOnBattery = iptr(0)
+	mains.OutputSource = 3
+	curMains := upsBase()
+	curMains.BatteryChargePct = f32(80)
+	curMains.OutputSource = 3
+	curMains.SecondsOnBattery = iptr(0)
+	if _, _, ok := upsDischargeRate(mains, curMains); ok {
+		t.Fatal("на сети скорость разряда не считаем")
+	}
+}
+
+func TestUPSAlertsRuntimeLowAndLongOnBattery(t *testing.T) {
+	now := time.Now()
+	prev := upsBase()
+	prev.OnBattery = true
+	prev.SecondsOnBattery = iptr(300)
+	prev.RuntimeMin = iptr(25)
+	prev.PolledAt = now.Add(-time.Minute)
+
+	cur := upsBase()
+	cur.OnBattery = true
+	cur.SecondsOnBattery = iptr(660) // > 10 минут на батарее
+	cur.RuntimeMin = iptr(8)         // автономии мало
+	cur.PolledAt = now
+
+	alerts := upsAlertEvents(prev, cur)
+	if !hasAlert(alerts, "UPS_RUNTIME_LOW") {
+		t.Fatalf("UPS_RUNTIME_LOW: %v", alertTypes(alerts))
+	}
+	if !hasAlert(alerts, "UPS_ON_BATTERY_LONG") {
+		t.Fatalf("UPS_ON_BATTERY_LONG: %v", alertTypes(alerts))
+	}
+	// Продолжаем сидеть на батарее — повторов нет.
+	again := upsBase()
+	again.OnBattery = true
+	again.SecondsOnBattery = iptr(900)
+	again.RuntimeMin = iptr(5)
+	if got := upsAlertEvents(cur, again); len(got) != 0 {
+		t.Fatalf("повторы не нужны: %v", alertTypes(got))
+	}
+}

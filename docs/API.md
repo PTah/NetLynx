@@ -83,8 +83,8 @@ http://<IP_или_имя_сервера>:8080
 | PATCH | `/api/v1/devices/{id}/location` | расположение |
 | PATCH | `/api/v1/devices/{id}/category` | тип |
 | PATCH | `/api/v1/devices/{id}/poll-interval` | интервал |
-| PATCH | `/api/v1/devices/{id}/monitoring` | пороги FDB/CPU |
-| PATCH | `/api/v1/devices/{id}/online-override` | режим достижимости: `auto` \| `ping` \| `online` \| `offline` |
+| PATCH | `/api/v1/devices/{id}/monitoring` | пороги утилизации (`util_high_pct`/`util_ok_pct`), `fdb_poll_interval_seconds` (30–86400), `heavy_poll_interval_seconds` (60–86400; `null` = `POLL_HEAVY_SECONDS`, по умолчанию 300 с) |
+| PATCH | `/api/v1/devices/{id}/online-override` | режим достижимости: `auto` \| `ping` \| `online` \| `offline`. `ping` — только ICMP: SNMP у такого узла не опрашивается вовсе (см. карточку узла) |
 | PATCH | `/api/v1/devices/{id}/trust-link-traps` | флаг для link traps |
 | PATCH | `/api/v1/devices/{id}/ssh` | SSH узла |
 | DELETE | `/api/v1/devices/{id}` | удалить один |
@@ -242,8 +242,9 @@ http://<IP_или_имя_сервера>:8080
 ## Планировщик SNMP (env)
 
 - `POLL_SCHEDULER_SECONDS` — тик планировщика (по умолчанию 10 с).
-- `poll_interval_seconds` на узле — интервал IF-MIB.
-- `FDB_POLL_INTERVAL_SECONDS` — опрос FDB.
+- `poll_interval_seconds` на узле — интервал лёгкого опроса (ping + sysUpTime + IF-MIB статусы/счётчики). Для роутеров/коммутаторов/серверов он не больше `POLL_CRITICAL_INTERVAL_SECONDS` (15 с).
+- `heavy_poll_interval_seconds` на узле — интервал тяжёлого опроса (LLDP/CDP, ARP, PoE, STP, chassis MAC, роли портов, FDB). `NULL` = `POLL_HEAVY_SECONDS` (300 с). Меняется в карточке узла («Тяжёлый опрос (с)») или через `PATCH /devices/{id}/monitoring`.
+- `FDB_POLL_INTERVAL_SECONDS` — опрос FDB (внутри тяжёлого опроса, по умолчанию 900 с).
 
 См. [`.env.example`](../.env.example).
 

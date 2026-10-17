@@ -71,11 +71,11 @@ func (s *Server) handleGetDeviceDetail(w http.ResponseWriter, r *http.Request) {
 	}
 	redactDeviceForAPI(d)
 	out := map[string]interface{}{
-		"device":         d,
-		"interfaces":     ifs,
-		"recent_events":  ev,
-		"neighbors":      neighbors,
-		"port_ignores":   ignArr,
+		"device":        d,
+		"interfaces":    ifs,
+		"recent_events": ev,
+		"neighbors":     neighbors,
+		"port_ignores":  ignArr,
 	}
 	if d.ChassisMAC == nil || strings.TrimSpace(*d.ChassisMAC) == "" {
 		if host := strings.TrimSpace(d.Host); host != "" {
@@ -88,9 +88,10 @@ func (s *Server) handleGetDeviceDetail(w http.ResponseWriter, r *http.Request) {
 }
 
 type patchDeviceMonitoringBody struct {
-	UtilHighPct            *float32 `json:"util_high_pct"`
-	UtilOkPct              *float32 `json:"util_ok_pct"`
-	FDBPollIntervalSeconds *int     `json:"fdb_poll_interval_seconds"`
+	UtilHighPct              *float32 `json:"util_high_pct"`
+	UtilOkPct                *float32 `json:"util_ok_pct"`
+	FDBPollIntervalSeconds   *int     `json:"fdb_poll_interval_seconds"`
+	HeavyPollIntervalSeconds *int     `json:"heavy_poll_interval_seconds"`
 }
 
 func (s *Server) handlePatchDeviceMonitoring(w http.ResponseWriter, r *http.Request) {
@@ -111,7 +112,14 @@ func (s *Server) handlePatchDeviceMonitoring(w http.ResponseWriter, r *http.Requ
 			return
 		}
 	}
-	if err := s.st.UpdateDeviceMonitoring(r.Context(), id, body.UtilHighPct, body.UtilOkPct, body.FDBPollIntervalSeconds); err != nil {
+	if body.HeavyPollIntervalSeconds != nil {
+		sec := *body.HeavyPollIntervalSeconds
+		if sec != 0 && (sec < 60 || sec > 86400) {
+			writeError(w, http.StatusBadRequest, "heavy_poll_interval_seconds: 60–86400 или null")
+			return
+		}
+	}
+	if err := s.st.UpdateDeviceMonitoring(r.Context(), id, body.UtilHighPct, body.UtilOkPct, body.FDBPollIntervalSeconds, body.HeavyPollIntervalSeconds); err != nil {
 		if err == store.ErrDeviceNotFound {
 			writeError(w, http.StatusNotFound, "узел не найден")
 			return
@@ -129,6 +137,9 @@ func (s *Server) handlePatchDeviceMonitoring(w http.ResponseWriter, r *http.Requ
 	}
 	if body.FDBPollIntervalSeconds != nil {
 		details["fdb_poll_interval_seconds"] = *body.FDBPollIntervalSeconds
+	}
+	if body.HeavyPollIntervalSeconds != nil {
+		details["heavy_poll_interval_seconds"] = *body.HeavyPollIntervalSeconds
 	}
 	s.emitConfigEditEvent(r, id, nil, "device.monitoring", details)
 	d, _ := s.st.GetDevice(r.Context(), id)
@@ -233,9 +244,9 @@ func (s *Server) handlePutPortIgnore(w http.ResponseWriter, r *http.Request) {
 		}
 		s.audit(r, "port.ignore.upsert", "device", &deviceID, map[string]interface{}{"if_index": ifIndex, "mode": mode})
 		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"mode":          mode,
-			"port_ignore":   rec,
-			"ignore_mode":   mode,
+			"mode":        mode,
+			"port_ignore": rec,
+			"ignore_mode": mode,
 		})
 		return
 	}

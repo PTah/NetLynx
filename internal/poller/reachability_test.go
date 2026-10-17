@@ -1,8 +1,10 @@
-﻿package poller
+package poller
 
 import (
 	"testing"
 	"time"
+
+	"git.kalinamall.ru/PapaTramp/netlynx/internal/models"
 )
 
 func TestShouldEmitDeviceOnline(t *testing.T) {
@@ -96,6 +98,48 @@ func TestShouldEmitDeviceOnline(t *testing.T) {
 				t.Fatalf("got %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestShouldEmitDeviceOfflineNow(t *testing.T) {
+	// Обычный путь: SNMP-сбой, ICMP не менялся — ждём второй опрос.
+	if shouldEmitDeviceOfflineNow(offlineStreakState{n: 1, fromOnline: true}, false) {
+		t.Fatal("первый сбой без пропажи ICMP не должен шуметь")
+	}
+	if !shouldEmitDeviceOfflineNow(offlineStreakState{n: offlineConfirmPolls, fromOnline: true}, false) {
+		t.Fatal("второй подряд сбой — OFFLINE")
+	}
+	// ICMP отвечал и замолчал — сообщаем сразу.
+	if !shouldEmitDeviceOfflineNow(offlineStreakState{n: 1, fromOnline: true}, true) {
+		t.Fatal("пропажа ICMP + SNMP = OFFLINE на первом опросе")
+	}
+	// Без эпизода online→offline (после рестарта) — не шумим.
+	if shouldEmitDeviceOfflineNow(offlineStreakState{n: 1}, true) {
+		t.Fatal("нет перехода online→offline — OFFLINE не шлём")
+	}
+	// Повторные опросы в том же эпизоде не дублируют событие.
+	if shouldEmitDeviceOfflineNow(offlineStreakState{n: offlineConfirmPolls + 1, fromOnline: true}, true) {
+		t.Fatal("повтор OFFLINE в том же эпизоде")
+	}
+}
+
+func TestPingWentDead(t *testing.T) {
+	yes, no := true, false
+	dev := func(ping *bool) *models.Device { return &models.Device{LastPingOK: ping} }
+	if !pingWentDead(dev(&no), dev(&yes)) {
+		t.Fatal("был ping → пропал ping = пропажа из сети")
+	}
+	if pingWentDead(dev(&yes), dev(&yes)) {
+		t.Fatal("ping жив")
+	}
+	if pingWentDead(dev(&no), dev(&no)) {
+		t.Fatal("ICMP закрыт всегда (напр. коммутатор без ICMP) — не наш случай")
+	}
+	if pingWentDead(dev(&no), nil) || pingWentDead(nil, dev(&yes)) {
+		t.Fatal("нет предыдущего состояния — не считаем пропажей")
+	}
+	if pingWentDead(dev(&no), dev(nil)) {
+		t.Fatal("неизвестный предыдущий ping — не считаем пропажей")
 	}
 }
 

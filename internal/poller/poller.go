@@ -3,6 +3,7 @@ package poller
 import (
 	"context"
 	"log/slog"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -22,7 +23,29 @@ import (
 	"sync/atomic"
 )
 
-const snmpParallel = 20
+const snmpParallel = 40
+
+// Таймауты SNMP-опроса: обычные — для обходов живого узла; короткие — для первой пробы,
+// когда ICMP уже молчит (мёртвый коммутатор иначе висит в очереди опроса ~10 с).
+const (
+	snmpProbeNormalTimeout = 5 * time.Second
+	snmpProbeNormalRetries = 1
+	snmpProbeFastTimeout   = 2 * time.Second
+	snmpProbeFastRetries   = 0
+)
+
+// SNMP-backoff: если узел стабильно не отвечает по SNMP (нет агента — камеры, ПК, ТВ),
+// не жжём слот опроса таймаутами и не спамим журнал: после N сбоев подряд SNMP
+// не опрашивается N минут, ICMP при этом продолжает работать (достижимость видна).
+const (
+	snmpFailThreshold = 3
+	snmpBackoffPause  = 15 * time.Minute
+)
+
+type snmpBackoffState struct {
+	failures int
+	until    time.Time
+}
 
 // Сколько подряд опросов с IsOnline=false нужно, прежде чем слать DEVICE_OFFLINE.
 // Один сбой SNMP при живом ping (часто EdgeSwitch) иначе даёт ложный email.
@@ -48,6 +71,9 @@ type Engine struct {
 	offlineStreak          sync.Map            // device id -> int: подряд «оффлайн» после опроса
 	neighborEmptyStreak    sync.Map            // "deviceID:protocol" -> int: подряд пустой neighbor walk
 	broadcastStormActive   sync.Map            // device id -> bool: эвристика broadcast storm активна
+	upsDischargeAlertAt    sync.Map            // device id -> time.Time: антидребезг UPS_DISCHARGE_FAST
+	utilSampleAt           sync.Map            // device id -> time.Time: троттлинг util/rate сэмплов
+	snmpBackoff            sync.Map            // device id -> snmpBackoffState: узел без SNMP не опрашиваем таймаутами
 	macMultiAccessLastEmit sync.Map            // mac -> time.Time: глобальный дедуп MAC_MULTI_ACCESS
 	wifiFilterMu           sync.Mutex
 	wifiFilterCache        wifiFilterCache
@@ -290,6 +316,30 @@ func shouldCatchUpDeviceOffline(wasOnline bool, streak offlineStreakState, offli
 	return now.Sub(*offlineSince) >= onlineRecoverThreshold(pollIntervalSec)
 }
 
+// shouldEmitDeviceOfflineNow — когда сообщать DEVICE_OFFLINE.
+// Обычно ждём offlineConfirmPolls опросов (короткий SNMP-блип при живом ping не должен
+// давать письмо). Но если узел, который раньше отвечал на ICMP, замолчал и по ping,
+// и по SNMP — это пропажа из сети, сообщаем сразу на первом таком опросе.
+func shouldEmitDeviceOfflineNow(streak offlineStreakState, pingWentDead bool) bool {
+	if !streak.fromOnline {
+		return false
+	}
+	if streak.n == offlineConfirmPolls {
+		return true
+	}
+	return streak.n == 1 && pingWentDead
+}
+
+// pingWentDead — ICMP отвечал в прошлом опросе и молчит в текущем (при этом SNMP тоже
+// не ответил: IsOnline=false). Для узлов, где ICMP закрыт всегда (prev.LastPingOK=false),
+// условие не срабатывает — такие узлы подтверждаются двумя опросами, как раньше.
+func pingWentDead(cur, prev *models.Device) bool {
+	if cur == nil || prev == nil || cur.LastPingOK == nil || prev.LastPingOK == nil {
+		return false
+	}
+	return !*cur.LastPingOK && *prev.LastPingOK
+}
+
 // emitReachabilityTransition — DEVICE_OFFLINE / DEVICE_ONLINE при смене IsOnline после опроса.
 // OFFLINE: был онлайн → N подряд неудачных опросов (короткий SNMP-timeout не шлёт письмо).
 func (e *Engine) emitReachabilityTransition(ctx context.Context, d store.PollDevice, prev *models.Device, wasOnline bool) {
@@ -325,8 +375,11 @@ func (e *Engine) emitReachabilityTransition(ctx context.Context, d store.PollDev
 	}
 
 	st := e.noteOfflinePoll(d.ID, wasOnline)
-	if st.fromOnline && st.n == offlineConfirmPolls {
+	if shouldEmitDeviceOfflineNow(st, pingWentDead(cur, prev)) {
 		e.emitDeviceOffline(ctx, d, cur, prev, st.n)
+		// Эпизод зафиксирован: до восстановления повторов не шлём
+		// (следующий опрос даст n=confirm+1 и условие уже не сработает).
+		e.offlineStreak.Store(d.ID, offlineStreakState{n: offlineConfirmPolls, fromOnline: true})
 		return
 	}
 	if shouldCatchUpDeviceOffline(wasOnline, st, since, now, d.PollIntervalSeconds, hasOff) {
@@ -493,6 +546,24 @@ func (e *Engine) pruneStaleLiveFDB(ctx context.Context) {
 	}
 }
 
+// Приоритет опроса по типу узла: критичные типы опрашиваются чаще и раньше в очереди.
+const (
+	pollPriorityCritical  = 0 // роутер, коммутатор, сервер — падение надо видеть сразу
+	pollPriorityImportant = 1 // ИБП, NAS, компьютер, гипервизор/out-of-band
+	pollPriorityNormal    = 2 // всё остальное (телефоны, камеры, МФУ, ТВ…)
+)
+
+func pollPriority(category string) int {
+	switch category {
+	case store.DeviceCategoryRouter, store.DeviceCategorySwitch, "server":
+		return pollPriorityCritical
+	case store.DeviceCategoryUPS, "nas", store.DeviceCategoryComputer, "ilo", "hypervisor":
+		return pollPriorityImportant
+	default:
+		return pollPriorityNormal
+	}
+}
+
 func (e *Engine) shouldSchedulePoll(d *store.PollDevice, now time.Time) bool {
 	sec := d.PollIntervalSeconds
 	if sec <= 0 {
@@ -505,10 +576,90 @@ func (e *Engine) shouldSchedulePoll(d *store.PollDevice, now time.Time) bool {
 		sec = 86400
 	}
 	interval := time.Duration(sec) * time.Second
+	// Критичные типы (роутер/коммутатор/сервер) опрашиваем не реже CriticalPollInterval:
+	// их пропажу из сети надо видеть сразу, даже если в карточке интервал больше.
+	if pollPriority(d.DeviceCategory) == pollPriorityCritical && e.cfg.CriticalPollInterval > 0 &&
+		interval > e.cfg.CriticalPollInterval {
+		interval = e.cfg.CriticalPollInterval
+	}
 	if d.LastPollAt == nil {
 		return true
 	}
 	return now.Sub(*d.LastPollAt) >= interval
+}
+
+// pollIntervalOf — фактический интервал лёгкого опроса с учётом приоритета типа.
+func (e *Engine) pollIntervalOf(d *store.PollDevice) time.Duration {
+	sec := d.PollIntervalSeconds
+	if sec <= 0 {
+		sec = 60
+	}
+	if sec < 10 {
+		sec = 10
+	}
+	interval := time.Duration(sec) * time.Second
+	if pollPriority(d.DeviceCategory) == pollPriorityCritical && e.cfg.CriticalPollInterval > 0 &&
+		interval > e.cfg.CriticalPollInterval {
+		interval = e.cfg.CriticalPollInterval
+	}
+	return interval
+}
+
+// shouldPollHeavy — пора ли делать тяжёлый опрос (LLDP/CDP/ARP/PoE/STP/FDB, роли портов).
+func (e *Engine) shouldPollHeavy(d *store.PollDevice, now time.Time) bool {
+	interval := e.cfg.HeavyPollInterval
+	if d.HeavyPollIntervalSeconds != nil && *d.HeavyPollIntervalSeconds > 0 {
+		interval = time.Duration(*d.HeavyPollIntervalSeconds) * time.Second
+	}
+	if interval <= 0 {
+		return false
+	}
+	if d.LastHeavyPollAt == nil {
+		return true
+	}
+	return now.Sub(*d.LastHeavyPollAt) >= interval
+}
+
+// snmpBackoffActive — SNMP-опрос узла на паузе (устройство не отвечает по SNMP).
+func (e *Engine) snmpBackoffActive(deviceID int64, now time.Time) bool {
+	if v, ok := e.snmpBackoff.Load(deviceID); ok {
+		if st, okT := v.(snmpBackoffState); okT {
+			return now.Before(st.until)
+		}
+	}
+	return false
+}
+
+// noteSNMPFailure — учитывает сбой SNMP; после snmpFailThreshold подряд ставит паузу.
+func (e *Engine) noteSNMPFailure(deviceID int64, now time.Time) snmpBackoffState {
+	st := snmpBackoffState{}
+	if v, ok := e.snmpBackoff.Load(deviceID); ok {
+		if prev, okT := v.(snmpBackoffState); okT {
+			st = prev
+		}
+	}
+	st.failures++
+	if st.failures >= snmpFailThreshold && now.After(st.until) {
+		st.until = now.Add(snmpBackoffPause)
+		e.log.Warn("snmp backoff", "device_id", deviceID, "failures", st.failures, "pause", snmpBackoffPause.String())
+	}
+	e.snmpBackoff.Store(deviceID, st)
+	return st
+}
+
+// clearSNMPFailures — успешный опрос: счётчик сбоев и пауза сбрасываются.
+func (e *Engine) clearSNMPFailures(deviceID int64) {
+	e.snmpBackoff.Delete(deviceID)
+}
+
+// snmpFailures — сколько сбоев SNMP подряд у узла (для уровня логирования).
+func (e *Engine) snmpFailures(deviceID int64) int {
+	if v, ok := e.snmpBackoff.Load(deviceID); ok {
+		if st, okT := v.(snmpBackoffState); okT {
+			return st.failures
+		}
+	}
+	return 0
 }
 
 func (e *Engine) pollAll(ctx context.Context) {
@@ -521,13 +672,27 @@ func (e *Engine) pollAll(ctx context.Context) {
 		return
 	}
 	now := time.Now()
-	sem := make(chan struct{}, snmpParallel)
-	var wg sync.WaitGroup
+	due := make([]store.PollDevice, 0, len(devs))
 	for _, d := range devs {
-		d := d
 		if !e.shouldSchedulePoll(&d, now) {
 			continue
 		}
+		due = append(due, d)
+	}
+	// Сначала критичные типы (роутер/коммутатор/сервер), внутри — самые просроченные:
+	// при большом батче (например сразу после рестарта, когда «просрочены» все) хвост
+	// списка иначе не опрашивается минутами, и ребут устройства в этом окне не виден.
+	sort.SliceStable(due, func(i, j int) bool {
+		pi, pj := pollPriority(due[i].DeviceCategory), pollPriority(due[j].DeviceCategory)
+		if pi != pj {
+			return pi < pj
+		}
+		return e.overdueBy(due[i], now) > e.overdueBy(due[j], now)
+	})
+	sem := make(chan struct{}, snmpParallel)
+	var wg sync.WaitGroup
+	for _, d := range due {
+		d := d
 		if _, loaded := e.pollInflight.LoadOrStore(d.ID, struct{}{}); loaded {
 			continue
 		}
@@ -538,11 +703,25 @@ func (e *Engine) pollAll(ctx context.Context) {
 			sem <- struct{}{}
 			defer func() { <-sem }()
 			if err := e.pollOne(ctx, pd); err != nil {
-				e.log.Warn("poll device", "device_id", pd.ID, "host", pd.Host, "err", err)
+				// Узлы без SNMP-агента не должны заливать журнал: первый сбой эпизода — warn,
+				// повторные попытки (раз в 15 минут) — debug. На опрос это не влияет.
+				if e.snmpFailures(pd.ID) > 1 {
+					e.log.Debug("poll device", "device_id", pd.ID, "host", pd.Host, "err", err)
+				} else {
+					e.log.Warn("poll device", "device_id", pd.ID, "host", pd.Host, "err", err)
+				}
 			}
 		}(d)
 	}
 	wg.Wait()
+}
+
+// overdueBy — насколько опрос просрочен относительно фактического интервала узла.
+func (e *Engine) overdueBy(d store.PollDevice, now time.Time) time.Duration {
+	if d.LastPollAt == nil {
+		return time.Duration(1<<62 - 1) // никогда не опрашивался — в первую очередь
+	}
+	return now.Sub(*d.LastPollAt) - e.pollIntervalOf(&d)
 }
 
 func (e *Engine) pollOne(ctx context.Context, d store.PollDevice) error {
@@ -572,15 +751,42 @@ func (e *Engine) pollOne(ctx context.Context, d store.PollDevice) error {
 		e.log.Warn("update ping", "device_id", d.ID, "err", err)
 	}
 
+	// Режим «Авто (Ping)»: SNMP у таких узлов нет (SIP-телефоны, IoT).
+	// Не тратим таймауты на опрос и не пишем ложные ошибки SNMP.
+	if models.NormalizeReachabilityMode(d.ReachabilityMode, d.OnlineOverride) == "ping" {
+		if err := e.st.UpdateDevicePingPollMeta(ctx, d.ID); err != nil {
+			e.log.Warn("poll meta (ping)", "device_id", d.ID, "err", err)
+		}
+		return nil
+	}
+
+	// Узел стабильно не отвечает по SNMP (нет агента: камеры, ПК, ТВ) — пауза.
+	// ICMP продолжает работать, достижимость и оффлайн видны как обычно.
+	if e.snmpBackoffActive(d.ID, time.Now()) {
+		if err := e.st.UpdateDevicePollTime(ctx, d.ID); err != nil {
+			e.log.Warn("poll meta (snmp backoff)", "device_id", d.ID, "err", err)
+		}
+		return nil
+	}
+
 	g, err := snmp.NewGoSNMP(d)
 	if err != nil {
 		msg := err.Error()
 		_ = e.st.UpdateDevicePollMeta(ctx, d.ID, false, &msg, nil, nil, nil, nil, nil, nil)
 		return err
 	}
+	// ICMP уже молчит: первая проба SNMP — короткая (2 с, без повторов), чтобы мёртвый
+	// узел не висел в очереди опроса ~10 с и не растягивал цикл (в это окно устройство
+	// может уйти в ребут и вернуться незамеченным). Ответил — вернём обычные таймауты.
+	probeFast := !pingOK
+	if probeFast {
+		g.Timeout = snmpProbeFastTimeout
+		g.Retries = snmpProbeFastRetries
+	}
 	if err := g.Connect(); err != nil {
 		msg := err.Error()
 		_ = e.st.UpdateDevicePollMeta(ctx, d.ID, false, &msg, nil, nil, nil, nil, nil, nil)
+		e.noteSNMPFailure(d.ID, time.Now())
 		return err
 	}
 	defer g.Conn.Close()
@@ -589,7 +795,14 @@ func (e *Engine) pollOne(ctx context.Context, d store.PollDevice) error {
 	if err != nil {
 		msg := err.Error()
 		_ = e.st.UpdateDevicePollMeta(ctx, d.ID, false, &msg, nil, nil, nil, nil, nil, nil)
+		e.noteSNMPFailure(d.ID, time.Now())
 		return err
+	}
+	e.clearSNMPFailures(d.ID)
+	if probeFast {
+		// SNMP ответил (ICMP, видимо, фильтруется) — дальше обходы с обычными таймаутами.
+		g.Timeout = snmpProbeNormalTimeout
+		g.Retries = snmpProbeNormalRetries
 	}
 
 	var sysUptimeCs *int64
@@ -650,11 +863,18 @@ func (e *Engine) pollOne(ctx context.Context, d store.PollDevice) error {
 		return e.st.UpdateDevicePollMeta(ctx, d.ID, true, nil, &sn, &sd, nil, nil, nil, sysUptimeCs)
 	}
 
+	// Тяжёлый опрос (LLDP/CDP/ARP/PoE/STP/FDB, роли портов) — раз в heavy_poll_interval_seconds.
+	// Лёгкий (ping, sysUpTime, IF-MIB статусы/счётчики, CPU, ИБП/МФУ) — каждый интервал узла.
+	now := time.Now()
+	heavyDue := e.shouldPollHeavy(&d, now)
+
 	var chassisMAC *string
-	if mac, macErr := snmp.ReadLocalChassisMAC(g, d.Host); macErr != nil {
-		e.log.Debug("local chassis mac", "device_id", d.ID, "err", macErr)
-	} else if mac != "" {
-		chassisMAC = &mac
+	if heavyDue {
+		if mac, macErr := snmp.ReadLocalChassisMAC(g, d.Host); macErr != nil {
+			e.log.Debug("local chassis mac", "device_id", d.ID, "err", macErr)
+		} else if mac != "" {
+			chassisMAC = &mac
+		}
 	}
 
 	sn, sd := sysName, sysDescr
@@ -662,7 +882,9 @@ func (e *Engine) pollOne(ctx context.Context, d store.PollDevice) error {
 		return err
 	}
 
-	e.pollSTP(ctx, d, g)
+	if heavyDue {
+		e.pollSTP(ctx, d, g)
+	}
 
 	ifRows, err := snmp.WalkIFMIB(g)
 	if err != nil {
@@ -671,67 +893,81 @@ func (e *Engine) pollOne(ctx context.Context, d store.PollDevice) error {
 		return err
 	}
 
-	poeByIf, poeErr := snmp.WalkPoEDeliveringByIfIndex(g, ifRows)
-	if poeErr != nil {
-		e.log.Debug("poe mib", "device_id", d.ID, "err", poeErr)
-		poeByIf = nil
-	}
-	poePowerByIf, poePowerErr := snmp.WalkPoEPowerWByIfIndex(g, ifRows)
-	if poePowerErr != nil {
-		e.log.Debug("poe power mib", "device_id", d.ID, "err", poePowerErr)
-		poePowerByIf = nil
-	}
-	lldpNeighbors, lldpNeighborsErr := snmp.WalkLLDPNeighbors(g, ifRows)
-	if lldpNeighborsErr != nil {
-		e.log.Debug("lldp neighbors", "device_id", d.ID, "err", lldpNeighborsErr)
-	}
-	sshGot := false
-	if e.shouldTrySSHPoeFallback(sysDescr, poeByIf) {
-		sshPoe, sshPower, sshErr := poecli.ReadPoEActiveAndPowerByIfIndex(
-			d.Host,
-			e.cfg.SSHPOEPort,
-			e.cfg.SSHPOEUser,
-			e.cfg.SSHPOEPass,
-			e.cfg.SSHPOEEnablePass,
-			sysDescr,
-			ifRows,
-			e.cfg.SSHPOETimeout,
-			e.cfg.SSHPOEKnownHosts,
-		)
-		if sshErr != nil {
-			e.log.Warn("poe ssh fallback", "device_id", d.ID, "host", d.Host, "err", sshErr)
-		} else if len(sshPoe) > 0 || len(sshPower) > 0 {
-			sshGot = len(sshPoe) > 0
-			if len(sshPoe) > 0 {
+	// Данные тяжёлого опроса: на лёгком опросе остаются nil, и UpsertInterfaces
+	// сохраняет прежние poe_active/poe_power_w (COALESCE), а роль берётся из снимка.
+	var poeByIf map[int]bool
+	var poePowerByIf map[int]float32
+	var lldpNeighbors []snmp.NeighborInfo
+	var lldpErr error
+	if heavyDue {
+		poeActive, poeErr := snmp.WalkPoEDeliveringByIfIndex(g, ifRows)
+		if poeErr != nil {
+			e.log.Debug("poe mib", "device_id", d.ID, "err", poeErr)
+		} else {
+			poeByIf = poeActive
+		}
+		poePower, poePowerErr := snmp.WalkPoEPowerWByIfIndex(g, ifRows)
+		if poePowerErr != nil {
+			e.log.Debug("poe power mib", "device_id", d.ID, "err", poePowerErr)
+		} else {
+			poePowerByIf = poePower
+		}
+		lldp, lldpErrWalk := snmp.WalkLLDPNeighbors(g, ifRows)
+		if lldpErrWalk != nil {
+			e.log.Debug("lldp neighbors", "device_id", d.ID, "err", lldpErrWalk)
+			lldpErr = lldpErrWalk
+		} else {
+			lldpNeighbors = lldp
+		}
+		sshGot := false
+		if e.shouldTrySSHPoeFallback(sysDescr, poeByIf) {
+			sshPoe, sshPower, sshErr := poecli.ReadPoEActiveAndPowerByIfIndex(
+				d.Host,
+				e.cfg.SSHPOEPort,
+				e.cfg.SSHPOEUser,
+				e.cfg.SSHPOEPass,
+				e.cfg.SSHPOEEnablePass,
+				sysDescr,
+				ifRows,
+				e.cfg.SSHPOETimeout,
+				e.cfg.SSHPOEKnownHosts,
+			)
+			if sshErr != nil {
+				e.log.Warn("poe ssh fallback", "device_id", d.ID, "host", d.Host, "err", sshErr)
+			} else if len(sshPoe) > 0 || len(sshPower) > 0 {
+				sshGot = len(sshPoe) > 0
+				if len(sshPoe) > 0 {
+					if poeByIf == nil {
+						poeByIf = make(map[int]bool)
+					}
+					mergePoeMap(poeByIf, sshPoe)
+				}
+				// SNMP watts приоритетнее; SSH заполняет дыры (EdgeSwitch *-lite* без 4413).
+				poePowerByIf = mergePoePowerMap(poePowerByIf, sshPower)
+			}
+		}
+		// LLDP-PD только если PSE-MIB и SSH ничего не сказали (карта пустая/nil).
+		// Не подмешиваем, когда SNMP уже дал явные false — иначе «сосед PD» снова станет ложной молнией.
+		if !sshGot && len(poeByIf) == 0 {
+			if m, lerr := snmp.WalkLLDPDot3RemotePDByIfIndex(g, ifRows); lerr == nil && len(m) > 0 {
+				snmp.FilterLldpPdInfraUplinks(m, lldpNeighbors)
 				if poeByIf == nil {
 					poeByIf = make(map[int]bool)
 				}
-				mergePoeMap(poeByIf, sshPoe)
+				mergePoeMap(poeByIf, m)
 			}
-			// SNMP watts приоритетнее; SSH заполняет дыры (EdgeSwitch *-lite* без 4413).
-			poePowerByIf = mergePoePowerMap(poePowerByIf, sshPower)
 		}
-	}
-	// LLDP-PD только если PSE-MIB и SSH ничего не сказали (карта пустая/nil).
-	// Не подмешиваем, когда SNMP уже дал явные false — иначе «сосед PD» снова станет ложной молнией.
-	if !sshGot && len(poeByIf) == 0 {
-		if m, lerr := snmp.WalkLLDPDot3RemotePDByIfIndex(g, ifRows); lerr == nil && len(m) > 0 {
-			snmp.FilterLldpPdInfraUplinks(m, lldpNeighbors)
-			if poeByIf == nil {
-				poeByIf = make(map[int]bool)
-			}
-			mergePoeMap(poeByIf, m)
+		// SFP/оптика никогда не PSE: сбрасываем ложные молнии (в т.ч. залипший poe_active в БД).
+		if poeByIf == nil {
+			poeByIf = make(map[int]bool)
 		}
+		snmp.ClearPoEOnFiberPorts(poeByIf, ifRows, sysDescr)
 	}
-	// SFP/оптика никогда не PSE: сбрасываем ложные молнии (в т.ч. залипший poe_active в БД).
-	if poeByIf == nil {
-		poeByIf = make(map[int]bool)
-	}
-	snmp.ClearPoEOnFiberPorts(poeByIf, ifRows, sysDescr)
 
-	now := time.Now()
-	pollFDBNow := e.shouldPollFDB(d, d.LastFDBPollAt, now)
-	e.maybeSyncPortRolesFromConfig(ctx, d, pollFDBNow)
+	pollFDBNow := heavyDue && e.shouldPollFDB(d, d.LastFDBPollAt, now)
+	if heavyDue {
+		e.maybeSyncPortRolesFromConfig(ctx, d, pollFDBNow)
+	}
 
 	prev, err := e.st.ListInterfaceSnapshots(ctx, d.ID)
 	if err != nil {
@@ -745,6 +981,11 @@ func (e *Engine) pollOne(ctx context.Context, d store.PollDevice) error {
 		if err != nil {
 			e.log.Warn("poll fdb", "device_id", d.ID, "err", err)
 			_ = e.st.UpdateDeviceFDBStatus(ctx, d.ID, "unavailable")
+			// Отмечаем попытку: у узлов без bridge-MIB иначе FDB пробовалась бы на каждом
+			// тяжёлом опросе (журнал «bridge port map empty» каждые 5 минут).
+			if merr := e.st.MarkDeviceFDBPollAttempt(ctx, d.ID); merr != nil {
+				e.log.Debug("fdb attempt mark", "device_id", d.ID, "err", merr)
+			}
 			pollFDBNow = false
 		}
 	} else if e.cfg.FDBPollInterval <= 0 {
@@ -774,8 +1015,10 @@ func (e *Engine) pollOne(ctx context.Context, d store.PollDevice) error {
 			roleDescr = alias
 		}
 		// operational role для алертов/UI — не полный mirror CLI switchport mode.
+		// На лёгком опросе не пересчитываем: роль зависит от LLDP/FDB, которых в лёгком
+		// опросе нет — иначе она мигала бы между значениями.
 		portRole := inferRoleFromSnapshot(old)
-		if portRole == "access" {
+		if heavyDue && portRole == "access" {
 			portRole = inferPortRole(row.IfName, roleDescr, row.IfType, old)
 			if portRole == "access" && infraByIf[ifIdx] {
 				portRole = "trunk"
@@ -958,30 +1201,35 @@ func (e *Engine) pollOne(ctx context.Context, d store.PollDevice) error {
 	if err := e.st.UpsertInterfaces(ctx, d.ID, upserts); err != nil {
 		return err
 	}
-	e.persistNeighbors(ctx, d, "lldp", now, func() ([]snmp.NeighborInfo, error) {
-		if lldpNeighborsErr != nil {
-			return nil, lldpNeighborsErr
-		}
-		return lldpNeighbors, nil
-	})
-	e.persistNeighbors(ctx, d, "cdp", now, func() ([]snmp.NeighborInfo, error) {
-		return snmp.WalkCDPNeighbors(g)
-	})
+	// Соседи (LLDP/CDP) и ARP — тяжёлый опрос: таблицы большие, не чаще heavy_poll_interval_seconds.
+	if heavyDue {
+		e.persistNeighbors(ctx, d, "lldp", now, func() ([]snmp.NeighborInfo, error) {
+			if lldpErr != nil {
+				return nil, lldpErr
+			}
+			return lldpNeighbors, nil
+		})
+		e.persistNeighbors(ctx, d, "cdp", now, func() ([]snmp.NeighborInfo, error) {
+			return snmp.WalkCDPNeighbors(g)
+		})
+	}
 	e.recordMetrics(ctx, d.ID, cpuPct, upserts, rateByIf, now, printer)
-	if arpEntries, err := snmp.WalkARP(g); err != nil {
-		e.log.Warn("poll arp", "device_id", d.ID, "err", err)
-	} else {
-		storeARP := make([]store.ARPEntry, 0, len(arpEntries))
-		for _, a := range arpEntries {
-			storeARP = append(storeARP, store.ARPEntry{IP: a.IP, MAC: a.MAC, IfIndex: a.IfIndex})
-		}
-		if err := e.st.ReplaceARPSnapshot(ctx, d.ID, storeARP, now); err != nil {
-			e.log.Warn("arp snapshot write", "device_id", d.ID, "err", err)
-		} else if n, err := e.st.BackfillEmptyChassisFromARP(ctx, storeARP); err != nil {
-			e.log.Debug("chassis backfill from arp", "device_id", d.ID, "err", err)
-		} else if n > 0 {
-			e.log.Info("chassis_mac backfilled from arp", "from_device_id", d.ID, "count", n)
-			e.notifyTopologyDirty("arp-chassis")
+	if heavyDue {
+		if arpEntries, err := snmp.WalkARP(g); err != nil {
+			e.log.Warn("poll arp", "device_id", d.ID, "err", err)
+		} else {
+			storeARP := make([]store.ARPEntry, 0, len(arpEntries))
+			for _, a := range arpEntries {
+				storeARP = append(storeARP, store.ARPEntry{IP: a.IP, MAC: a.MAC, IfIndex: a.IfIndex})
+			}
+			if err := e.st.ReplaceARPSnapshot(ctx, d.ID, storeARP, now); err != nil {
+				e.log.Warn("arp snapshot write", "device_id", d.ID, "err", err)
+			} else if n, err := e.st.BackfillEmptyChassisFromARP(ctx, storeARP); err != nil {
+				e.log.Debug("chassis backfill from arp", "device_id", d.ID, "err", err)
+			} else if n > 0 {
+				e.log.Info("chassis_mac backfilled from arp", "from_device_id", d.ID, "count", n)
+				e.notifyTopologyDirty("arp-chassis")
+			}
 		}
 	}
 	if pollFDBNow {
@@ -994,13 +1242,36 @@ func (e *Engine) pollOne(ctx context.Context, d store.PollDevice) error {
 	} else if e.isFDBLearning(d, now) {
 		_ = e.st.UpdateDeviceFDBStatus(ctx, d.ID, "learning")
 	}
+	if heavyDue {
+		if err := e.st.UpdateDeviceHeavyPollAt(ctx, d.ID); err != nil {
+			e.log.Warn("heavy poll mark", "device_id", d.ID, "err", err)
+		}
+	}
 	return nil
+}
+
+// utilSampleDue — пора ли писать util/rate сэмплы (троттлинг записи истории).
+func (e *Engine) utilSampleDue(deviceID int64, now time.Time) bool {
+	interval := e.cfg.MetricsUtilInterval
+	if interval <= 0 {
+		return true
+	}
+	if v, ok := e.utilSampleAt.Load(deviceID); ok {
+		if last, okT := v.(time.Time); okT && now.Sub(last) < interval {
+			return false
+		}
+	}
+	e.utilSampleAt.Store(deviceID, now)
+	return true
 }
 
 func (e *Engine) recordMetrics(ctx context.Context, deviceID int64, cpuPct *float32, upserts []store.InterfaceUpsert, rates map[int][2]float32, at time.Time, printer *snmp.PrinterReading) {
 	if !e.cfg.MetricsEnabled {
 		return
 	}
+	// util/rate пишем не чаще MetricsUtilInterval (по умолчанию 60 с): сам опрос идёт
+	// каждые 15–20 с, и без троттлинга это ~19 млн строк в сутки вместо ~4 млн.
+	writeUtil := e.utilSampleDue(deviceID, at)
 	var samples []store.MetricSample
 	if cpuPct != nil {
 		samples = append(samples, store.MetricSample{MetricType: "cpu_pct", Value: *cpuPct, SampledAt: at})
@@ -1026,6 +1297,9 @@ func (e *Engine) recordMetrics(ctx context.Context, deviceID int64, cpuPct *floa
 		}
 	}
 	for _, u := range upserts {
+		if !writeUtil {
+			break
+		}
 		if u.OperStatus == nil || *u.OperStatus != 1 {
 			continue
 		}

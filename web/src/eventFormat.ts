@@ -97,6 +97,20 @@ export function formatEventTypeLabel(eventType: string): string {
       return "ИБП: высокая нагрузка (>=90%)";
     case "UPS_LOAD_OK":
       return "ИБП: нагрузка в норме";
+    case "UPS_CHARGE_LOW":
+      return "ИБП: низкий заряд АКБ (<=50%)";
+    case "UPS_CHARGE_CRITICAL":
+      return "ИБП: критический заряд АКБ (<=20%)";
+    case "UPS_CHARGE_OK":
+      return "ИБП: заряд АКБ восстановился";
+    case "UPS_CHARGE_DROP":
+      return "ИБП: заряд АКБ падает без работы от батареи";
+    case "UPS_DISCHARGE_FAST":
+      return "ИБП: быстрый разряд АКБ (>=2%/мин)";
+    case "UPS_RUNTIME_LOW":
+      return "ИБП: малая автономия (<=10 мин)";
+    case "UPS_ON_BATTERY_LONG":
+      return "ИБП: питание не вернулось (на батарее >10 мин)";
     default:
       return eventType;
   }
@@ -147,6 +161,20 @@ export function formatDashboardEventAbbrev(eventType: string): string | null {
       return "UPS LH";
     case "UPS_LOAD_OK":
       return "UPS LO";
+    case "UPS_CHARGE_LOW":
+      return "UPS CL";
+    case "UPS_CHARGE_CRITICAL":
+      return "UPS CC!";
+    case "UPS_CHARGE_OK":
+      return "UPS COK";
+    case "UPS_CHARGE_DROP":
+      return "UPS CD";
+    case "UPS_DISCHARGE_FAST":
+      return "UPS DF!";
+    case "UPS_RUNTIME_LOW":
+      return "UPS RL";
+    case "UPS_ON_BATTERY_LONG":
+      return "UPS BLONG";
     default:
       return null;
   }
@@ -487,7 +515,14 @@ export function formatEventSummary(ev: Pick<EventRow, "event_type" | "payload" |
     case "UPS_ALARM":
     case "UPS_ALARM_CLEAR":
     case "UPS_LOAD_HIGH":
-    case "UPS_LOAD_OK": {
+    case "UPS_LOAD_OK":
+    case "UPS_CHARGE_LOW":
+    case "UPS_CHARGE_CRITICAL":
+    case "UPS_CHARGE_OK":
+    case "UPS_CHARGE_DROP":
+    case "UPS_DISCHARGE_FAST":
+    case "UPS_RUNTIME_LOW":
+    case "UPS_ON_BATTERY_LONG": {
       const parts: string[] = [];
       const model = str(p.ups_model);
       if (model) parts.push(model);
@@ -501,6 +536,8 @@ export function formatEventSummary(ev: Pick<EventRow, "event_type" | "payload" |
       if (load != null) parts.push(`нагрузка ${Math.round(load)}%`);
       const alarms = asNum(p.alarms_present);
       if (alarms != null && alarms > 0) parts.push(`аварий ${Math.round(alarms)}`);
+      const rate = asNum(p.discharge_pct_per_min);
+      if (rate != null) parts.push(`разряд ${rate.toFixed(1)}%/мин`);
       return parts.length ? parts.join(" · ") : "ИБП";
     }
     case "SERVICE_STARTED": {

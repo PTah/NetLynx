@@ -48,6 +48,16 @@ type PollDevice struct {
 	LastPollAt             *time.Time
 	LastFDBPollAt          *time.Time
 	FDBBaselineAt          *time.Time
+	/** auto | ping | online | offline — как определяется «в сети» (см. models.NormalizeReachabilityMode) */
+	ReachabilityMode string
+	OnlineOverride   *bool
+	LastSNMPOK       *bool
+	LastSNMPError    *string
+	/** Интервал тяжёлого опроса (LLDP/CDP/ARP/PoE/STP/FDB, роли портов); nil = POLL_HEAVY_SECONDS */
+	HeavyPollIntervalSeconds *int
+	LastHeavyPollAt          *time.Time
+	/** Тип узла — от него зависит приоритет опроса и ветка ИБП/МФУ */
+	DeviceCategory string
 }
 
 func (s *Store) GetPollDevice(ctx context.Context, id int64) (*PollDevice, error) {
@@ -56,13 +66,18 @@ func (s *Store) GetPollDevice(ctx context.Context, id int64) (*PollDevice, error
 		SELECT id, name, COALESCE(host, '') AS host, snmp_version, community,
 		       v3_user, v3_auth_protocol, v3_auth_pass, v3_priv_protocol, v3_priv_pass, v3_engine_id,
 		       poll_interval_seconds, util_high_pct, util_ok_pct, fdb_poll_interval_seconds,
-		       last_poll_at, last_fdb_poll_at, fdb_baseline_at
+		       last_poll_at, last_fdb_poll_at, fdb_baseline_at,
+		       COALESCE(NULLIF(btrim(reachability_mode), ''), 'auto'), online_override, last_snmp_ok, last_snmp_error,
+		       heavy_poll_interval_seconds, last_heavy_poll_at,
+		       COALESCE(NULLIF(btrim(device_category), ''), 'switch')
 		FROM devices WHERE id = $1`, id,
 	).Scan(
 		&d.ID, &d.Name, &d.Host, &d.SNMPVersion, &d.Community,
 		&d.V3User, &d.V3AuthProtocol, &d.V3AuthPass, &d.V3PrivProtocol, &d.V3PrivPass, &d.V3EngineID,
 		&d.PollIntervalSeconds, &d.UtilHighPct, &d.UtilOkPct, &d.FDBPollIntervalSeconds,
 		&d.LastPollAt, &d.LastFDBPollAt, &d.FDBBaselineAt,
+		&d.ReachabilityMode, &d.OnlineOverride, &d.LastSNMPOK, &d.LastSNMPError,
+		&d.HeavyPollIntervalSeconds, &d.LastHeavyPollAt, &d.DeviceCategory,
 	)
 	if err == pgx.ErrNoRows {
 		return nil, nil
@@ -97,7 +112,10 @@ func (s *Store) ListPollDevices(ctx context.Context) ([]PollDevice, error) {
 		SELECT id, name, COALESCE(host, '') AS host, snmp_version, community,
 		       v3_user, v3_auth_protocol, v3_auth_pass, v3_priv_protocol, v3_priv_pass, v3_engine_id,
 		       poll_interval_seconds, util_high_pct, util_ok_pct, fdb_poll_interval_seconds,
-		       last_poll_at, last_fdb_poll_at, fdb_baseline_at
+		       last_poll_at, last_fdb_poll_at, fdb_baseline_at,
+		       COALESCE(NULLIF(btrim(reachability_mode), ''), 'auto'), online_override, last_snmp_ok, last_snmp_error,
+		       heavy_poll_interval_seconds, last_heavy_poll_at,
+		       COALESCE(NULLIF(btrim(device_category), ''), 'switch')
 		FROM devices ORDER BY id`)
 	if err != nil {
 		return nil, err
@@ -111,6 +129,8 @@ func (s *Store) ListPollDevices(ctx context.Context) ([]PollDevice, error) {
 			&d.V3User, &d.V3AuthProtocol, &d.V3AuthPass, &d.V3PrivProtocol, &d.V3PrivPass, &d.V3EngineID,
 			&d.PollIntervalSeconds, &d.UtilHighPct, &d.UtilOkPct, &d.FDBPollIntervalSeconds,
 			&d.LastPollAt, &d.LastFDBPollAt, &d.FDBBaselineAt,
+			&d.ReachabilityMode, &d.OnlineOverride, &d.LastSNMPOK, &d.LastSNMPError,
+			&d.HeavyPollIntervalSeconds, &d.LastHeavyPollAt, &d.DeviceCategory,
 		); err != nil {
 			return nil, err
 		}
@@ -131,6 +151,7 @@ func (s *Store) ListDevices(ctx context.Context) ([]models.Device, error) {
 		       last_ping_ok, last_ping_at, last_ping_rtt_ms, online_override, COALESCE(NULLIF(btrim(reachability_mode), ''), 'auto'), offline_since,
 		       sys_name, sys_descr, chassis_mac, cpu_profile, device_category, last_cpu_pct, last_cpu_at, last_sys_uptime_cs,
 		       last_page_count, last_toners, last_ups, last_ups_at, fdb_monitoring_status,
+		       heavy_poll_interval_seconds, last_heavy_poll_at,
 		       ssh_user, ssh_password, ssh_port, ssh_enable_password, COALESCE(NULLIF(btrim(ssh_vendor), ''), 'auto'),
 		       COALESCE(trust_link_traps, false)
 		FROM devices ORDER BY id`)
@@ -151,6 +172,7 @@ func (s *Store) ListDevices(ctx context.Context) ([]models.Device, error) {
 			&d.LastPingOK, &d.LastPingAt, &d.LastPingRTTMs, &d.OnlineOverride, &d.ReachabilityMode, &d.OfflineSince,
 			&d.SysName, &d.SysDescr, &d.ChassisMAC, &d.CPUProfile, &d.DeviceCategory, &d.LastCPUPct, &d.LastCPUAt, &d.LastSysUptimeCs,
 			&d.LastPageCount, &tonerRaw, &upsRaw, &d.LastUPSAt, &d.FDBMonitoringStatus,
+			&d.HeavyPollIntervalSeconds, &d.LastHeavyPollAt,
 			&d.SSHUser, &d.SSHPassword, &d.SSHPort, &d.SSHEnablePassword, &d.SSHVendor,
 			&d.TrustLinkTraps,
 		); err != nil {
@@ -185,6 +207,7 @@ func (s *Store) GetDevice(ctx context.Context, id int64) (*models.Device, error)
 		       last_ping_ok, last_ping_at, last_ping_rtt_ms, online_override, COALESCE(NULLIF(btrim(reachability_mode), ''), 'auto'), offline_since,
 		       sys_name, sys_descr, chassis_mac, cpu_profile, device_category, last_cpu_pct, last_cpu_at, last_sys_uptime_cs,
 		       last_page_count, last_toners, last_ups, last_ups_at, fdb_monitoring_status,
+		       heavy_poll_interval_seconds, last_heavy_poll_at,
 		       ssh_user, ssh_password, ssh_port, ssh_enable_password, COALESCE(NULLIF(btrim(ssh_vendor), ''), 'auto'),
 		       COALESCE(trust_link_traps, false)
 		FROM devices WHERE id = $1`, id).Scan(
@@ -195,6 +218,7 @@ func (s *Store) GetDevice(ctx context.Context, id int64) (*models.Device, error)
 		&d.LastPingOK, &d.LastPingAt, &d.LastPingRTTMs, &d.OnlineOverride, &d.ReachabilityMode, &d.OfflineSince,
 		&d.SysName, &d.SysDescr, &d.ChassisMAC, &d.CPUProfile, &d.DeviceCategory, &d.LastCPUPct, &d.LastCPUAt, &d.LastSysUptimeCs,
 		&d.LastPageCount, &tonerRaw, &upsRaw, &d.LastUPSAt, &d.FDBMonitoringStatus,
+		&d.HeavyPollIntervalSeconds, &d.LastHeavyPollAt,
 		&d.SSHUser, &d.SSHPassword, &d.SSHPort, &d.SSHEnablePassword, &d.SSHVendor,
 		&d.TrustLinkTraps,
 	)
@@ -340,6 +364,39 @@ func (s *Store) UpdateDevice(ctx context.Context, id int64, in CreateDeviceInput
 		return ErrDeviceNotFound
 	}
 	return nil
+}
+
+// UpdateDevicePollTime — отметить время опроса, не трогая SNMP-поля
+// (узел в режиме «только ping» либо на паузе SNMP-опроса).
+func (s *Store) UpdateDevicePollTime(ctx context.Context, id int64) error {
+	_, err := s.pool.Exec(ctx, `UPDATE devices SET last_poll_at = now(), updated_at = now() WHERE id = $1`, id)
+	return err
+}
+
+// MarkDeviceFDBPollAttempt — отметить попытку опроса FDB, даже если она не удалась
+// (нет bridge-MIB). Иначе такие узлы пробуются на каждом тяжёлом опросе и засоряют журнал.
+func (s *Store) MarkDeviceFDBPollAttempt(ctx context.Context, id int64) error {
+	_, err := s.pool.Exec(ctx, `UPDATE devices SET last_fdb_poll_at = now() WHERE id = $1`, id)
+	return err
+}
+
+// UpdateDeviceHeavyPollAt — отметка выполнения тяжёлого опроса (LLDP/CDP/ARP/PoE/STP/FDB).
+func (s *Store) UpdateDeviceHeavyPollAt(ctx context.Context, id int64) error {
+	_, err := s.pool.Exec(ctx, `UPDATE devices SET last_heavy_poll_at = now() WHERE id = $1`, id)
+	return err
+}
+
+// UpdateDevicePingPollMeta — отметка опроса для узлов в режиме достижимости «только ping»
+// (SIP-телефоны, IoT): обновляет время опроса и держит SNMP-поля пустыми.
+func (s *Store) UpdateDevicePingPollMeta(ctx context.Context, id int64) error {
+	_, err := s.pool.Exec(ctx, `
+		UPDATE devices SET
+			last_poll_at = now(),
+			last_snmp_ok = NULL,
+			last_snmp_error = NULL,
+			updated_at = now()
+		WHERE id = $1`, id)
+	return err
 }
 
 // ClearDeviceCPU сбрасывает last_cpu_* (для МФУ без осмысленного CPU по SNMP).
@@ -1475,14 +1532,15 @@ func onlyDigits(s string) bool {
 	return len(s) > 0
 }
 
-func (s *Store) UpdateDeviceMonitoring(ctx context.Context, id int64, utilHigh, utilOk *float32, fdbPollSec *int) error {
+func (s *Store) UpdateDeviceMonitoring(ctx context.Context, id int64, utilHigh, utilOk *float32, fdbPollSec, heavyPollSec *int) error {
 	tag, err := s.pool.Exec(ctx, `
 		UPDATE devices SET
 			util_high_pct = $2,
 			util_ok_pct = $3,
 			fdb_poll_interval_seconds = $4,
+			heavy_poll_interval_seconds = $5,
 			updated_at = now()
-		WHERE id = $1`, id, utilHigh, utilOk, fdbPollSec)
+		WHERE id = $1`, id, utilHigh, utilOk, fdbPollSec, heavyPollSec)
 	if err != nil {
 		return err
 	}

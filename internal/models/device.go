@@ -3,33 +3,36 @@ package models
 import "time"
 
 type Device struct {
-	ID                     int64      `json:"id"`
-	Name                   string     `json:"name"`
-	Host                   string     `json:"host"`
-	Location               *string    `json:"location,omitempty"`
-	UISPDeviceID           *string    `json:"uisp_device_id,omitempty"`
-	UISPOverviewStatus     *string    `json:"uisp_overview_status,omitempty"` // из UISP overview.status (active/disconnected)
-	SNMPVersion            string     `json:"snmp_version"`
-	Community              *string    `json:"-"` // community не отдаём в API (см. HasCommunity)
-	HasCommunity           bool       `json:"has_community"`
-	V3User                 *string    `json:"v3_user,omitempty"`
-	V3AuthProtocol         *string    `json:"v3_auth_protocol,omitempty"`
-	V3AuthPass             *string    `json:"-"` // не отдаём в JSON
-	V3PrivProtocol         *string    `json:"v3_priv_protocol,omitempty"`
-	V3PrivPass             *string    `json:"-"`
-	V3EngineID             *string    `json:"v3_engine_id,omitempty"`
-	PollIntervalSeconds    int        `json:"poll_interval_seconds"`
-	UtilHighPct            *float32   `json:"util_high_pct,omitempty"`
-	UtilOkPct              *float32   `json:"util_ok_pct,omitempty"`
-	FDBPollIntervalSeconds *int       `json:"fdb_poll_interval_seconds,omitempty"`
-	CreatedAt              time.Time  `json:"created_at"`
-	UpdatedAt              time.Time  `json:"updated_at"`
-	LastPollAt             *time.Time `json:"last_poll_at,omitempty"`
-	LastSNMPOK             *bool      `json:"last_snmp_ok,omitempty"`
-	LastSNMPError          *string    `json:"last_snmp_error,omitempty"`
-	LastPingOK             *bool      `json:"last_ping_ok,omitempty"`
-	LastPingAt             *time.Time `json:"last_ping_at,omitempty"`
-	LastPingRTTMs          *int       `json:"last_ping_rtt_ms,omitempty"`
+	ID                     int64    `json:"id"`
+	Name                   string   `json:"name"`
+	Host                   string   `json:"host"`
+	Location               *string  `json:"location,omitempty"`
+	UISPDeviceID           *string  `json:"uisp_device_id,omitempty"`
+	UISPOverviewStatus     *string  `json:"uisp_overview_status,omitempty"` // из UISP overview.status (active/disconnected)
+	SNMPVersion            string   `json:"snmp_version"`
+	Community              *string  `json:"-"` // community не отдаём в API (см. HasCommunity)
+	HasCommunity           bool     `json:"has_community"`
+	V3User                 *string  `json:"v3_user,omitempty"`
+	V3AuthProtocol         *string  `json:"v3_auth_protocol,omitempty"`
+	V3AuthPass             *string  `json:"-"` // не отдаём в JSON
+	V3PrivProtocol         *string  `json:"v3_priv_protocol,omitempty"`
+	V3PrivPass             *string  `json:"-"`
+	V3EngineID             *string  `json:"v3_engine_id,omitempty"`
+	PollIntervalSeconds    int      `json:"poll_interval_seconds"`
+	UtilHighPct            *float32 `json:"util_high_pct,omitempty"`
+	UtilOkPct              *float32 `json:"util_ok_pct,omitempty"`
+	FDBPollIntervalSeconds *int     `json:"fdb_poll_interval_seconds,omitempty"`
+	/** Тяжёлый опрос (LLDP/CDP/ARP/PoE/STP/FDB, роли портов) — раз в N секунд; nil = POLL_HEAVY_SECONDS */
+	HeavyPollIntervalSeconds *int       `json:"heavy_poll_interval_seconds,omitempty"`
+	LastHeavyPollAt          *time.Time `json:"last_heavy_poll_at,omitempty"`
+	CreatedAt                time.Time  `json:"created_at"`
+	UpdatedAt                time.Time  `json:"updated_at"`
+	LastPollAt               *time.Time `json:"last_poll_at,omitempty"`
+	LastSNMPOK               *bool      `json:"last_snmp_ok,omitempty"`
+	LastSNMPError            *string    `json:"last_snmp_error,omitempty"`
+	LastPingOK               *bool      `json:"last_ping_ok,omitempty"`
+	LastPingAt               *time.Time `json:"last_ping_at,omitempty"`
+	LastPingRTTMs            *int       `json:"last_ping_rtt_ms,omitempty"`
 	/** nil = авто; true/false = ручная отметка (legacy, синхронизируется с reachability_mode) */
 	OnlineOverride *bool `json:"online_override"`
 	/** auto | ping | online | offline — как определяется «в сети» */

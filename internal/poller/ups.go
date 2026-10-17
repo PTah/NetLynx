@@ -23,6 +23,23 @@ const (
 	upsBatteryLow    = 3 // upsBatteryStatus: low
 	upsBatteryDeplet = 4 // upsBatteryStatus: depleted
 	upsBatteryNormal = 2 // upsBatteryStatus: normal
+
+	// Пороги заряда АКБ (%), с гистерезисом на восстановление.
+	upsChargeLowPct      = float32(50)
+	upsChargeCriticalPct = float32(20)
+	upsChargeOkPct       = float32(60)
+	// Падение заряда между опросами без работы от батареи — похоже на проблему с АКБ.
+	upsChargeDropPct = float32(10)
+
+	// Быстрый разряд: %/мин (окно не меньше минуты) и минимальное падение за опрос.
+	upsDischargeFastPctPerMin = float32(2)
+	upsDischargeMinDropPct    = float32(3)
+	// не повторять предупреждение о быстром разряде чаще, чем раз в 10 минут.
+	upsDischargeCooldown = 10 * time.Minute
+
+	// Автономия на грани и «долго на батарее».
+	upsRuntimeLowMin    = 10
+	upsOnBatteryLongSec = 600
 )
 
 // upsAlert — событие по переходу состояния ИБП.
@@ -50,6 +67,9 @@ func (e *Engine) pollUPS(ctx context.Context, d store.PollDevice, prev *models.D
 	}
 
 	for _, a := range upsAlertEvents(prevSnap, cur) {
+		if a.EventType == "UPS_DISCHARGE_FAST" && !e.upsDischargeAlertDue(d.ID, now) {
+			continue
+		}
 		e.emit(ctx, nil, d, nil, a.EventType, a.Severity, a.Payload)
 	}
 
@@ -57,6 +77,18 @@ func (e *Engine) pollUPS(ctx context.Context, d store.PollDevice, prev *models.D
 		e.log.Warn("ups snapshot", "device_id", d.ID, "err", err)
 	}
 	e.recordUPSMetrics(ctx, d.ID, prevSnap, cur, now)
+}
+
+// upsDischargeAlertDue — антидребезг для предупреждений о быстром разряде
+// (разряд продолжается — событие иначе повторялось бы каждый опрос).
+func (e *Engine) upsDischargeAlertDue(deviceID int64, now time.Time) bool {
+	if v, ok := e.upsDischargeAlertAt.Load(deviceID); ok {
+		if last, okT := v.(time.Time); okT && now.Sub(last) < upsDischargeCooldown {
+			return false
+		}
+	}
+	e.upsDischargeAlertAt.Store(deviceID, now)
+	return true
 }
 
 // recordUPSMetrics — история ups_* в metric_samples не чаще upsMetricInterval,
@@ -154,7 +186,76 @@ func upsAlertEvents(prev, cur *models.UPSSnapshot) []upsAlert {
 			add("UPS_LOAD_OK", "info")
 		}
 	}
+
+	// Заряд АКБ: пороги (с гистерезисом) + падение без работы от батареи.
+	if cur.BatteryChargePct != nil {
+		cc := *cur.BatteryChargePct
+		var pc float32
+		havePC := prev.BatteryChargePct != nil
+		if havePC {
+			pc = *prev.BatteryChargePct
+		}
+		switch {
+		case cc <= upsChargeCriticalPct && (!havePC || pc > upsChargeCriticalPct):
+			add("UPS_CHARGE_CRITICAL", "error")
+		case cc <= upsChargeLowPct && (!havePC || pc > upsChargeLowPct):
+			add("UPS_CHARGE_LOW", "warning")
+		}
+		if havePC && cc >= upsChargeOkPct && pc < upsChargeOkPct {
+			add("UPS_CHARGE_OK", "info")
+		}
+		if havePC && !curOn && !prevOn && pc-cc >= upsChargeDropPct {
+			add("UPS_CHARGE_DROP", "warning")
+		}
+	}
+
+	// Быстрый разряд: %/мин по окну между опросами.
+	if rate, drop, ok := upsDischargeRate(prev, cur); ok &&
+		rate >= upsDischargeFastPctPerMin && drop >= upsDischargeMinDropPct {
+		pl["discharge_pct_per_min"] = rate
+		pl["charge_drop_pct"] = drop
+		add("UPS_DISCHARGE_FAST", "warning")
+	}
+
+	// Автономия на грани (работа от батареи).
+	if curOn && cur.RuntimeMin != nil && *cur.RuntimeMin <= upsRuntimeLowMin {
+		if prev.RuntimeMin == nil || *prev.RuntimeMin > upsRuntimeLowMin {
+			add("UPS_RUNTIME_LOW", "warning")
+		}
+	}
+
+	// Питание не вернулось: на батарее дольше upsOnBatteryLongSec.
+	if curOn && cur.SecondsOnBattery != nil {
+		csec := *cur.SecondsOnBattery
+		psec := 0
+		if prev.SecondsOnBattery != nil {
+			psec = *prev.SecondsOnBattery
+		}
+		if csec >= upsOnBatteryLongSec && psec < upsOnBatteryLongSec {
+			add("UPS_ON_BATTERY_LONG", "error")
+		}
+	}
 	return out
+}
+
+// upsDischargeRate — скорость разряда (%/мин) и падение заряда между опросами.
+// Окно меньше минуты не считаем: разрешение метрики — 1%.
+func upsDischargeRate(prev, cur *models.UPSSnapshot) (rate, drop float32, ok bool) {
+	if prev == nil || cur == nil || !cur.UPSOnBattery() {
+		return 0, 0, false
+	}
+	if prev.BatteryChargePct == nil || cur.BatteryChargePct == nil {
+		return 0, 0, false
+	}
+	dt := cur.PolledAt.Sub(prev.PolledAt)
+	if dt < time.Minute {
+		return 0, 0, false
+	}
+	drop = *prev.BatteryChargePct - *cur.BatteryChargePct
+	if drop <= 0 {
+		return 0, 0, false
+	}
+	return drop / float32(dt.Minutes()), drop, true
 }
 
 // upsEventPayload — общие поля события ИБП (для журнала/уведомлений).
