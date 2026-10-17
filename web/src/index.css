@@ -328,6 +328,25 @@ button.port-ignore-btn--all:hover {
   font-size: 0.9rem;
 }
 
+@keyframes toner-critical-blink {
+  0%,
+  100% {
+    background-color: rgba(180, 40, 40, 0.55);
+  }
+  50% {
+    background-color: rgba(255, 70, 70, 0.22);
+  }
+}
+
+tr.device-row-toner-critical > td {
+  animation: toner-critical-blink 1.15s ease-in-out infinite;
+  color: #ffe8e8;
+}
+
+tr.device-row-toner-critical a {
+  color: #ffc9c9;
+}
+
 .devices-list-scroll {
   overflow: visible;
   border: 1px solid #2a3040;

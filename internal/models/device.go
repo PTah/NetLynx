@@ -48,15 +48,18 @@ type Device struct {
 	/** prtMarkerLifeCount (Printer-MIB), страниц за жизнь устройства */
 	LastPageCount *int64 `json:"last_page_count,omitempty"`
 	/** Снимок тонер-картриджей (Printer-MIB prtMarkerSuppliesTable) */
-	LastToners           []PrinterToner `json:"last_toners,omitempty"`
-	FDBMonitoringStatus  string         `json:"fdb_monitoring_status,omitempty"`
-	SSHUser              *string        `json:"ssh_user,omitempty"`
-	SSHPassword          *string        `json:"-"`
-	SSHPort              *int           `json:"ssh_port,omitempty"`
-	SSHEnablePassword    *string        `json:"-"`
-	SSHVendor            string         `json:"ssh_vendor,omitempty"`
-	HasSSHPassword       bool           `json:"has_ssh_password,omitempty"`
-	HasSSHEnablePassword bool           `json:"has_ssh_enable_password,omitempty"`
+	LastToners []PrinterToner `json:"last_toners,omitempty"`
+	/** Снимок ИБП (UPS-MIB, RFC 1628) */
+	LastUPS              *UPSSnapshot `json:"last_ups,omitempty"`
+	LastUPSAt            *time.Time   `json:"last_ups_at,omitempty"`
+	FDBMonitoringStatus  string       `json:"fdb_monitoring_status,omitempty"`
+	SSHUser              *string      `json:"ssh_user,omitempty"`
+	SSHPassword          *string      `json:"-"`
+	SSHPort              *int         `json:"ssh_port,omitempty"`
+	SSHEnablePassword    *string      `json:"-"`
+	SSHVendor            string       `json:"ssh_vendor,omitempty"`
+	HasSSHPassword       bool         `json:"has_ssh_password,omitempty"`
+	HasSSHEnablePassword bool         `json:"has_ssh_enable_password,omitempty"`
 	/** При link_trap_events_mode=per_device — писать LINK_* сразу из SNMP trap. */
 	TrustLinkTraps bool `json:"trust_link_traps"`
 }

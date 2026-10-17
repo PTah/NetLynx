@@ -14,41 +14,41 @@ import (
 )
 
 type TopologyNode struct {
-	ID           int64   `json:"id"`
-	Name         string  `json:"name"`
-	Host         string  `json:"host"`
-	SysName      *string `json:"sys_name,omitempty"`
-	SysDescr     *string `json:"sys_descr,omitempty"`
-	CPUProfile   *string `json:"cpu_profile,omitempty"`
-	Location     *string `json:"location,omitempty"`
-	SNMPOK         *bool   `json:"last_snmp_ok,omitempty"`
-	PingOK         *bool   `json:"last_ping_ok,omitempty"`
-	OnlineOverride   *bool   `json:"online_override"`
-	ReachabilityMode string  `json:"reachability_mode,omitempty"`
-	UISPDeviceID     *string `json:"uisp_device_id,omitempty"`
-	UISPStatus     *string `json:"uisp_overview_status,omitempty"`
-	Virtual        bool    `json:"virtual,omitempty"`
-	Kind           string  `json:"kind"`
-	LinkCount      int     `json:"link_count"`
-	DiscoveredID   *int64  `json:"discovered_id,omitempty"`
+	ID               int64      `json:"id"`
+	Name             string     `json:"name"`
+	Host             string     `json:"host"`
+	SysName          *string    `json:"sys_name,omitempty"`
+	SysDescr         *string    `json:"sys_descr,omitempty"`
+	CPUProfile       *string    `json:"cpu_profile,omitempty"`
+	Location         *string    `json:"location,omitempty"`
+	SNMPOK           *bool      `json:"last_snmp_ok,omitempty"`
+	PingOK           *bool      `json:"last_ping_ok,omitempty"`
+	OnlineOverride   *bool      `json:"online_override"`
+	ReachabilityMode string     `json:"reachability_mode,omitempty"`
+	UISPDeviceID     *string    `json:"uisp_device_id,omitempty"`
+	UISPStatus       *string    `json:"uisp_overview_status,omitempty"`
+	Virtual          bool       `json:"virtual,omitempty"`
+	Kind             string     `json:"kind"`
+	LinkCount        int        `json:"link_count"`
+	DiscoveredID     *int64     `json:"discovered_id,omitempty"`
 	LastPollAt       *time.Time `json:"last_poll_at,omitempty"`
 	LastSysUptimeCs  *int64     `json:"last_sys_uptime_cs,omitempty"`
 }
 
 type TopologyEdge struct {
-	LocalDeviceID   int64      `json:"local_device_id"`
-	LocalIfIndex    int        `json:"local_if_index"`
-	LocalIfName     *string    `json:"local_if_name,omitempty"`
-	LocalIfSpeed    *int64     `json:"local_if_speed,omitempty"`
-	PoeActive       *bool      `json:"poe_active,omitempty"`
-	PoePowerW       *float64   `json:"poe_power_w,omitempty"`
-	VlanID          *int       `json:"vlan_id,omitempty"`
-	RemoteDeviceID  *int64     `json:"remote_device_id,omitempty"`
-	RemoteSysName   *string    `json:"remote_sys_name,omitempty"`
-	RemotePortID    *string    `json:"remote_port_id,omitempty"`
-	RemoteIfName    *string    `json:"remote_if_name,omitempty"`
-	RemoteChassisID *string    `json:"remote_chassis_id,omitempty"`
-	RemoteMgmtAddr  *string    `json:"remote_mgmt_addr,omitempty"`
+	LocalDeviceID   int64    `json:"local_device_id"`
+	LocalIfIndex    int      `json:"local_if_index"`
+	LocalIfName     *string  `json:"local_if_name,omitempty"`
+	LocalIfSpeed    *int64   `json:"local_if_speed,omitempty"`
+	PoeActive       *bool    `json:"poe_active,omitempty"`
+	PoePowerW       *float64 `json:"poe_power_w,omitempty"`
+	VlanID          *int     `json:"vlan_id,omitempty"`
+	RemoteDeviceID  *int64   `json:"remote_device_id,omitempty"`
+	RemoteSysName   *string  `json:"remote_sys_name,omitempty"`
+	RemotePortID    *string  `json:"remote_port_id,omitempty"`
+	RemoteIfName    *string  `json:"remote_if_name,omitempty"`
+	RemoteChassisID *string  `json:"remote_chassis_id,omitempty"`
+	RemoteMgmtAddr  *string  `json:"remote_mgmt_addr,omitempty"`
 	// Protocol — основной (первый) для совместимости; Protocols — все после дедупа LLDP+CDP.
 	Protocol        string     `json:"protocol"`
 	Protocols       []string   `json:"protocols,omitempty"`
@@ -1273,6 +1273,8 @@ func classifyTopologyKind(virtual bool, deviceCategory, cpuProfile, sysDescr, na
 		return "camera"
 	case DeviceCategoryAP:
 		return "ap"
+	case DeviceCategoryUPS:
+		return "ups"
 	case DeviceCategoryOther:
 		return "other"
 	case DeviceCategorySwitch:

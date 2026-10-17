@@ -399,8 +399,8 @@ func (s *Store) ListChassisMACIndex(ctx context.Context) (map[string]ChassisEndp
 	return out, rows.Err()
 }
 
-const fdbTopoMaxMACsOnPort = 10 // access: больше — шум/trunk-like
-const fdbTopoMaxAPsOnTrunk = 1  // только uplink одной AP на trunk
+const fdbTopoMaxMACsOnPort = 10      // access: больше — шум/trunk-like
+const fdbTopoMaxAPsOnTrunk = 1       // только uplink одной AP на trunk
 const fdbTopoSiblingTrunkAPFlood = 4 // >=4 single-AP trunk на свитче — core-like; edge multi-AP (48 #7) обычно 3
 const fdbTopoMinNonInventoryMACsOnAPTrunk = 2
 const fdbTopoMinMACsQuietAPTrunk = 8
@@ -546,7 +546,8 @@ func fdbTopoTrunkRemoteOK(remoteCategory string) bool {
 	case DeviceCategoryAP, DeviceCategoryServer, DeviceCategoryOther:
 		return true
 	case DeviceCategorySwitch, DeviceCategoryRouter,
-		DeviceCategoryComputer, DeviceCategoryPhone, DeviceCategoryMFU, DeviceCategoryCamera:
+		DeviceCategoryComputer, DeviceCategoryPhone, DeviceCategoryMFU, DeviceCategoryCamera,
+		DeviceCategoryUPS:
 		return false
 	default:
 		return cat != "" // nas, storage, …

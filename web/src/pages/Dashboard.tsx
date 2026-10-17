@@ -5,24 +5,30 @@ import { apiGet } from "../api";
 import {
   type CategoryFilterState,
   type DeviceCategory,
+  isPrinterCategory,
   normalizeDeviceCategory,
   readDashboardCategoryFilter,
   writeDashboardCategoryFilter,
   dashboardDevicesTableTitle,
+  isUpsCategory,
 } from "../deviceCategories";
 import { useDeviceCategories } from "../hooks/useDeviceCategories";
 import { DeviceCategoryIcon } from "../components/DeviceCategoryIcon";
+import { TonerRemainCell } from "../components/TonerRemainCell";
+import { UpsStatusCell } from "../components/UpsStatusCell";
 import { useEventStream } from "../hooks/useEventStream";
 import EventsTable from "../components/EventsTable";
 import { formatDashboardLastEventTooltip } from "../eventFormat";
 import { usePersistedColumnWidths } from "../hooks/usePersistedColumnWidths";
 import { deviceLinkState } from "../navigation";
 import { deviceReachabilityLabel, isDeviceOnline } from "../deviceOnline";
+import { formatPageCount, isTonerCritical, minTonerPct } from "../printerMetrics";
+import { isUpsCritical } from "../upsMetrics";
 import type { Device, EventRow } from "../types";
 
 type DeviceFilter = "all" | "active" | "inactive";
 
-type SortKey = "name" | "host" | "location" | "status" | "cpu";
+type SortKey = "name" | "host" | "location" | "status" | "cpu" | "pages";
 type SortDir = "asc" | "desc";
 
 type SortState = { key: SortKey; dir: SortDir };
@@ -117,6 +123,28 @@ function renderLastEvent(ev?: EventRow): ReactNode {
           {portSuffix}
         </>,
       );
+    case "TONER_LOW": {
+      const pct = asNum((p as Record<string, unknown>).pct);
+      const label = String((p as Record<string, unknown>).toner_label ?? (p as Record<string, unknown>).toner_key ?? "").trim();
+      const pctTxt = pct == null ? "" : ` ${Math.round(pct)}%`;
+      return wrap(
+        <span style={{ color: "#f88", fontWeight: 700 }}>
+          TL{label ? ` ${label}` : ""}
+          {pctTxt}
+        </span>,
+      );
+    }
+    case "TONER_CRITICAL": {
+      const pct = asNum((p as Record<string, unknown>).pct);
+      const label = String((p as Record<string, unknown>).toner_label ?? (p as Record<string, unknown>).toner_key ?? "").trim();
+      const pctTxt = pct == null ? "" : ` ${Math.round(pct)}%`;
+      return wrap(
+        <span style={{ color: "#ff5252", fontWeight: 700 }}>
+          TC{label ? ` ${label}` : ""}
+          {pctTxt}
+        </span>,
+      );
+    }
     default:
       return wrap(ev.event_type);
   }
@@ -171,7 +199,8 @@ function loadSortState(): SortState {
       o.key === "host" ||
       o.key === "location" ||
       o.key === "status" ||
-      o.key === "cpu"
+      o.key === "cpu" ||
+      o.key === "pages"
     ) {
       if (o.dir === "asc" || o.dir === "desc") return { key: o.key, dir: o.dir };
     }
@@ -252,11 +281,29 @@ function sortDevices(list: Device[], key: SortKey, dir: SortDir, nowMs: number):
       // одинаковая длительность / оба онлайн — по имени
       return a.name.localeCompare(b.name, "ru", { numeric: true, sensitivity: "base" });
     }
+    if (key === "pages") {
+      const na = a.last_page_count;
+      const nb = b.last_page_count;
+      const aOk = na != null && Number.isFinite(na);
+      const bOk = nb != null && Number.isFinite(nb);
+      if (!aOk && !bOk) return 0;
+      if (!aOk) return 1;
+      if (!bOk) return -1;
+      return m * (Number(na) - Number(nb));
+    }
     const na = a.last_cpu_pct;
     const nb = b.last_cpu_pct;
     const aOk = na != null && Number.isFinite(na);
     const bOk = nb != null && Number.isFinite(nb);
-    if (!aOk && !bOk) return 0;
+    if (!aOk && !bOk) {
+      // запасной порядок для МФУ без CPU — по мин. тонеру
+      const ta = minTonerPct(a.last_toners);
+      const tb = minTonerPct(b.last_toners);
+      if (ta == null && tb == null) return 0;
+      if (ta == null) return 1;
+      if (tb == null) return -1;
+      return m * (ta - tb);
+    }
     if (!aOk) return 1;
     if (!bOk) return -1;
     return m * (na - nb);
@@ -290,7 +337,9 @@ function SortTh({
           ? "Сортировать по расположению"
           : sortKey === "status"
             ? "Сортировать по времени оффлайна (▲ короче / онлайн сверху, ▼ дольше оффлайн сверху)"
-            : "Сортировать по загрузке CPU";
+            : sortKey === "pages"
+              ? "Сортировать по числу страниц"
+              : "Сортировать по загрузке CPU";
   return (
     <th style={{ whiteSpace: "nowrap", position: "relative", userSelect: "none" }}>
       <button
@@ -318,10 +367,6 @@ function SortTh({
 
 export default function Dashboard() {
   const { categories } = useDeviceCategories();
-  const { colgroup: devicesColgroup, ResizeHandle: DevicesResizeHandle } = usePersistedColumnWidths(
-    "dashboard-devices",
-    [140, 130, 200, 76, 200, 96, 240],
-  );
   const [devices, setDevices] = useState<Device[] | null>(null);
   const [events, setEvents] = useState<EventRow[] | null>(null);
   const [lastEventByDevice, setLastEventByDevice] = useState<Map<number, EventRow>>(new Map());
@@ -343,6 +388,24 @@ export default function Dashboard() {
       return next;
     });
   }, [categories]);
+
+  const mfuOnlyFilter = useMemo(() => {
+    const enabled = categories.filter((c) => categoryFilter[c.id] !== false);
+    return enabled.length > 0 && enabled.every((c) => isPrinterCategory(c.id));
+  }, [categories, categoryFilter]);
+
+  const { colgroup: devicesColgroup, ResizeHandle: DevicesResizeHandle } = usePersistedColumnWidths(
+    mfuOnlyFilter ? "dashboard-devices-mfu-v1" : "dashboard-devices",
+    mfuOnlyFilter ? [140, 130, 200, 76, 200, 100, 170, 240] : [140, 130, 200, 76, 200, 96, 240],
+  );
+
+  useEffect(() => {
+    if (mfuOnlyFilter && sort.key === "cpu") {
+      setSort({ key: "pages", dir: "desc" });
+    } else if (!mfuOnlyFilter && sort.key === "pages") {
+      setSort({ key: "name", dir: "asc" });
+    }
+  }, [mfuOnlyFilter, sort.key]);
 
   const load = (signal?: AbortSignal) => {
     setErr(null);
@@ -685,23 +748,44 @@ export default function Dashboard() {
                 colIndex={4}
                 ResizeHandle={DevicesResizeHandle}
               />
-              <SortTh
-                label="CPU"
-                sortKey="cpu"
-                sort={sort}
-                onSort={onSortColumn}
-                colIndex={5}
-                ResizeHandle={DevicesResizeHandle}
-              />
+              {mfuOnlyFilter ? (
+                <>
+                  <SortTh
+                    label="Страниц всего"
+                    sortKey="pages"
+                    sort={sort}
+                    onSort={onSortColumn}
+                    colIndex={5}
+                    ResizeHandle={DevicesResizeHandle}
+                  />
+                  <th style={{ position: "relative", userSelect: "none" }}>
+                    Остаток тонера
+                    <DevicesResizeHandle colIndex={6} />
+                  </th>
+                </>
+              ) : (
+                <SortTh
+                  label="CPU"
+                  sortKey="cpu"
+                  sort={sort}
+                  onSort={onSortColumn}
+                  colIndex={5}
+                  ResizeHandle={DevicesResizeHandle}
+                />
+              )}
               <th style={{ position: "relative", userSelect: "none" }}>
                 Последнее событие
-                <DevicesResizeHandle colIndex={6} />
+                <DevicesResizeHandle colIndex={mfuOnlyFilter ? 7 : 6} />
               </th>
             </tr>
           </thead>
           <tbody>
-            {sortedDevices.map((d) => (
-              <tr key={d.id}>
+            {sortedDevices.map((d) => {
+              const tonerCrit = isTonerCritical(d.last_toners);
+              const upsCrit = isUpsCritical(d.last_ups);
+              const rowCrit = tonerCrit || upsCrit;
+              return (
+              <tr key={d.id} className={rowCrit ? "device-row-toner-critical" : undefined}>
                 <td>
                   <Link to={`/devices/${d.id}`} state={deviceLinkState({ path: "/", label: "Дашборд" })}>
                     {d.name}
@@ -732,21 +816,35 @@ export default function Dashboard() {
                     );
                   })()}
                 </td>
-                <td style={{ whiteSpace: "nowrap" }}>
-                  {d.last_cpu_pct == null ? (
-                    "N/A"
-                  ) : (
-                    <>
-                      {d.last_cpu_pct.toFixed(1)}%
-                      {d.cpu_profile ? ` (${d.cpu_profile})` : ""}
-                    </>
-                  )}
-                </td>
+                {mfuOnlyFilter ? (
+                  <>
+                    <td style={{ fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>
+                      {formatPageCount(d.last_page_count)}
+                    </td>
+                    <td style={{ fontSize: "0.85rem", lineHeight: 1.35 }}>
+                      <TonerRemainCell toners={d.last_toners} muted="#9aa3b5" />
+                    </td>
+                  </>
+                ) : (
+                  <td style={{ whiteSpace: "nowrap" }}>
+                    {isUpsCategory(d.device_category) || d.last_ups ? (
+                      <UpsStatusCell ups={d.last_ups} muted="#9aa3b5" />
+                    ) : d.last_cpu_pct == null ? (
+                      "N/A"
+                    ) : (
+                      <>
+                        {d.last_cpu_pct.toFixed(1)}%
+                        {d.cpu_profile ? ` (${d.cpu_profile})` : ""}
+                      </>
+                    )}
+                  </td>
+                )}
                 <td style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                   {renderLastEvent(lastEventByDevice.get(d.id))}
                 </td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       )}

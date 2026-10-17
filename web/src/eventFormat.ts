@@ -71,6 +71,32 @@ export function formatEventTypeLabel(eventType: string): string {
       return "Старт / рестарт NetLynx";
     case "PORT_ADMIN_DOWN_ACTION":
       return "Авто-shutdown порта";
+    case "TONER_LOW":
+      return "Тонер низкий (<=5%)";
+    case "TONER_CRITICAL":
+      return "Тонер критический (<=2%)";
+    case "UPS_ON_BATTERY":
+      return "ИБП: питание пропало (работа от батареи)";
+    case "UPS_MAINS_OK":
+      return "ИБП: питание вернулось";
+    case "UPS_BATTERY_LOW":
+      return "ИБП: низкий заряд батареи";
+    case "UPS_BATTERY_DEPLETED":
+      return "ИБП: батарея разряжена";
+    case "UPS_BATTERY_OK":
+      return "ИБП: батарея в норме";
+    case "UPS_TEMP_HIGH":
+      return "ИБП: нагрев батареи (>=45 °C)";
+    case "UPS_TEMP_CRITICAL":
+      return "ИБП: перегрев батареи (>=55 °C)";
+    case "UPS_ALARM":
+      return "ИБП: активна авария";
+    case "UPS_ALARM_CLEAR":
+      return "ИБП: авария снята";
+    case "UPS_LOAD_HIGH":
+      return "ИБП: высокая нагрузка (>=90%)";
+    case "UPS_LOAD_OK":
+      return "ИБП: нагрузка в норме";
     default:
       return eventType;
   }
@@ -95,6 +121,32 @@ export function formatDashboardEventAbbrev(eventType: string): string | null {
       return "L2L";
     case "UNKNOWN_MAC_ON_ACCESS_PORT":
       return "UMAC!";
+    case "TONER_LOW":
+      return "TL";
+    case "TONER_CRITICAL":
+      return "TC";
+    case "UPS_ON_BATTERY":
+      return "UPS BAT!";
+    case "UPS_MAINS_OK":
+      return "UPS OK";
+    case "UPS_BATTERY_LOW":
+      return "UPS BL";
+    case "UPS_BATTERY_DEPLETED":
+      return "UPS BD!";
+    case "UPS_BATTERY_OK":
+      return "UPS BOK";
+    case "UPS_TEMP_HIGH":
+      return "UPS TH";
+    case "UPS_TEMP_CRITICAL":
+      return "UPS TC!";
+    case "UPS_ALARM":
+      return "UPS AL";
+    case "UPS_ALARM_CLEAR":
+      return "UPS AC";
+    case "UPS_LOAD_HIGH":
+      return "UPS LH";
+    case "UPS_LOAD_OK":
+      return "UPS LO";
     default:
       return null;
   }
@@ -413,6 +465,44 @@ export function formatEventSummary(ev: Pick<EventRow, "event_type" | "payload" |
       if (n != null) return `Не снято конфигов: ${n}`;
       return "Часть конфигов свитчей не снята по SSH";
     }
+    case "TONER_LOW":
+    case "TONER_CRITICAL": {
+      const label = str(p.toner_label) || str(p.toner_key) || "тонер";
+      const pct = asNum(p.pct);
+      const th = asNum(p.threshold_pct);
+      const pctTxt = pct == null ? "?" : `${Math.round(pct)}%`;
+      const thTxt = th == null ? "?" : `${Math.round(th)}%`;
+      const kind = ev.event_type === "TONER_CRITICAL" ? "критический" : "низкий";
+      const desc = str(p.description);
+      if (desc) return `${kind} остаток «${label}» ${pctTxt} (порог ${thTxt}), ${desc}`;
+      return `${kind} остаток «${label}» ${pctTxt} (порог ${thTxt})`;
+    }
+    case "UPS_ON_BATTERY":
+    case "UPS_MAINS_OK":
+    case "UPS_BATTERY_LOW":
+    case "UPS_BATTERY_DEPLETED":
+    case "UPS_BATTERY_OK":
+    case "UPS_TEMP_HIGH":
+    case "UPS_TEMP_CRITICAL":
+    case "UPS_ALARM":
+    case "UPS_ALARM_CLEAR":
+    case "UPS_LOAD_HIGH":
+    case "UPS_LOAD_OK": {
+      const parts: string[] = [];
+      const model = str(p.ups_model);
+      if (model) parts.push(model);
+      const charge = asNum(p.battery_charge_pct);
+      if (charge != null) parts.push(`заряд ${Math.round(charge)}%`);
+      const runtime = asNum(p.runtime_min);
+      if (runtime != null) parts.push(`${Math.round(runtime)} мин`);
+      const temp = asNum(p.battery_temp_c);
+      if (temp != null) parts.push(`АКБ ${Math.round(temp)} °C`);
+      const load = asNum(p.output_load_pct);
+      if (load != null) parts.push(`нагрузка ${Math.round(load)}%`);
+      const alarms = asNum(p.alarms_present);
+      if (alarms != null && alarms > 0) parts.push(`аварий ${Math.round(alarms)}`);
+      return parts.length ? parts.join(" · ") : "ИБП";
+    }
     case "SERVICE_STARTED": {
       const ver = str(p.version) || "?";
       const reason = str(p.reason);
@@ -502,6 +592,7 @@ function formatBulkNotesHuman(notes: unknown): string[] {
     else if (n.startsWith("poe=")) out.push(`PoE ${n.slice(4)}`);
     else if (n.startsWith("vlan=no_vlan")) out.push("VLAN: No VLAN");
     else if (n.startsWith("vlan=set_access/")) out.push(`VLAN access ${n.slice("vlan=set_access/".length)}`);
+    else if (n.startsWith("vlan=set_native/")) out.push(`VLAN trunk native ${n.slice("vlan=set_native/".length)}`);
     else if (n.startsWith("vlan=")) out.push(`VLAN ${n.slice(5)}`);
     else if (n.startsWith("poe_reset=")) out.push(`PoE reset ${n.slice("poe_reset=".length)}`);
     else out.push(n);
@@ -525,6 +616,8 @@ function formatConfigEditDetail(p: Record<string, unknown>): string {
       if (applied.poe_mode != null) actions.push(`PoE ${str(applied.poe_mode)}`);
       if (applied.vlan_op === "no_vlan") actions.push("VLAN: No VLAN");
       else if (applied.vlan_op === "set_access" && applied.vlan_id != null) actions.push(`VLAN access ${applied.vlan_id}`);
+      else if (applied.vlan_op === "set_native" && applied.vlan_id != null)
+        actions.push(`VLAN trunk native ${applied.vlan_id}`);
       if (applied.poe_reset_seconds != null) actions.push(`PoE reset ${applied.poe_reset_seconds}s`);
     }
     const head = idxs.length ? `${idxs.length} порт(ов): if ${idxs.join(",")}` : "несколько портов";

@@ -28,7 +28,8 @@ import { DeviceCategoryIcon } from "../components/DeviceCategoryIcon";
 import { useDeviceCategories } from "../hooks/useDeviceCategories";
 import { isDeviceOnline } from "../deviceOnline";
 import { formatMacDisplay, macVendorLabel } from "../macUtil";
-import { formatPageCount, formatTonerPct, tonerLetter, tonerSwatch } from "../printerMetrics";
+import { formatPageCount, isTonerCritical } from "../printerMetrics";
+import { TonerRemainCell } from "../components/TonerRemainCell";
 import { alertDeviceCreateError } from "../apiError";
 import { formatSysUptime, sysUptimeCsNow } from "../uptimeFormat";
 
@@ -116,29 +117,6 @@ function sortIndicator(active: boolean, dir: SortDir): string {
   return dir === "asc" ? " ▲" : " ▼";
 }
 
-function TonerRemainCell({
-  toners,
-  muted,
-}: {
-  toners?: Device["last_toners"];
-  muted: string;
-}) {
-  if (!toners?.length) return <span style={{ color: muted }}>—</span>;
-  return (
-    <span style={{ display: "inline-flex", flexWrap: "wrap", gap: "0.35rem 0.65rem" }}>
-      {toners.map((t, i) => {
-        const low = t.pct != null && t.pct < 10;
-        return (
-          <span key={`${t.key}-${i}`} title={t.description || t.label} style={{ color: low ? "#f88" : undefined }}>
-            <span style={{ color: tonerSwatch(t.key), fontWeight: 700 }}>{tonerLetter(t.key)}</span>{" "}
-            {formatTonerPct(t)}
-          </span>
-        );
-      })}
-    </span>
-  );
-}
-
 export default function Devices() {
   const { categories } = useDeviceCategories();
   const [list, setList] = useState<Device[]>([]);
@@ -195,13 +173,23 @@ export default function Devices() {
     return enabled.length > 0 && enabled.every((c) => isPrinterCategory(c.id));
   }, [categories, categoryFilter]);
 
+  /** Только «Роутеры» в фильтре типов — колонка CPU из SNMP. */
+  const routerOnlyFilter = useMemo(() => {
+    const enabled = categories.filter((c) => categoryFilter[c.id] !== false);
+    return enabled.length > 0 && enabled.every((c) => normalizeDeviceCategory(c.id) === "router");
+  }, [categories, categoryFilter]);
+
   const colDefaults = mfuOnlyFilter
     ? [52, 140, 130, 110, 220, 100, 170, 72, 80, 150, 120, 100, 88]
-    : [52, 140, 130, 110, 220, 72, 80, 150, 120, 100, 88];
+    : routerOnlyFilter
+      ? [52, 140, 130, 110, 220, 72, 80, 150, 88, 120, 100, 88]
+      : [52, 140, 130, 110, 220, 72, 80, 150, 120, 100, 88];
   const { colgroup, ResizeHandle } = usePersistedColumnWidths(
-    mfuOnlyFilter ? "devices-list-mfu-v2" : "devices-list-v2",
+    mfuOnlyFilter ? "devices-list-mfu-v2" : routerOnlyFilter ? "devices-list-router-v1" : "devices-list-v2",
     colDefaults,
   );
+  /** Индекс колонки после «Расположение» (0…): SNMP=0, опрос=1, SNMP/ping=2, затем опц. CPU, uptime… */
+  const listCol = (afterLocation: number) => 5 + (mfuOnlyFilter ? 2 : 0) + afterLocation;
 
   const toggleCategoryFilter = (id: DeviceCategory) => {
     setCategoryFilter((prev) => {
@@ -742,29 +730,35 @@ export default function Devices() {
             )}
             <th style={{ userSelect: "none" }}>
               SNMP
-              <ResizeHandle colIndex={mfuOnlyFilter ? 7 : 5} />
+              <ResizeHandle colIndex={listCol(0)} />
             </th>
             <th style={{ userSelect: "none" }}>
               Опрос (с)
-              <ResizeHandle colIndex={mfuOnlyFilter ? 8 : 6} />
+              <ResizeHandle colIndex={listCol(1)} />
             </th>
             <th style={{ userSelect: "none" }}>
               SNMP / ping
-              <ResizeHandle colIndex={mfuOnlyFilter ? 9 : 7} />
+              <ResizeHandle colIndex={listCol(2)} />
             </th>
+            {routerOnlyFilter && (
+              <th style={{ userSelect: "none" }} title="Загрузка CPU по SNMP (last_cpu_pct)">
+                CPU
+                <ResizeHandle colIndex={listCol(3)} />
+              </th>
+            )}
             <th style={{ userSelect: "none" }}>
               <button type="button" className="devices-sort-th" onClick={() => toggleSort("uptime")}>
                 Uptime{sortIndicator(sortCol === "uptime", sortDir)}
               </button>
-              <ResizeHandle colIndex={mfuOnlyFilter ? 10 : 8} />
+              <ResizeHandle colIndex={listCol(routerOnlyFilter ? 4 : 3)} />
             </th>
             <th style={{ userSelect: "none" }}>
               Проверка SNMP
-              <ResizeHandle colIndex={mfuOnlyFilter ? 11 : 9} />
+              <ResizeHandle colIndex={listCol(routerOnlyFilter ? 5 : 4)} />
             </th>
             <th style={{ userSelect: "none" }}>
               Удалить
-              <ResizeHandle colIndex={mfuOnlyFilter ? 12 : 10} />
+              <ResizeHandle colIndex={listCol(routerOnlyFilter ? 6 : 5)} />
             </th>
           </tr>
         </thead>
@@ -772,13 +766,18 @@ export default function Devices() {
           {sortedList.map((d) => {
             // Как на дашборде: ПК/сервер онлайн по ping; свитч/роутер — только SNMP.
             const offline = !isDeviceOnline(d);
-            const dim: CSSProperties = offline
+            const tonerCrit = isTonerCritical(d.last_toners);
+            const dim: CSSProperties = offline && !tonerCrit
               ? { background: "#141820", color: "#5f6778" }
               : {};
-            const linkColor = offline ? { color: "#6d7689" } : undefined;
-            const muted = offline ? "#4d5566" : "#9aa3b5";
+            const linkColor = offline && !tonerCrit ? { color: "#6d7689" } : undefined;
+            const muted = offline && !tonerCrit ? "#4d5566" : "#9aa3b5";
             return (
-              <tr key={d.id} style={offline ? { background: "#141820" } : undefined}>
+              <tr
+                key={d.id}
+                className={tonerCrit ? "device-row-toner-critical" : undefined}
+                style={offline && !tonerCrit ? { background: "#141820" } : undefined}
+              >
                 <td style={dim}>{d.id}</td>
                 <td style={dim}>
                   <Link
@@ -828,6 +827,14 @@ export default function Devices() {
                         : "нет"}
                   </div>
                 </td>
+                {routerOnlyFilter && (
+                  <td
+                    style={{ fontSize: "0.9rem", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap", ...dim }}
+                    title={d.cpu_profile ? `Профиль: ${d.cpu_profile}` : undefined}
+                  >
+                    {d.last_cpu_pct == null ? "—" : `${d.last_cpu_pct.toFixed(1)}%`}
+                  </td>
+                )}
                 <td style={{ fontSize: "0.9rem", fontVariantNumeric: "tabular-nums", ...dim }}>
                   {d.last_sys_uptime_cs != null && d.last_poll_at
                     ? formatSysUptime(d.last_sys_uptime_cs, d.last_poll_at)

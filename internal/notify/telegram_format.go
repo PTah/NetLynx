@@ -84,7 +84,15 @@ func telegramEventLine(eventType string, payload map[string]interface{}, at time
 			line += fmt.Sprintf(" · %d", int(n))
 		}
 		return line
+	case "TONER_LOW":
+		return "<b><u>TONER LOW</u></b> &lt;=" + telegramTonerThreshold(payload) + "% · " + telegramTonerDetail(payload)
+	case "TONER_CRITICAL":
+		return "<b><u>TONER CRITICAL</u></b> &lt;=" + telegramTonerThreshold(payload) + "% · " + telegramTonerDetail(payload)
 	default:
+		if isUPSEvent(et) {
+			return "<b><u>" + escapeTelegramHTML(upsEventTitle(et)) + "</u></b> · " +
+				escapeTelegramHTML(upsPayloadDetail(payload))
+		}
 		line := escapeTelegramHTML(strings.TrimSpace(eventType))
 		if mac, ok := payload["mac"].(string); ok && strings.TrimSpace(mac) != "" {
 			line += " · " + escapeTelegramHTML(strings.TrimSpace(mac))
@@ -118,4 +126,50 @@ func formatTelegramFromCard(card EmailDeviceCard, deviceHost string, eventType s
 		b.WriteString("(" + escapeTelegramHTML("Закреплено "+att) + ")")
 	}
 	return b.String()
+}
+
+func telegramTonerThreshold(payload map[string]interface{}) string {
+	if payload == nil {
+		return "?"
+	}
+	switch v := payload["threshold_pct"].(type) {
+	case float32:
+		return fmt.Sprintf("%g", v)
+	case float64:
+		return fmt.Sprintf("%g", v)
+	case int:
+		return fmt.Sprintf("%d", v)
+	case int64:
+		return fmt.Sprintf("%d", v)
+	default:
+		return "?"
+	}
+}
+
+func telegramTonerDetail(payload map[string]interface{}) string {
+	if payload == nil {
+		return "?"
+	}
+	label, _ := payload["toner_label"].(string)
+	label = strings.TrimSpace(label)
+	if label == "" {
+		if k, ok := payload["toner_key"].(string); ok {
+			label = strings.TrimSpace(k)
+		}
+	}
+	pct := "?"
+	switch v := payload["pct"].(type) {
+	case float32:
+		pct = fmt.Sprintf("%.0f%%", v)
+	case float64:
+		pct = fmt.Sprintf("%.0f%%", v)
+	case int:
+		pct = fmt.Sprintf("%d%%", v)
+	case int64:
+		pct = fmt.Sprintf("%d%%", v)
+	}
+	if label == "" {
+		return escapeTelegramHTML(pct)
+	}
+	return escapeTelegramHTML(label) + " " + escapeTelegramHTML(pct)
 }

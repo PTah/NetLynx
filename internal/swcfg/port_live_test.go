@@ -1,6 +1,9 @@
 package swcfg
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestParseInterfaceConfigSnippet(t *testing.T) {
 	out := `
@@ -84,6 +87,39 @@ exit
 	s5b := ParseInterfaceConfigSnippet(out5, "0/1")
 	if !s5b.AdminUp {
 		t.Fatal("wantIface 0/1 must be up")
+	}
+}
+
+func TestParseInterfaceConfigSnippet_trunkNative(t *testing.T) {
+	out := `
+interface 0/15
+description 'port15: Razumovsky-PC'
+switchport mode trunk
+switchport trunk native vlan 165
+switchport trunk allowed vlan 34,165
+exit
+`
+	s := ParseInterfaceConfigSnippet(out, "0/15")
+	if s.PortMode != "trunk" {
+		t.Fatalf("mode: %q", s.PortMode)
+	}
+	if s.NativeVLAN == nil || *s.NativeVLAN != 165 {
+		t.Fatalf("native: %+v", s.NativeVLAN)
+	}
+	if s.TrunkAllowedMode != TrunkAllowSet || FormatVLANIDList(s.TrunkAllowed) != "34,165" {
+		t.Fatalf("allowed: mode=%q list=%v", s.TrunkAllowedMode, s.TrunkAllowed)
+	}
+}
+
+func TestVLANCLILines_trunkAllowSet(t *testing.T) {
+	ch := PortVLANChange{Op: VLANOpTrunkAllow, AllowedMode: TrunkAllowSet, AllowedList: "34,165", VLANID: 165}
+	if err := ch.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	got := strings.Join(VLANCLILines(vlanStyleCisco, ch), "\n")
+	want := "switchport mode trunk\nswitchport trunk native vlan 165\nswitchport trunk allowed vlan 34,165"
+	if got != want {
+		t.Fatalf("got:\n%s", got)
 	}
 }
 

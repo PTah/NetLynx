@@ -235,6 +235,30 @@ func TestVLANCLILines_noVLAN(t *testing.T) {
 	}
 }
 
+func TestVLANCLILines_setNative(t *testing.T) {
+	ch := PortVLANChange{Op: VLANOpSetNative, VLANID: 165}
+	if err := ch.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	cisco := strings.Join(VLANCLILines(vlanStyleCisco, ch), "\n")
+	want := "switchport mode trunk\nswitchport trunk native vlan 165"
+	if cisco != want {
+		t.Fatalf("cisco set_native:\n%s", cisco)
+	}
+	ieee := strings.Join(VLANCLILines(vlanStyleIEEE, ch), "\n")
+	if !strings.Contains(ieee, "vlan pvid 165") || !strings.Contains(ieee, "no vlan tagging 165") {
+		t.Fatalf("ieee set_native: %s", ieee)
+	}
+	trunk := VLANCLILines(vlanStyleCisco, PortVLANChange{
+		Op: VLANOpTrunkAllow, AllowedMode: TrunkAllowAdd, AllowedList: "34,165", VLANID: 165,
+	})
+	joined := strings.Join(trunk, "\n")
+	if !strings.Contains(joined, "switchport trunk native vlan 165") ||
+		!strings.Contains(joined, "switchport trunk allowed vlan add 34,165") {
+		t.Fatalf("trunk_allow+native: %s", joined)
+	}
+}
+
 func TestVLANCLILines_trunkAllow(t *testing.T) {
 	add := VLANCLILines(vlanStyleCisco, PortVLANChange{
 		Op: VLANOpTrunkAllow, AllowedMode: TrunkAllowAdd, AllowedList: "10;20-22",

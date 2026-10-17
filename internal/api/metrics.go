@@ -66,9 +66,20 @@ func (s *Server) handleDeviceMetrics(w http.ResponseWriter, r *http.Request) {
 	if samples == nil {
 		samples = []store.MetricSample{}
 	}
+	maxPoints := 1500
+	if v := r.URL.Query().Get("max_points"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 50 && n <= 10000 {
+			maxPoints = n
+		}
+	}
+	rawCount := len(samples)
+	samples = store.DownsampleMetricSamples(samples, maxPoints)
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"device_id":   id,
 		"metric_type": metricType,
+		"from":        from,
+		"to":          to,
+		"raw_count":   rawCount,
 		"samples":     samples,
 	})
 }

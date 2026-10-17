@@ -20,7 +20,7 @@ SNMP-мониторинг коммутаторов, веб-UI.
 | **Linux, уровень Ctrl-C/Ctrl-V** *(админ с Habr)* | [Чеклист](docs/Runbook-Linux.md#краткий-чеклист-копируйте-блоками) — копируйте **весь блок** (пакеты → docker → clone → `bash docs/deploy.sh`). [deploy.sh](docs/deploy.sh) **ставит всё сам** (сборка, Postgres, systemd, health). [Шаг 5](docs/Runbook-Linux.md#шаг-5-первый-вход-в-браузере) — войти в UI. Runbook — если пропустили перelogin после `usermod docker` *(спойлер: `permission denied` — это не баг NetLynx)*. |
 | **Windows Server** | [docs/Windows-Server-Setup.md](docs/Windows-Server-Setup.md) |
 
-После установки: SNMP community — [docs/SNMP-Community.md](docs/SNMP-Community.md); автообнаружение (нужны **SNMP + LLDP** на свитчах) — [docs/Autodiscover.md](docs/Autodiscover.md); опросы и кэш топологии (поллер, «ночной» blast-rebuild) — [docs/Polling-and-Topology-Cache.md](docs/Polling-and-Topology-Cache.md); вендоры — [docs/Vendors.md](docs/Vendors.md); МФУ/принтеры (страницы, тонер) — [docs/Printer-MIB.md](docs/Printer-MIB.md).
+После установки: SNMP community — [docs/SNMP-Community.md](docs/SNMP-Community.md); автообнаружение (нужны **SNMP + LLDP** на свитчах) — [docs/Autodiscover.md](docs/Autodiscover.md); опросы и кэш топологии (поллер, «ночной» blast-rebuild) — [docs/Polling-and-Topology-Cache.md](docs/Polling-and-Topology-Cache.md); вендоры — [docs/Vendors.md](docs/Vendors.md); МФУ/принтеры (страницы, тонер) — [docs/Printer-MIB.md](docs/Printer-MIB.md); ИБП по SNMP — [docs/UPS.md](docs/UPS.md).
 
 Эталонный репозиторий git: [https://github.com/PTah/NetLynx](https://github.com/PTah/NetLynx) (ветка `main`).
 

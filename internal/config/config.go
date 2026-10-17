@@ -57,8 +57,9 @@ type Config struct {
 	// Если задано, принимаются только traps с этим community (для v1/v2c).
 	SNMPTrapCommunity string
 
-	MetricsEnabled       bool
-	MetricsRetentionDays int
+	MetricsEnabled              bool
+	MetricsRetentionDays        int // util/cpu/rate и прочее
+	MetricsPrinterRetentionDays int // page_count + toner_* (дольше)
 
 	// MAC investigation / flapping.
 	// SyslogListenAddr — UDP syslog (пусто = выкл). Пример: ":9514".
@@ -269,6 +270,15 @@ func Load() (Config, error) {
 			return Config{}, fmt.Errorf("METRICS_RETENTION_DAYS: invalid value %q", v)
 		}
 		c.MetricsRetentionDays = n
+	}
+	// История тонера/страниц МФУ — год по умолчанию (короткий METRICS_RETENTION_DAYS их не режет).
+	c.MetricsPrinterRetentionDays = 365
+	if v := os.Getenv("METRICS_PRINTER_RETENTION_DAYS"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 || n > 3650 {
+			return Config{}, fmt.Errorf("METRICS_PRINTER_RETENTION_DAYS: invalid value %q (1–3650)", v)
+		}
+		c.MetricsPrinterRetentionDays = n
 	}
 
 	c.SyslogListenAddr = strings.TrimSpace(os.Getenv("NETLYNX_SYSLOG_LISTEN"))

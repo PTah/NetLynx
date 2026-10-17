@@ -27,6 +27,8 @@ const EVENT_TYPE_OPTIONS: { value: string; label: string }[] = [
   { value: "ACCESS_PORT_LONG_IDLE_DEVICE", label: formatEventTypeLabel("ACCESS_PORT_LONG_IDLE_DEVICE") },
   { value: "MANUAL_LINK_SUPERSEDED", label: formatEventTypeLabel("MANUAL_LINK_SUPERSEDED") },
   { value: "CONFIG_EDIT", label: formatEventTypeLabel("CONFIG_EDIT") },
+  { value: "TONER_LOW", label: formatEventTypeLabel("TONER_LOW") },
+  { value: "TONER_CRITICAL", label: formatEventTypeLabel("TONER_CRITICAL") },
   { value: "SERVICE_STARTED", label: formatEventTypeLabel("SERVICE_STARTED") },
 ];
 const SEVERITIES = ["", "info", "warning", "error"];

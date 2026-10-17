@@ -103,15 +103,20 @@ func (s *Server) handleGetDeviceVLANs(w http.ResponseWriter, r *http.Request) {
 // vlanIDsForPortChange — VLAN, которые должны уже быть в vlan database перед apply.
 func vlanIDsForPortChange(ch swcfg.PortVLANChange) []int {
 	switch ch.Op {
-	case swcfg.VLANOpSetAccess, swcfg.VLANOpAddTagged:
+	case swcfg.VLANOpSetAccess, swcfg.VLANOpAddTagged, swcfg.VLANOpSetNative:
 		if ch.VLANID > 0 {
 			return []int{ch.VLANID}
 		}
 	case swcfg.VLANOpTrunkAllow:
-		mode := strings.ToLower(strings.TrimSpace(ch.AllowedMode))
-		if mode == swcfg.TrunkAllowAdd || mode == swcfg.TrunkAllowExcept {
-			return swcfg.ParseVLANIDList(swcfg.NormalizeVLANList(ch.AllowedList))
+		var ids []int
+		if ch.VLANID > 0 {
+			ids = append(ids, ch.VLANID)
 		}
+		mode := strings.ToLower(strings.TrimSpace(ch.AllowedMode))
+		if mode == swcfg.TrunkAllowAdd || mode == swcfg.TrunkAllowExcept || mode == swcfg.TrunkAllowSet {
+			ids = append(ids, swcfg.ParseVLANIDList(swcfg.NormalizeVLANList(ch.AllowedList))...)
+		}
+		return ids
 	}
 	return nil
 }

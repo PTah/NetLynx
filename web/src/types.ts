@@ -47,6 +47,9 @@
   /** Printer-MIB prtMarkerLifeCount */
   last_page_count?: number | null;
   last_toners?: PrinterToner[] | null;
+  /** Снимок ИБП (UPS-MIB, RFC 1628) */
+  last_ups?: UPSSnapshot | null;
+  last_ups_at?: string | null;
   fdb_monitoring_status?: string | null;
   util_high_pct?: number | null;
   util_ok_pct?: number | null;
@@ -64,6 +67,34 @@ export type PrinterToner = {
   unknown?: boolean;
   remaining_ok?: boolean;
   metric_type?: string;
+};
+
+/** Снимок UPS-MIB (RFC 1628) — см. docs/UPS.md. */
+export type UPSSnapshot = {
+  manufacturer?: string;
+  model?: string;
+  ident_name?: string;
+  agent_software?: string;
+  /** 1 unknown, 2 normal, 3 low, 4 depleted */
+  battery_status?: number;
+  seconds_on_battery?: number | null;
+  runtime_min?: number | null;
+  battery_charge_pct?: number | null;
+  battery_voltage_v?: number | null;
+  battery_temp_c?: number | null;
+  on_battery?: boolean;
+  input_voltage_v?: number | null;
+  input_frequency_hz?: number | null;
+  /** 1 other, 2 none, 3 normal, 4 bypass, 5 battery, 6 booster, 7 reducer */
+  output_source?: number;
+  output_voltage_v?: number | null;
+  output_current_a?: number | null;
+  output_power_w?: number | null;
+  output_load_pct?: number | null;
+  alarms_present?: number | null;
+  config_input_voltage_v?: number | null;
+  low_battery_runtime_min?: number | null;
+  polled_at?: string;
 };
 
 export type EventRow = {

@@ -27,6 +27,19 @@ export const NOTIFY_EVENT_TYPE_OPTIONS: { value: string; label: string }[] = [
   { value: "SNMP_TRAP", label: formatEventTypeLabel("SNMP_TRAP") },
   { value: "MANUAL_LINK_SUPERSEDED", label: formatEventTypeLabel("MANUAL_LINK_SUPERSEDED") },
   { value: "CONFIG_EDIT", label: formatEventTypeLabel("CONFIG_EDIT") },
+  { value: "TONER_LOW", label: formatEventTypeLabel("TONER_LOW") },
+  { value: "TONER_CRITICAL", label: formatEventTypeLabel("TONER_CRITICAL") },
+  { value: "UPS_ON_BATTERY", label: formatEventTypeLabel("UPS_ON_BATTERY") },
+  { value: "UPS_MAINS_OK", label: formatEventTypeLabel("UPS_MAINS_OK") },
+  { value: "UPS_BATTERY_LOW", label: formatEventTypeLabel("UPS_BATTERY_LOW") },
+  { value: "UPS_BATTERY_DEPLETED", label: formatEventTypeLabel("UPS_BATTERY_DEPLETED") },
+  { value: "UPS_BATTERY_OK", label: formatEventTypeLabel("UPS_BATTERY_OK") },
+  { value: "UPS_TEMP_HIGH", label: formatEventTypeLabel("UPS_TEMP_HIGH") },
+  { value: "UPS_TEMP_CRITICAL", label: formatEventTypeLabel("UPS_TEMP_CRITICAL") },
+  { value: "UPS_ALARM", label: formatEventTypeLabel("UPS_ALARM") },
+  { value: "UPS_ALARM_CLEAR", label: formatEventTypeLabel("UPS_ALARM_CLEAR") },
+  { value: "UPS_LOAD_HIGH", label: formatEventTypeLabel("UPS_LOAD_HIGH") },
+  { value: "UPS_LOAD_OK", label: formatEventTypeLabel("UPS_LOAD_OK") },
 ];
 
 export function parseEventTypesCSV(raw: string): string[] {

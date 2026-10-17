@@ -17,6 +17,7 @@ const ICON_FILE_BY_CATEGORY: Record<string, string> = {
   computer: "computer",
   phone: "phone",
   mfu: "mfu",
+  ups: "industrial",
   camera: "camera",
   other: "other",
   tv: "tv",

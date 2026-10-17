@@ -225,6 +225,9 @@ func (s *Server) pushPortAdmin(ctx context.Context, deviceID int64, ifIndex, sta
 	up := status == 1
 	snmpErr := s.snmpSetAdmin(pd, ifIndex, status)
 	if snmpErr == nil {
+		// SNMP SET не трогает SSH-кэш сам — сбрасываем, иначе /settings отдаёт
+		// старый snapshot (в т.ч. PoE Mode) после вкл/выкл порта.
+		s.invalidateDeviceRunningConfig(deviceID)
 		return "snmp", nil
 	}
 	sshErr := s.sshPortChange(ctx, deviceID, ifIndex, nil, &up)
@@ -682,8 +685,31 @@ func applyPortLiveSettings(resp map[string]interface{}, live swcfg.PortLiveSetti
 	if live.AccessVLAN != nil {
 		resp["access_vlan"] = *live.AccessVLAN
 	}
+	if live.NativeVLAN != nil {
+		resp["native_vlan"] = *live.NativeVLAN
+	} else if strings.EqualFold(live.PortMode, "trunk") && live.AccessVLAN != nil {
+		// fallback: некоторые CLI пишут только pvid
+		resp["native_vlan"] = *live.AccessVLAN
+	}
 	if live.PortMode != "" {
 		resp["port_mode"] = live.PortMode
+	}
+	if strings.EqualFold(live.PortMode, "trunk") || live.TrunkAllowedMode != "" || live.TrunkAllowedAll || len(live.TrunkAllowed) > 0 {
+		mode := live.TrunkAllowedMode
+		if mode == "" {
+			if live.TrunkAllowedAll {
+				mode = "all"
+			} else if len(live.TrunkAllowed) > 0 {
+				mode = "set"
+			}
+		}
+		resp["trunk_allowed_mode"] = mode
+		resp["trunk_allowed_all"] = live.TrunkAllowedAll || mode == "all"
+		if len(live.TrunkAllowed) > 0 {
+			resp["trunk_allowed_vlans"] = swcfg.FormatVLANIDList(live.TrunkAllowed)
+		} else {
+			resp["trunk_allowed_vlans"] = ""
+		}
 	}
 	resp["via"] = via
 	resp["live"] = true

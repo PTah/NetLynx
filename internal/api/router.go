@@ -30,7 +30,10 @@ type Server struct {
 	backupRun             *backup.Runner
 	wifiFilterInvalidator wifiFilterCacheInvalidator
 	runningConfigCache    sync.Map // int64 → deviceRunningConfigEntry
-	topoDirty             func(reason string)
+	// runningConfigDirtyAt — device_id → time.Time: после CLI/SNMP записи на порт
+	// memory-кэш сброшен; snapshot БД до следующего show run считать устаревшим.
+	runningConfigDirtyAt sync.Map
+	topoDirty            func(reason string)
 	sshReporter           *configssh.Reporter
 	// portClientsRefreshBusy — device_id, уже идёт ручной FDB/ARP refresh.
 	portClientsRefreshMu   sync.Mutex

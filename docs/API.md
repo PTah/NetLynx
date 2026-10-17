@@ -61,7 +61,7 @@ http://<IP_или_имя_сервера>:8080
 | GET | `/api/v1/devices/{id}/interfaces/{ifIndex}/settings` | ignore, thresholds |
 | GET | `/api/v1/devices/{id}/interfaces/{ifIndex}/shut-impact` | превью риска shutdown: clients, LLDP/CDP, **downstream** (multi-hop blast-cache), cut_paths |
 | GET | `/api/v1/devices/{id}/events` | события узла |
-| GET | `/api/v1/devices/{id}/metrics` | история метрик (`metric_type`: `cpu_pct`, `page_count`, `toner_black_pct` / `toner_cyan_pct` / `toner_magenta_pct` / `toner_yellow_pct`, `util_*`) |
+| GET | `/api/v1/devices/{id}/metrics` | история метрик (`metric_type`: `cpu_pct`, `page_count`, `toner_*_pct`, `ups_*` — см. [UPS.md](UPS.md), `util_*`; `from`/`to` RFC3339; `max_points` downsample). Тонер/страницы/ИБП хранятся дольше util (`METRICS_PRINTER_RETENTION_DAYS`) |
 | GET | `/api/v1/devices/{id}/traffic-series` | трафик по портам |
 | GET | `/api/v1/devices/{id}/config/snapshots` | снимки show run |
 | GET | `/api/v1/devices/{id}/config/snapshots/{snapId}` | один снимок |

@@ -34,6 +34,8 @@
 
 ## Добавленные приоритеты (текущий фокус)
 
+- [x] ИБП (UPS-MIB): опрос ИБП по SNMP, снимок статуса, история `ups_*`, события `UPS_ON_BATTERY` / `UPS_MAINS_OK` / низкий заряд / аварии / перегрев / перегрузка — [UPS.md](UPS.md).
+
 - [x] Шаг 11 (CPU профили): закрыт для Ubiquiti, MikroTik, SNR + вывод в дашборде/карточке узла.
 - [x] Шаг 12 (SNMP v3 hardening): расширена валидация v3 и закрыты базовые edge-cases.
 - [x] Шаг 15 (уведомления до production): email + подписки по типам + retry/backoff реализованы.
@@ -176,7 +178,7 @@
 - [ ] Incident actions 2.0 дальше: per-device rules, webhook action, admin_up
 - [ ] Last-Event-ID SSE resume; Basic legacy removal
 - [ ] Topology multi-neighbor bundling (остаток)
-- [ ] BOM check в CI (локально: `scripts/check-bom.sh`, `.githooks`)
+- [ ] BOM check в CI (локально: `scripts/check-bom.sh`)
 
 ### Роль порта / VLAN (после 0.37.33)
 

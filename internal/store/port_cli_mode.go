@@ -178,6 +178,9 @@ func (s *Store) ApplyConfigPortRoles(ctx context.Context, deviceID int64, config
 				if access == nil {
 					access = p.PVID
 				}
+				if access == nil {
+					access = p.TrunkNative // на trunk — native как «основной» VLAN порта
+				}
 				roleUpdates = append(roleUpdates, CLIPortModeUpdate{
 					IfIndex:     ifIndex,
 					CLIPortMode: mode,
@@ -233,14 +236,37 @@ func (s *Store) UpdateInterfaceVLANAfterCLI(ctx context.Context, deviceID int64,
 				updated_at = now()
 			WHERE device_id = $1 AND if_index = $2`, deviceID, ifIndex, vlanID, now)
 		return err
-	case swcfg.VLANOpAddTagged, swcfg.VLANOpTrunkAllow:
+	case swcfg.VLANOpSetNative:
 		_, err := s.pool.Exec(ctx, `
+			UPDATE device_interfaces SET
+				cli_port_mode = 'trunk',
+				port_role = 'trunk',
+				cli_access_vlan = $3,
+				cli_mode_synced_at = $4,
+				updated_at = now()
+			WHERE device_id = $1 AND if_index = $2`, deviceID, ifIndex, vlanID, now)
+		return err
+	case swcfg.VLANOpAddTagged, swcfg.VLANOpTrunkAllow:
+		q := `
 			UPDATE device_interfaces SET
 				cli_port_mode = 'trunk',
 				port_role = 'trunk',
 				cli_mode_synced_at = $3,
 				updated_at = now()
-			WHERE device_id = $1 AND if_index = $2`, deviceID, ifIndex, now)
+			WHERE device_id = $1 AND if_index = $2`
+		args := []interface{}{deviceID, ifIndex, now}
+		if vlanID >= 1 && vlanID <= 4094 {
+			q = `
+			UPDATE device_interfaces SET
+				cli_port_mode = 'trunk',
+				port_role = 'trunk',
+				cli_access_vlan = $4,
+				cli_mode_synced_at = $3,
+				updated_at = now()
+			WHERE device_id = $1 AND if_index = $2`
+			args = append(args, vlanID)
+		}
+		_, err := s.pool.Exec(ctx, q, args...)
 		return err
 	case swcfg.VLANOpRemove:
 		_, err := s.pool.Exec(ctx, `

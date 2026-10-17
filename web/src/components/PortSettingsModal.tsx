@@ -4,6 +4,10 @@ import { createPortal } from "react-dom";
 
 export type PoEModeValue = "off" | "24v" | "poe+";
 export type EdgePortValue = "auto" | "enable" | "disable";
+/** Режим VLAN на порту в модалке настроек. */
+export type VlanModeValue = "access" | "trunk" | "no_vlan";
+/** switchport trunk allowed vlan … */
+export type TrunkAllowedMode = "all" | "set" | "add" | "remove" | "except";
 
 export type PortSettingsTarget = {
   if_index: number;
@@ -31,7 +35,11 @@ export type PortLiveSettings = {
   live?: boolean;
   live_err?: string | null;
   access_vlan?: number | null;
+  native_vlan?: number | null;
   port_mode?: string | null;
+  trunk_allowed_mode?: TrunkAllowedMode | string | null;
+  trunk_allowed_all?: boolean;
+  trunk_allowed_vlans?: string | null;
 };
 
 type Baseline = {
@@ -44,7 +52,10 @@ type Baseline = {
   portPriority: number;
   pathCost: number;
   poeMode: PoEModeValue;
+  vlanMode: VlanModeValue;
   accessVlan: number;
+  trunkAllowedMode: TrunkAllowedMode;
+  trunkAllowedList: string;
 };
 
 export type PortSettingsSaveOpts = {
@@ -64,8 +75,24 @@ export type PortSettingsSaveOpts = {
   flowControlDirty: boolean;
   stpDirty: boolean;
   vlanDirty: boolean;
+  vlanMode: VlanModeValue;
   accessVlan: number;
+  trunkAllowedMode: TrunkAllowedMode;
+  trunkAllowedList: string;
 };
+
+function normTrunkAllowedMode(v: string | null | undefined): TrunkAllowedMode {
+  const m = (v ?? "").toLowerCase();
+  if (m === "all" || m === "set" || m === "add" || m === "remove" || m === "except") return m;
+  return "all";
+}
+
+function vlanModeFromCLI(mode: string | null | undefined, accessVlan: number): VlanModeValue {
+  const m = (mode ?? "").toLowerCase();
+  if (m === "general" || accessVlan === 0) return "no_vlan";
+  if (m === "trunk") return "trunk";
+  return "access";
+}
 
 type Props = {
   open: boolean;
@@ -92,6 +119,7 @@ function normEdge(v: string | undefined | null): EdgePortValue {
 function baselineFromPort(port: PortSettingsTarget): Baseline {
   const mode = (port.cli_port_mode ?? "").toLowerCase();
   const noVlan = mode === "general";
+  const accessVlan = noVlan ? 0 : port.cli_access_vlan && port.cli_access_vlan > 0 ? port.cli_access_vlan : 1;
   return {
     enable: port.admin_status === 1,
     isolate: port.isolate === true,
@@ -102,8 +130,11 @@ function baselineFromPort(port: PortSettingsTarget): Baseline {
     portPriority: 128,
     pathCost: 0,
     poeMode: port.poe_mode === "off" || port.poe_mode === "24v" || port.poe_mode === "poe+" ? port.poe_mode : "poe+",
-    // 0 = No VLAN (EdgeSwitch general); иначе access / PVID
-    accessVlan: noVlan ? 0 : port.cli_access_vlan && port.cli_access_vlan > 0 ? port.cli_access_vlan : 1,
+    vlanMode: vlanModeFromCLI(port.cli_port_mode, accessVlan),
+    // 0 = No VLAN (EdgeSwitch general); иначе access / native / PVID
+    accessVlan,
+    trunkAllowedMode: "all",
+    trunkAllowedList: "",
   };
 }
 
@@ -138,7 +169,10 @@ export function PortSettingsModal({
   const [portPriority, setPortPriority] = useState(128);
   const [pathCost, setPathCost] = useState(0);
   const [poeMode, setPoeMode] = useState<PoEModeValue>("poe+");
+  const [vlanMode, setVlanMode] = useState<VlanModeValue>("access");
   const [accessVlan, setAccessVlan] = useState(1);
+  const [trunkAllowedMode, setTrunkAllowedMode] = useState<TrunkAllowedMode>("all");
+  const [trunkAllowedList, setTrunkAllowedList] = useState("");
   const [poe24v, setPoe24v] = useState(poe24vSupported);
   const [baseline, setBaseline] = useState<Baseline>(baselineFromPort({ if_index: 0 }));
   const [loading, setLoading] = useState(false);
@@ -173,7 +207,10 @@ export function PortSettingsModal({
     setPortPriority(poll.portPriority);
     setPathCost(poll.pathCost);
     setPoeMode(poll.poeMode);
+    setVlanMode(poll.vlanMode);
     setAccessVlan(poll.accessVlan);
+    setTrunkAllowedMode(poll.trunkAllowedMode);
+    setTrunkAllowedList(poll.trunkAllowedList);
     setPoe24v(poe24vSupported);
     setPoeResetSec(10);
     setErr(null);
@@ -214,6 +251,16 @@ export function PortSettingsModal({
       try {
         const live = await loadFn();
         if (cancelled) return;
+        const liveMode = (live.port_mode ?? "").toLowerCase();
+        let accessVlanNext =
+          liveMode === "general"
+            ? 0
+            : liveMode === "trunk" && live.native_vlan && live.native_vlan > 0
+              ? live.native_vlan
+              : live.access_vlan && live.access_vlan > 0
+                ? live.access_vlan
+                : poll.accessVlan;
+        if (liveMode === "trunk" && accessVlanNext <= 0) accessVlanNext = 1;
         const next: Baseline = {
           enable: live.admin_up,
           isolate: live.isolate === true,
@@ -224,12 +271,12 @@ export function PortSettingsModal({
           portPriority: typeof live.port_priority === "number" ? live.port_priority : 128,
           pathCost: typeof live.path_cost === "number" ? live.path_cost : 0,
           poeMode: live.poe_mode === "off" || live.poe_mode === "24v" || live.poe_mode === "poe+" ? live.poe_mode : "poe+",
-          accessVlan:
-            (live.port_mode ?? "").toLowerCase() === "general"
-              ? 0
-              : live.access_vlan && live.access_vlan > 0
-                ? live.access_vlan
-                : poll.accessVlan,
+          vlanMode: vlanModeFromCLI(live.port_mode, accessVlanNext),
+          accessVlan: accessVlanNext,
+          trunkAllowedMode: live.trunk_allowed_all
+            ? "all"
+            : normTrunkAllowedMode(live.trunk_allowed_mode),
+          trunkAllowedList: (live.trunk_allowed_vlans ?? "").trim(),
         };
         if (live.poe_24v === false && next.poeMode === "24v") next.poeMode = "poe+";
         setBaseline(next);
@@ -242,7 +289,10 @@ export function PortSettingsModal({
         setPortPriority(next.portPriority);
         setPathCost(next.pathCost);
         setPoeMode(next.poeMode);
+        setVlanMode(next.vlanMode);
         setAccessVlan(next.accessVlan);
+        setTrunkAllowedMode(next.trunkAllowedMode);
+        setTrunkAllowedList(next.trunkAllowedList);
         if (typeof live.poe_24v === "boolean") setPoe24v(live.poe_24v);
         if (live.live) {
           const viaNote =
@@ -290,9 +340,22 @@ export function PortSettingsModal({
   const dhcpTrustedDirty = !bulkMode && w && dhcpTrusted !== baseline.dhcpTrusted;
   const flowControlDirty = !bulkMode && w && flowControl !== baseline.flowControl;
   const poeDirty = w && poeMode !== baseline.poeMode;
-  const vlanDirty = w && accessVlan !== baseline.accessVlan;
+  const trunkAllowedDirty =
+    vlanMode === "trunk" &&
+    (trunkAllowedMode !== baseline.trunkAllowedMode ||
+      trunkAllowedList.trim() !== baseline.trunkAllowedList.trim());
+  const vlanDirty =
+    w &&
+    (vlanMode !== baseline.vlanMode ||
+      accessVlan !== baseline.accessVlan ||
+      trunkAllowedDirty);
   const vlanNotInDb =
-    vlanDirty && knownVlans != null && accessVlan > 0 && accessVlan !== 1 && !knownVlans.has(accessVlan);
+    vlanDirty &&
+    vlanMode !== "no_vlan" &&
+    knownVlans != null &&
+    accessVlan > 0 &&
+    accessVlan !== 1 &&
+    !knownVlans.has(accessVlan);
   const stpDirty =
     !bulkMode &&
     w &&
@@ -310,6 +373,18 @@ export function PortSettingsModal({
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     if (!canWrite || !canSubmit || saving || loading) return;
+    if (vlanMode === "trunk" && (accessVlan < 1 || accessVlan > 4094)) {
+      setErr("Для trunk укажите Native VLAN (1–4094)");
+      return;
+    }
+    if (vlanMode === "access" && accessVlan < 1) {
+      setErr("Для access укажите Access VLAN или выберите No VLAN");
+      return;
+    }
+    if (vlanMode === "trunk" && trunkAllowedMode !== "all" && !trunkAllowedList.trim()) {
+      setErr("Укажите список Allowed VLAN (например 34,165) или режим all");
+      return;
+    }
     if (vlanNotInDb) {
       setErr(`VLAN ${accessVlan} нет в vlan database — сначала создайте на вкладке VLAN`);
       return;
@@ -334,7 +409,10 @@ export function PortSettingsModal({
         flowControlDirty: !!flowControlDirty,
         stpDirty: !!stpDirty,
         vlanDirty,
-        accessVlan,
+        vlanMode,
+        accessVlan: vlanMode === "no_vlan" ? 0 : accessVlan,
+        trunkAllowedMode,
+        trunkAllowedList: trunkAllowedList.trim(),
       });
       onClose();
     } catch (ex) {
@@ -440,54 +518,137 @@ export function PortSettingsModal({
           </span>
         </label>
 
-        <label style={{ ...fieldLabel, opacity: w && !loading ? 1 : 0.55, margin: "0.35rem 0 0.85rem" }}>
-          Access VLAN / PVID
-          <select
-            ref={vlanInputRef}
-            value={accessVlan}
-            disabled={controlsDisabled || !w}
-            onChange={(e) => setAccessVlan(Number(e.target.value))}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") e.preventDefault();
-            }}
-            style={{
-              ...inputStyle,
-              borderColor: vlanNotInDb ? "#c45c5c" : "#2e3648",
-            }}
-          >
-            <option value={0}>No VLAN</option>
-            {(() => {
-              const ids = new Set<number>([1]);
-              if (knownVlans) {
-                for (const id of knownVlans) {
-                  if (id >= 1 && id <= 4094) ids.add(id);
+        <div style={{ margin: "0.35rem 0 0.85rem", opacity: w && !loading ? 1 : 0.55 }}>
+          <label style={{ ...fieldLabel, marginBottom: 6 }}>
+            Режим VLAN
+            <select
+              value={vlanMode}
+              disabled={controlsDisabled || !w}
+              onChange={(e) => {
+                const next = e.target.value as VlanModeValue;
+                setVlanMode(next);
+                if (next === "no_vlan") {
+                  setAccessVlan(0);
+                } else if (accessVlan <= 0) {
+                  setAccessVlan(baseline.accessVlan > 0 ? baseline.accessVlan : 1);
                 }
-              }
-              if (baseline.accessVlan > 0) ids.add(baseline.accessVlan);
-              if (accessVlan > 0) ids.add(accessVlan);
-              return [...ids]
-                .sort((a, b) => a - b)
-                .map((id) => (
-                  <option key={id} value={id}>
-                    {id}
-                  </option>
-                ));
-            })()}
-          </select>
+                if (next === "trunk" && baseline.vlanMode !== "trunk") {
+                  // Новый trunk: по умолчанию all (безопаснее для управления), пока live не подставит список.
+                  if (!trunkAllowedList.trim() && trunkAllowedMode === baseline.trunkAllowedMode) {
+                    setTrunkAllowedMode("all");
+                  }
+                }
+              }}
+              style={inputStyle}
+            >
+              <option value="access">Access</option>
+              <option value="trunk">Trunk</option>
+              <option value="no_vlan">No VLAN</option>
+            </select>
+          </label>
+          {vlanMode !== "no_vlan" && (
+            <label style={{ ...fieldLabel, marginTop: 6 }}>
+              {vlanMode === "trunk" ? "Native VLAN" : "Access VLAN / PVID"}
+              <select
+                ref={vlanInputRef}
+                value={accessVlan > 0 ? accessVlan : 1}
+                disabled={controlsDisabled || !w}
+                onChange={(e) => setAccessVlan(Number(e.target.value))}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") e.preventDefault();
+                }}
+                style={{
+                  ...inputStyle,
+                  borderColor: vlanNotInDb ? "#c45c5c" : "#2e3648",
+                }}
+              >
+                {(() => {
+                  const ids = new Set<number>([1]);
+                  if (knownVlans) {
+                    for (const id of knownVlans) {
+                      if (id >= 1 && id <= 4094) ids.add(id);
+                    }
+                  }
+                  if (baseline.accessVlan > 0) ids.add(baseline.accessVlan);
+                  if (accessVlan > 0) ids.add(accessVlan);
+                  return [...ids]
+                    .sort((a, b) => a - b)
+                    .map((id) => (
+                      <option key={id} value={id}>
+                        {id}
+                      </option>
+                    ));
+                })()}
+              </select>
+            </label>
+          )}
+          {vlanMode === "trunk" && (
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: trunkAllowedMode === "all" ? "1fr" : "minmax(0, 140px) minmax(0, 1fr)",
+                gap: 8,
+                marginTop: 8,
+              }}
+            >
+              <label style={fieldLabel}>
+                Allowed VLAN
+                <select
+                  value={trunkAllowedMode}
+                  disabled={controlsDisabled || !w}
+                  onChange={(e) => setTrunkAllowedMode(e.target.value as TrunkAllowedMode)}
+                  style={inputStyle}
+                  title="switchport trunk allowed vlan …"
+                >
+                  <option value="all">all</option>
+                  <option value="set">список (set)</option>
+                  <option value="add">add</option>
+                  <option value="remove">remove</option>
+                  <option value="except">except</option>
+                </select>
+              </label>
+              {trunkAllowedMode !== "all" && (
+                <label style={fieldLabel}>
+                  Список
+                  <input
+                    type="text"
+                    value={trunkAllowedList}
+                    disabled={controlsDisabled || !w}
+                    onChange={(e) => setTrunkAllowedList(e.target.value)}
+                    placeholder="34,165 или 10,20-22"
+                    style={inputStyle}
+                    title="Абсолютный список (set) или add/remove/except"
+                  />
+                </label>
+              )}
+            </div>
+          )}
           {vlanNotInDb ? (
             <span style={{ fontSize: "0.75rem", color: "#f88", fontWeight: 500 }} role="alert">
               VLAN {accessVlan} нет в vlan database — сначала создайте на вкладке VLAN
             </span>
-          ) : accessVlan === 0 ? (
+          ) : vlanMode === "no_vlan" ? (
             <span style={{ fontSize: "0.75rem", color: "#7a8499", fontWeight: 400 }}>
               Очистка порта: participation auto 2–4093, mode general, access vlan 1 (как EdgeSwitch).
             </span>
+          ) : vlanMode === "trunk" ? (
+            <span style={{ fontSize: "0.75rem", color: "#7a8499", fontWeight: 400, display: "block", marginTop: 4 }}>
+              <code>switchport mode trunk</code>,{" "}
+              <code>native vlan {accessVlan > 0 ? accessVlan : "…"}</code>,{" "}
+              <code>
+                allowed vlan{" "}
+                {trunkAllowedMode === "all"
+                  ? "all"
+                  : `${trunkAllowedMode === "set" ? "" : trunkAllowedMode + " "}${trunkAllowedList.trim() || "…"}`.trim()}
+              </code>
+              . Без VLAN 1 в allowed можно потерять SSH/Web.
+            </span>
           ) : (
             <span style={{ fontSize: "0.75rem", color: "#7a8499", fontWeight: 400 }}>
-              switchport access vlan, иначе vlan pvid. Tagged — на вкладке VLAN.
+              switchport access vlan, иначе vlan pvid.
             </span>
           )}
-        </label>
+        </div>
 
         {!bulkMode && (
           <>

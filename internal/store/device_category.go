@@ -22,6 +22,7 @@ const (
 	DeviceCategoryMFU      = "mfu"
 	DeviceCategoryCamera   = "camera"
 	DeviceCategoryAP       = "ap"
+	DeviceCategoryUPS      = "ups"
 	DeviceCategoryOther    = "other"
 )
 
@@ -82,6 +83,8 @@ func NormalizeDeviceCategory(raw string) string {
 		return DeviceCategoryPhone
 	case DeviceCategoryMFU, "мфу", "принтер", "printer":
 		return DeviceCategoryMFU
+	case DeviceCategoryUPS, "ибп", "источник питания":
+		return DeviceCategoryUPS
 	case DeviceCategoryCamera, "камера", "камеры":
 		return DeviceCategoryCamera
 	case DeviceCategoryAP, "точка доступа", "точки доступа", "access point", "wifi", "wap":

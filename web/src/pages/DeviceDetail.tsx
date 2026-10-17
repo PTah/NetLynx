@@ -21,6 +21,7 @@ import { deviceLinkState, resolveDeviceBack } from "../navigation";
 import {
   type DeviceCategory,
   isPrinterCategory,
+  isUpsCategory,
   normalizeDeviceCategory,
 } from "../deviceCategories";
 import {
@@ -39,6 +40,18 @@ import {
 import { formatSysUptime } from "../uptimeFormat";
 import { formatMacDisplay, looksLikeMac, macVendorLabel } from "../macUtil";
 import { formatPageCount, formatTonerPct, tonerLetter, tonerMetricType, tonerSwatch } from "../printerMetrics";
+import {
+  UPS_METRICS,
+  fmtUpsNum,
+  formatUpsCharge,
+  formatUpsLoad,
+  formatUpsRuntime,
+  formatUpsTitle,
+  isUpsCritical,
+  upsBatteryStatusLabel,
+  upsOnBattery,
+  upsOutputSourceLabel,
+} from "../upsMetrics";
 import { alertDeviceCreateError } from "../apiError";
 import type { Device, EventRow, PrinterToner } from "../types";
 import type { ManualTopologyLink } from "../topologyTypes";
@@ -488,6 +501,12 @@ export default function DeviceDetail() {
   const [pageSamples, setPageSamples] = useState<{ value: number; sampled_at: string }[]>([]);
   const [tonerSeries, setTonerSeries] = useState<Record<string, { value: number; sampled_at: string }[]>>({});
   const [printerChart, setPrinterChart] = useState<string | null>(null);
+  /** Период истории тонера/страниц на карточке МФУ (сутки). */
+  const [printerRangeDays, setPrinterRangeDays] = useState<1 | 7 | 30 | 90 | 365>(30);
+  /** Период истории ИБП (сутки) и открытая метрика UPS. */
+  const [upsRangeDays, setUpsRangeDays] = useState<1 | 7 | 30 | 90 | 365>(7);
+  const [upsChart, setUpsChart] = useState<string | null>(null);
+  const [upsSeries, setUpsSeries] = useState<Record<string, { value: number; sampled_at: string }[]>>({});
   const [devUtilHigh, setDevUtilHigh] = useState("");
   const [devUtilOk, setDevUtilOk] = useState("");
   const [devFdbPoll, setDevFdbPoll] = useState("");
@@ -665,11 +684,6 @@ export default function DeviceDetail() {
       .catch((e: Error) => {
         if (e.name !== "AbortError") setCpuSamples([]);
       });
-    apiGet<{ samples: { value: number; sampled_at: string }[] }>(`/api/v1/devices/${id}/metrics?metric_type=page_count&${q}`, { signal: ac.signal })
-      .then((r) => setPageSamples(r.samples ?? []))
-      .catch((e: Error) => {
-        if (e.name !== "AbortError") setPageSamples([]);
-      });
     apiGet<{ samples: { value: number; sampled_at: string }[] }>(
       `/api/v1/devices/${id}/metrics?metric_type=util_max_pct&if_index=1&${q}`,
       { signal: ac.signal },
@@ -701,16 +715,35 @@ export default function DeviceDetail() {
     .filter(Boolean)
     .join(",");
 
+  const isMfuDevice =
+    !!data &&
+    (isPrinterCategory(data.device.device_category) ||
+      data.device.last_page_count != null ||
+      (data.device.last_toners?.length ?? 0) > 0);
+
   useEffect(() => {
-    if (!id || !tonerMetricKeys) {
+    if (!id || !isMfuDevice) {
+      setPageSamples([]);
       setTonerSeries({});
       return;
     }
     const ac = new AbortController();
-    const from = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+    const from = new Date(Date.now() - printerRangeDays * 24 * 3600 * 1000).toISOString();
     const to = new Date().toISOString();
-    const q = `from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
-    const types = tonerMetricKeys.split(",");
+    const q = `from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&max_points=1500`;
+    apiGet<{ samples: { value: number; sampled_at: string }[] }>(
+      `/api/v1/devices/${id}/metrics?metric_type=page_count&${q}`,
+      { signal: ac.signal },
+    )
+      .then((r) => setPageSamples(r.samples ?? []))
+      .catch((e: Error) => {
+        if (e.name !== "AbortError") setPageSamples([]);
+      });
+    const types = tonerMetricKeys ? tonerMetricKeys.split(",").filter(Boolean) : [];
+    if (types.length === 0) {
+      setTonerSeries({});
+      return () => ac.abort();
+    }
     Promise.all(
       types.map((mt) =>
         apiGet<{ samples: { value: number; sampled_at: string }[] }>(
@@ -733,7 +766,46 @@ export default function DeviceDetail() {
         if (e.name !== "AbortError") setTonerSeries({});
       });
     return () => ac.abort();
-  }, [id, tonerMetricKeys]);
+  }, [id, isMfuDevice, printerRangeDays, tonerMetricKeys]);
+
+  const isUpsDevice =
+    !!data && (isUpsCategory(data.device.device_category) || !!data.device.last_ups);
+  const ups = data?.device.last_ups ?? null;
+  const upsCrit = isUpsCritical(ups);
+
+  useEffect(() => {
+    if (!id || !isUpsDevice) {
+      setUpsSeries({});
+      setUpsChart(null);
+      return;
+    }
+    const ac = new AbortController();
+    const from = new Date(Date.now() - upsRangeDays * 24 * 3600 * 1000).toISOString();
+    const to = new Date().toISOString();
+    const q = `from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&max_points=1500`;
+    Promise.all(
+      UPS_METRICS.map((m) =>
+        apiGet<{ samples: { value: number; sampled_at: string }[] }>(
+          `/api/v1/devices/${id}/metrics?metric_type=${encodeURIComponent(m.type)}&${q}`,
+          { signal: ac.signal },
+        )
+          .then((r) => [m.type, r.samples ?? []] as const)
+          .catch((e: Error) => {
+            if (e.name === "AbortError") throw e;
+            return [m.type, []] as const;
+          }),
+      ),
+    )
+      .then((pairs) => {
+        const next: Record<string, { value: number; sampled_at: string }[]> = {};
+        for (const [type, samples] of pairs) next[type] = [...samples];
+        setUpsSeries(next);
+      })
+      .catch((e: Error) => {
+        if (e.name !== "AbortError") setUpsSeries({});
+      });
+    return () => ac.abort();
+  }, [id, isUpsDevice, upsRangeDays]);
 
   useEffect(() => {
     formSyncedId.current = null;
@@ -742,6 +814,8 @@ export default function DeviceDetail() {
     setPortSettings(null);
     setPrinterChart(null);
     setTonerSeries({});
+    setUpsChart(null);
+    setUpsSeries({});
   }, [id]);
 
   useEffect(() => {
@@ -1558,7 +1632,7 @@ export default function DeviceDetail() {
                 Выбрано портов: {selectedPorts.length} — можно править сразу несколько
               </div>
               <div className="device-detail-port-bulk-hint">
-                Admin up/down, PoE, Access VLAN / No VLAN, сброс PoE. На EdgeSwitch подряд идущие порты уходят как{" "}
+                Admin up/down, PoE, Access / Trunk (native VLAN) / No VLAN, сброс PoE. На EdgeSwitch подряд идущие порты уходят как{" "}
                 <code>interface 0/4-0/7</code>. Снять выбор — кнопка или Esc.
               </div>
             </div>
@@ -2101,21 +2175,23 @@ export default function DeviceDetail() {
                 · <strong>sysName:</strong> {data.device.sys_name}
               </>
             )}
-            {" "}
-            · <strong>CPU:</strong>{" "}
-            {data.device.last_cpu_pct == null
-              ? "N/A"
-              : `${data.device.last_cpu_pct.toFixed(1)}%${data.device.cpu_profile ? ` (${data.device.cpu_profile})` : ""}`}
-            {(isPrinterCategory(data.device.device_category) ||
-              data.device.last_page_count != null ||
-              (data.device.last_toners && data.device.last_toners.length > 0)) && (
+            {!isPrinterCategory(data.device.device_category) && !isUpsDevice && (
+              <>
+                {" "}
+                · <strong>CPU:</strong>{" "}
+                {data.device.last_cpu_pct == null
+                  ? "N/A"
+                  : `${data.device.last_cpu_pct.toFixed(1)}%${data.device.cpu_profile ? ` (${data.device.cpu_profile})` : ""}`}
+              </>
+            )}
+            {isMfuDevice && (
               <>
                 {" "}
                 · <strong>Страниц всего:</strong>{" "}
                 <button
                   type="button"
                   className={`metric-chip${printerChart === "pages" ? " is-active" : ""}`}
-                  title="Показать график"
+                  title="Показать график истории"
                   onClick={() => setPrinterChart((k) => (k === "pages" ? null : "pages"))}
                 >
                   {formatPageCount(data.device.last_page_count)}
@@ -2133,7 +2209,7 @@ export default function DeviceDetail() {
                           <button
                             type="button"
                             className={`metric-chip${printerChart === mt ? " is-active" : ""}`}
-                            title={`${t.description || t.label}: график за 24 ч`}
+                            title={`${t.description || t.label}: график истории`}
                             onClick={() => setPrinterChart((k) => (k === mt ? null : mt))}
                             style={{ color: low ? "#f88" : tonerSwatch(t.key) }}
                           >
@@ -2163,16 +2239,161 @@ export default function DeviceDetail() {
                   ? "недоступен"
                   : "—"}
           </p>
-          <MetricChart title="CPU (24 ч)" samples={cpuSamples} />
-          {utilSamples.length > 0 && <MetricChart title="Макс. утилизация порта ifIndex=1 (24 ч)" samples={utilSamples} />}
+          {isMfuDevice && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "0.35rem 0.75rem", alignItems: "center", margin: "0.5rem 0 0.75rem" }}>
+              <span style={{ color: "#9aa3b5", fontSize: "0.9rem" }}>История МФУ:</span>
+              {([1, 7, 30, 90, 365] as const).map((d) => (
+                <button
+                  key={d}
+                  type="button"
+                  className={`metric-chip${printerRangeDays === d ? " is-active" : ""}`}
+                  onClick={() => setPrinterRangeDays(d)}
+                >
+                  {d === 1 ? "1 день" : `${d} дн.`}
+                </button>
+              ))}
+              <span style={{ color: "#7a8499", fontSize: "0.8rem" }}>
+                хранится до года в БД (metric_samples)
+              </span>
+            </div>
+          )}
+          {!isPrinterCategory(data.device.device_category) && <MetricChart title="CPU (24 ч)" samples={cpuSamples} />}
+          {!isPrinterCategory(data.device.device_category) && utilSamples.length > 0 && (
+            <MetricChart title="Макс. утилизация порта ifIndex=1 (24 ч)" samples={utilSamples} />
+          )}
           {printerChart === "pages" && (
-            <MetricChart title="Страниц всего (24 ч)" samples={pageSamples} unit="" maxY={0} digits={0} />
+            <>
+              <MetricChart
+                title={`Страниц всего (${printerRangeDays === 1 ? "1 день" : `${printerRangeDays} дн.`})`}
+                samples={pageSamples}
+                unit=""
+                maxY={0}
+                digits={0}
+              />
+              {pageSamples.length >= 2 && (
+                <p style={{ color: "#9aa3b5", fontSize: "0.85rem", marginTop: "-0.5rem" }}>
+                  За период: {Math.round(pageSamples[0].value).toLocaleString("ru-RU")} →{" "}
+                  {Math.round(pageSamples[pageSamples.length - 1].value).toLocaleString("ru-RU")}{" "}
+                  (+
+                  {Math.round(pageSamples[pageSamples.length - 1].value - pageSamples[0].value).toLocaleString("ru-RU")}{" "}
+                  отпечатков)
+                </p>
+              )}
+            </>
           )}
           {printerChart && printerChart !== "pages" && (
-            <MetricChart
-              title={`${(data.device.last_toners ?? []).find((t) => tonerMetricType(t) === printerChart)?.label ?? "Тонер"} (24 ч)`}
-              samples={tonerSeries[printerChart] ?? []}
-            />
+            <>
+              <MetricChart
+                title={`${(data.device.last_toners ?? []).find((t) => tonerMetricType(t) === printerChart)?.label ?? "Тонер"} (${printerRangeDays === 1 ? "1 день" : `${printerRangeDays} дн.`})`}
+                samples={tonerSeries[printerChart] ?? []}
+              />
+              {(tonerSeries[printerChart]?.length ?? 0) >= 2 && (
+                <p style={{ color: "#9aa3b5", fontSize: "0.85rem", marginTop: "-0.5rem" }}>
+                  За период: {Math.round(tonerSeries[printerChart]![0].value)}% →{" "}
+                  {Math.round(tonerSeries[printerChart]![tonerSeries[printerChart]!.length - 1].value)}%
+                </p>
+              )}
+            </>
+          )}
+          {isUpsDevice && ups && (
+            <>
+              <p style={{ margin: "0.5rem 0 0.25rem" }}>
+                · <strong>ИБП:</strong>{" "}
+                <span style={{ color: upsCrit ? "#ff5252" : "#6d6", fontWeight: upsCrit ? 700 : undefined }}>
+                  {upsOnBattery(ups) ? "РАБОТА ОТ БАТАРЕИ" : upsOutputSourceLabel(ups.output_source)}
+                </span>
+                {" "}
+                · <strong>Заряд:</strong>{" "}
+                <button
+                  type="button"
+                  className={`metric-chip${upsChart === "ups_battery_charge_pct" ? " is-active" : ""}`}
+                  title="График заряда АКБ"
+                  onClick={() => setUpsChart((k) => (k === "ups_battery_charge_pct" ? null : "ups_battery_charge_pct"))}
+                >
+                  {formatUpsCharge(ups)}
+                </button>
+                {" "}
+                · <strong>Автономия:</strong> {formatUpsRuntime(ups)}
+                {" "}
+                · <strong>АКБ:</strong> {fmtUpsNum(ups.battery_voltage_v, 1, " В")}
+                {ups.battery_status != null && (
+                  <>
+                    {" "}
+                    ({upsBatteryStatusLabel(ups.battery_status)})
+                  </>
+                )}
+                {ups.battery_temp_c != null && (
+                  <>
+                    {" "}
+                    · <strong>Темп.:</strong>{" "}
+                    <span style={{ color: ups.battery_temp_c >= 45 ? "#f88" : undefined }}>
+                      {fmtUpsNum(ups.battery_temp_c, 0, " °C")}
+                    </span>
+                  </>
+                )}
+              </p>
+              <p style={{ margin: "0 0 0.25rem" }}>
+                · <strong>Вход:</strong> {fmtUpsNum(ups.input_voltage_v, 0, " В")}
+                {ups.input_frequency_hz != null ? ` / ${fmtUpsNum(ups.input_frequency_hz, 1, " Гц")}` : ""}
+                {" "}
+                · <strong>Выход:</strong>{" "}
+                <button
+                  type="button"
+                  className={`metric-chip${upsChart === "ups_output_load_pct" ? " is-active" : ""}`}
+                  title="График нагрузки выхода"
+                  onClick={() => setUpsChart((k) => (k === "ups_output_load_pct" ? null : "ups_output_load_pct"))}
+                >
+                  {formatUpsLoad(ups)}
+                </button>{" "}
+                нагрузки ({fmtUpsNum(ups.output_voltage_v, 0, " В")}
+                {ups.output_power_w != null ? ` / ${fmtUpsNum(ups.output_power_w, 0, " Вт")}` : ""})
+                {" "}
+                · <strong>Аварии:</strong>{" "}
+                <span style={{ color: (ups.alarms_present ?? 0) > 0 ? "#ff5252" : undefined }}>
+                  {ups.alarms_present ?? 0}
+                </span>
+                {ups.ident_name || ups.model ? ` · ${formatUpsTitle(ups)}` : ""}
+              </p>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "0.35rem 0.75rem", alignItems: "center", margin: "0.5rem 0 0.75rem" }}>
+                <span style={{ color: "#9aa3b5", fontSize: "0.9rem" }}>История ИБП:</span>
+                {([1, 7, 30, 90, 365] as const).map((d) => (
+                  <button
+                    key={d}
+                    type="button"
+                    className={`metric-chip${upsRangeDays === d ? " is-active" : ""}`}
+                    onClick={() => setUpsRangeDays(d)}
+                  >
+                    {d === 1 ? "1 день" : `${d} дн.`}
+                  </button>
+                ))}
+                {UPS_METRICS.map((m) => {
+                  const samples = upsSeries[m.type] ?? [];
+                  if (samples.length === 0) return null;
+                  return (
+                    <button
+                      key={m.type}
+                      type="button"
+                      className={`metric-chip${upsChart === m.type ? " is-active" : ""}`}
+                      title={`${m.label}: график истории`}
+                      onClick={() => setUpsChart((k) => (k === m.type ? null : m.type))}
+                    >
+                      {m.label}
+                    </button>
+                  );
+                })}
+                <span style={{ color: "#7a8499", fontSize: "0.8rem" }}>
+                  семпл раз в 5 минут, хранится до года
+                </span>
+              </div>
+              {upsChart && (
+                <MetricChart
+                  title={`${UPS_METRICS.find((m) => m.type === upsChart)?.label ?? upsChart} (${upsRangeDays === 1 ? "1 день" : `${upsRangeDays} дн.`})`}
+                  samples={upsSeries[upsChart] ?? []}
+                  unit={UPS_METRICS.find((m) => m.type === upsChart)?.unit ?? ""}
+                  digits={UPS_METRICS.find((m) => m.type === upsChart)?.digits ?? 0}
+                />
+              )}
+            </>
           )}
           <p style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem", alignItems: "center" }}>
             <button type="button" onClick={runSnmpTest} disabled={!canWrite}>
@@ -2643,24 +2864,51 @@ export default function DeviceDetail() {
                   flowControlDirty,
                   stpDirty,
                   vlanDirty,
+                  vlanMode,
                   accessVlan,
+                  trunkAllowedMode,
+                  trunkAllowedList,
                 }) => {
+                  type VlanBody = {
+                    op: string;
+                    vlan_id?: number;
+                    allowed_mode?: string;
+                    allowed_vlans?: string;
+                  };
+                  const vlanOpBody = (): VlanBody => {
+                    if (vlanMode === "no_vlan" || accessVlan === 0) return { op: "no_vlan" };
+                    if (vlanMode === "trunk") {
+                      return {
+                        op: "trunk_allow",
+                        vlan_id: accessVlan,
+                        allowed_mode: trunkAllowedMode,
+                        allowed_vlans: trunkAllowedMode === "all" ? "" : trunkAllowedList,
+                      };
+                    }
+                    return { op: "set_access", vlan_id: accessVlan };
+                  };
+                  const vlanNote = () => {
+                    if (vlanMode === "no_vlan" || accessVlan === 0) return "No VLAN";
+                    if (vlanMode === "trunk") {
+                      const allow =
+                        trunkAllowedMode === "all"
+                          ? "allowed all"
+                          : `allowed ${trunkAllowedMode} ${trunkAllowedList}`.trim();
+                      return `trunk native ${accessVlan}, ${allow}`;
+                    }
+                    return `access ${accessVlan}`;
+                  };
                   if (portBulkOpen) {
                     const idxs = selectedPorts.map((p) => p.if_index);
                     const body: {
                       if_indexes: number[];
                       admin_up?: boolean;
                       poe_mode?: string;
-                      vlan?: { op: string; vlan_id: number };
+                      vlan?: VlanBody;
                     } = { if_indexes: idxs };
                     if (enableDirty) body.admin_up = adminUp;
                     if (poeDirty) body.poe_mode = poeMode;
-                    if (vlanDirty) {
-                      body.vlan =
-                        accessVlan === 0
-                          ? { op: "no_vlan", vlan_id: 0 }
-                          : { op: "set_access", vlan_id: accessVlan };
-                    }
+                    if (vlanDirty) body.vlan = vlanOpBody();
                     if (body.admin_up == null && body.poe_mode == null && body.vlan == null) {
                       throw new Error("Нет изменений для применения");
                     }
@@ -2669,7 +2917,7 @@ export default function DeviceDetail() {
                       const bits: string[] = [];
                       if (enableDirty) bits.push(adminUp ? "admin up" : "shutdown");
                       if (poeDirty) bits.push(`PoE ${poeMode}`);
-                      if (vlanDirty) bits.push(accessVlan === 0 ? "No VLAN" : `VLAN ${accessVlan}`);
+                      if (vlanDirty) bits.push(`VLAN ${vlanNote()}`);
                       setDescrMsg(`Массово (${idxs.length}): ${bits.join("; ")}`);
                       clearPortSelection();
                       setPortBulkOpen(false);
@@ -2725,19 +2973,12 @@ export default function DeviceDetail() {
                       notes.push(`STP → ${stpEnabled ? "on" : "off"}${res.via ? ` (${res.via})` : ""}`);
                     }
                     if (vlanDirty) {
-                      if (accessVlan === 0) {
-                        const res = await apiPatch<{ ok: boolean; via?: string }>(
-                          `/api/v1/devices/${id}/interfaces/${p.if_index}/vlan`,
-                          { op: "no_vlan" },
-                        );
-                        notes.push(`VLAN → No VLAN${res.via ? ` (${res.via})` : ""}`);
-                      } else {
-                        const res = await apiPatch<{ ok: boolean; via?: string; vlan_id?: number }>(
-                          `/api/v1/devices/${id}/interfaces/${p.if_index}/vlan`,
-                          { op: "set_access", vlan_id: accessVlan },
-                        );
-                        notes.push(`VLAN access → ${res.vlan_id ?? accessVlan}${res.via ? ` (${res.via})` : ""}`);
-                      }
+                      const vb = vlanOpBody();
+                      const res = await apiPatch<{ ok: boolean; via?: string; vlan_id?: number; op?: string }>(
+                        `/api/v1/devices/${id}/interfaces/${p.if_index}/vlan`,
+                        vb,
+                      );
+                      notes.push(`VLAN → ${vlanNote()}${res.via ? ` (${res.via})` : ""}`);
                     }
                     if (poeDirty) {
                       const res = await apiPatch<{ ok: boolean; via?: string; poe_mode?: string }>(

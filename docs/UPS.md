@@ -1,0 +1,109 @@
+# ИБП (UPS) по SNMP
+
+NetLynx опрашивает ИБП по стандартной **UPS-MIB (RFC 1628, `1.3.6.1.2.1.33`)** — так работает большинство сетевых карт: APC/Schneider, Ippon (EPPC), Eaton, Powercom, CyberPower, Winpower-совместимые NMC.
+
+Проверено на: **Ippon RT II 6000** с картой `Network Management Card for UPS` (`sysObjectID = 1.3.6.1.4.1.935.10.1`), адрес `10.0.0.1`, community `public`.
+
+## Быстрая проверка по SNMP
+
+```bash
+# ответ есть?
+snmpget -v2c -c public 10.0.0.1 1.3.6.1.2.1.1.1.0 1.3.6.1.2.1.33.1.1.5.0
+# модель/статус/заряд/время
+snmpget -v2c -c public 10.0.0.1 \
+  1.3.6.1.2.1.33.1.1.2.0 1.3.6.1.2.1.33.1.2.1.0 \
+  1.3.6.1.2.1.33.1.2.4.0 1.3.6.1.2.1.33.1.2.3.0
+```
+
+Из Windows без `snmpget` — пробник из репозитория:
+
+```bash
+UPS_TARGET=10.0.0.1 go test ./internal/snmp/ -run TestReadUPSLive -v
+```
+
+Если `UPS_TARGET` не задан, тест пропускается (по умолчанию живые устройства в тестах не трогаем).
+
+## Как включить узел
+
+1. **Узлы → добавить**: имя (например `UPS-Серверная`), IP ИБП, тип — **ИБП** (`ups`).
+2. SNMP: v2c + community (на картах Ippon/APC обычно `public`), либо v3.
+3. Период опроса: 60 с достаточно, карта отвечает ~50 мс на батч GET.
+
+Опрос включается автоматически, если тип узла `ups` **или** `sysDescr` похож на ИБП (`ups`, `smart-ups`, `winpower`, `ippon`, `eaton`, `powercom`, `network management card for ups`). Для ИБП NetLynx **не** ходит в IF-MIB/FDB/LLDP/PoE — читает только UPS-MIB.
+
+## Карта OID и правила декодирования
+
+Скалярные значения читаются **одним** SNMP GET-батчем (карта медленная: полный walk группы 33 — около 18 секунд).
+
+| OID | Поле NetLynx | Правило |
+|---|---|---|
+| `1.3.6.1.2.1.1.5.0` | sysName | строка |
+| `33.1.1.1.0` | manufacturer | строка (`EPPC`) |
+| `33.1.1.2.0` | model | строка (`ON-LINE`) |
+| `33.1.1.4.0` | agent_software | строка версии агента карты |
+| `33.1.1.5.0` | ident_name | имя ИБП (`Ippon RT II 6000`) |
+| `33.1.2.1.0` | battery_status | 1 unknown, 2 normal, 3 low, 4 depleted |
+| `33.1.2.2.0` | seconds_on_battery | целое, сек |
+| `33.1.2.3.0` | runtime_min | целое, мин |
+| `33.1.2.4.0` | battery_charge_pct | целое, % |
+| `33.1.2.5.0` | battery_voltage_v | сырое / 10 (2187 → 218.7 В) |
+| `33.1.2.7.0` | battery_temp_c | целое, °C |
+| `33.1.3.2.0` | input_lines | число входных линий |
+| `33.1.3.3.1.2.1` | input_frequency_hz | сырое / 10 (499 → 49.9 Гц) |
+| `33.1.3.3.1.3.1` | input_voltage_v | целое, В (238) |
+| `33.1.3.3.1.4.1` | input_current_a | сырое / 10; `-1` = не поддержано |
+| `33.1.4.1.0` | output_source | 3 normal, 5 battery, 4 bypass, 6 booster, 7 reducer |
+| `33.1.4.2.0` | output_frequency_hz | сырое / 10 |
+| `33.1.4.4.1.2.1` | output_voltage_v | целое, В (220) |
+| `33.1.4.4.1.3.1` | output_current_a | сырое / 10 (56 → 5.6 А) |
+| `33.1.4.4.1.4.1` | output_power_w | целое, Вт (1100) |
+| `33.1.4.4.1.5.1` | output_load_pct | целое, % (20) |
+| `33.1.6.1.0` | alarms_present | число активных аварий |
+| `33.1.9.1.0` | config_input_voltage_v | номинал входа, В |
+| `33.1.9.7.0` | low_battery_runtime_min | порог «низкая батарея», мин |
+
+Не поддержано у Ippon RT II 6000: bypass (`33.1.5`), `upsTest` (`33.1.7`), задержки shutdown (`33.1.8`). Такие поля приходят как `-1`/`noSuchObject` и в снимок не попадают.
+
+**Работа от батареи** определяется как `upsSecondsOnBattery > 0` **или** `upsOutputSource == 5`.
+
+## Что пишется в БД
+
+| Куда | Что |
+|---|---|
+| `devices.last_ups` (JSONB) | текущий снимок всех полей таблицы выше |
+| `devices.last_ups_at` | когда снимок обновлён |
+| `metric_samples` (`ups_*`) | история для графиков, семпл раз в 5 минут, хранится до года |
+
+Метрики истории: `ups_battery_charge_pct`, `ups_runtime_min`, `ups_battery_voltage_v`, `ups_battery_temp_c`, `ups_input_voltage_v`, `ups_output_voltage_v`, `ups_output_load_pct`, `ups_output_w`, `ups_on_battery` (0/1).
+
+Графики: карточка узла → **Состояние** → чипы метрик (клик открывает график), период 1/7/30/90/365 дней.
+
+## События и оповещения
+
+| Event type | Severity | Когда |
+|---|---|---|
+| `UPS_ON_BATTERY` | error | переход на батарею (пропало питание) |
+| `UPS_MAINS_OK` | info | вернулось питание (выход снова `normal`) |
+| `UPS_BATTERY_LOW` | warning | `upsBatteryStatus = 3` |
+| `UPS_BATTERY_DEPLETED` | error | `upsBatteryStatus = 4` |
+| `UPS_BATTERY_OK` | info | статус батареи вернулся в `normal` |
+| `UPS_TEMP_HIGH` | warning | температура батареи ≥ 45 °C |
+| `UPS_TEMP_CRITICAL` | error | температура батареи ≥ 55 °C |
+| `UPS_ALARM` | warning | `upsAlarmsPresent` вырос с 0 |
+| `UPS_ALARM_CLEAR` | info | аварии снялись (`upsAlarmsPresent = 0`) |
+| `UPS_LOAD_HIGH` | warning | нагрузка выхода ≥ 90 % |
+| `UPS_LOAD_OK` | info | нагрузка упала ниже 80 % |
+
+События появляются в журнале, а также в Telegram/email/webhook, если их типы включены в настройках уведомлений (по умолчанию UPS-типы добавляются миграцией `077_ups.sql` в списки Telegram/email/webhook).
+
+Первый опрос после добавления узла алертов не даёт — сначала базовый снимок (как у тонера МФУ).
+
+## Winpower Manager
+
+Веб-интерфейс карты и Winpower Manager на отдельном ПК **не нужны** — NetLynx читает те же данные напрямую по SNMP. Winpower можно удалить.
+
+## Ограничения
+
+- Опрос идёт по SNMP; если карта ИБП отдаёт только свой веб-интерфейс без SNMP (`161/udp` закрыт), узел опрашивается как ping-only (режим достижимости «Авто (Ping)» в карточке).
+- Полный `walk` группы `33` медленный (≈18 с) — NetLynx делает один GET-батч фиксированного набора OID, не walk.
+- Числовые поля, помеченные `-1` производителем, в JSON не попадают (в UI — `—`).

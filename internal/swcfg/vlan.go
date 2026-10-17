@@ -12,6 +12,8 @@ const (
 	VLANOpAddTagged  = "add_tagged" // устар.: один tagged; предпочтительно trunk_allow
 	VLANOpRemove     = "remove"
 	VLANOpTrunkAllow = "trunk_allow"
+	// VLANOpSetNative — trunk + native (untagged) VLAN: switchport trunk native vlan N.
+	VLANOpSetNative = "set_native"
 	// VLANOpNoVLAN — очистить порт от VLAN (EdgeSwitch: participation auto + general + access vlan 1).
 	VLANOpNoVLAN = "no_vlan"
 
@@ -19,6 +21,8 @@ const (
 	TrunkAllowRemove = "remove"
 	TrunkAllowAll    = "all"
 	TrunkAllowExcept = "except"
+	// TrunkAllowSet — абсолютный список: «switchport trunk allowed vlan 34,165» (без add/remove).
+	TrunkAllowSet = "set"
 
 	VLANDBOpSetName = "set_name"
 	VLANDBOpDelete  = "delete"
@@ -38,7 +42,7 @@ const (
 // PortVLANChange — прописать или снять VLAN на порту.
 type PortVLANChange struct {
 	Op             string
-	VLANID         int    // set_access / remove / add_tagged
+	VLANID         int    // set_access / set_native / remove / add_tagged; для trunk_allow — optional native
 	AllowedMode    string // trunk_allow: add|remove|all|except
 	AllowedList    string // trunk_allow: «10,20-22» (или ; как у SNR)
 	PrevAccessVLAN *int
@@ -49,17 +53,20 @@ func (v PortVLANChange) Validate() error {
 	switch v.Op {
 	case VLANOpNoVLAN:
 		return nil
-	case VLANOpSetAccess, VLANOpAddTagged, VLANOpRemove:
+	case VLANOpSetAccess, VLANOpAddTagged, VLANOpRemove, VLANOpSetNative:
 		if v.VLANID < 1 || v.VLANID > 4094 {
 			return fmt.Errorf("vlan_id должен быть 1–4094")
 		}
 		return nil
 	case VLANOpTrunkAllow:
+		if v.VLANID != 0 && (v.VLANID < 1 || v.VLANID > 4094) {
+			return fmt.Errorf("native vlan_id должен быть 1–4094")
+		}
 		mode := strings.ToLower(strings.TrimSpace(v.AllowedMode))
 		switch mode {
 		case TrunkAllowAll:
 			return nil
-		case TrunkAllowAdd, TrunkAllowRemove, TrunkAllowExcept:
+		case TrunkAllowAdd, TrunkAllowRemove, TrunkAllowExcept, TrunkAllowSet:
 			ids := ParseVLANIDList(NormalizeVLANList(v.AllowedList))
 			if len(ids) == 0 {
 				return fmt.Errorf("укажите список VLAN в Allow vlan (например 10,20-22)")
@@ -69,7 +76,7 @@ func (v PortVLANChange) Validate() error {
 			}
 			return nil
 		default:
-			return fmt.Errorf("allowed_mode: add | remove | all | except")
+			return fmt.Errorf("allowed_mode: add | remove | all | except | set")
 		}
 	default:
 		return fmt.Errorf("неизвестная операция VLAN %q", v.Op)
@@ -807,6 +814,11 @@ func vlanCiscoLines(ch PortVLANChange) []string {
 			"switchport mode access",
 			"switchport access vlan " + id,
 		}
+	case VLANOpSetNative:
+		return []string{
+			"switchport mode trunk",
+			"switchport trunk native vlan " + id,
+		}
 	case VLANOpAddTagged:
 		return []string{
 			"switchport mode trunk",
@@ -815,10 +827,16 @@ func vlanCiscoLines(ch PortVLANChange) []string {
 	case VLANOpTrunkAllow:
 		mode := strings.ToLower(strings.TrimSpace(ch.AllowedMode))
 		lines := []string{"switchport mode trunk"}
+		if ch.VLANID >= 1 && ch.VLANID <= 4094 {
+			lines = append(lines, "switchport trunk native vlan "+strconv.Itoa(ch.VLANID))
+		}
 		switch mode {
 		case TrunkAllowAll:
 			// EdgeSwitch / ELTEX MES23xx / SNR: all
 			lines = append(lines, "switchport trunk allowed vlan all")
+		case TrunkAllowSet:
+			list := FormatVLANIDList(ParseVLANIDList(ch.AllowedList))
+			lines = append(lines, "switchport trunk allowed vlan "+list)
 		case TrunkAllowAdd:
 			list := FormatVLANIDList(ParseVLANIDList(ch.AllowedList))
 			lines = append(lines, "switchport trunk allowed vlan add "+list)
@@ -857,6 +875,13 @@ func vlanIEEELines(ch PortVLANChange) []string {
 			lines = append(lines, "vlan participation exclude "+strconv.Itoa(*ch.PrevAccessVLAN))
 		}
 		return lines
+	case VLANOpSetNative:
+		// Fastpath: native/untagged на trunk ≈ PVID без tagging.
+		return []string{
+			"vlan pvid " + id,
+			"vlan participation include " + id,
+			"no vlan tagging " + id,
+		}
 	case VLANOpAddTagged:
 		return []string{
 			"vlan participation include " + id,
@@ -870,11 +895,19 @@ func vlanIEEELines(ch PortVLANChange) []string {
 		}
 		ids := ParseVLANIDList(ch.AllowedList)
 		var lines []string
+		if ch.VLANID >= 1 && ch.VLANID <= 4094 {
+			nid := strconv.Itoa(ch.VLANID)
+			lines = append(lines, "vlan pvid "+nid, "vlan participation include "+nid, "no vlan tagging "+nid)
+		}
 		for _, n := range ids {
 			sid := strconv.Itoa(n)
 			if mode == TrunkAllowRemove {
 				lines = append(lines, "vlan participation exclude "+sid, "no vlan tagging "+sid)
 			} else {
+				// add / set: tagged; native — untagged
+				if ch.VLANID == n {
+					continue
+				}
 				lines = append(lines, "vlan participation include "+sid, "vlan tagging "+sid)
 			}
 		}

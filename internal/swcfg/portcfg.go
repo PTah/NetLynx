@@ -392,7 +392,10 @@ func interpretPortCLI(out string) error {
 		strings.Contains(low, "flowcontrol") ||
 		strings.Contains(low, "flow control") ||
 		strings.Contains(low, "flow-control") ||
-		strings.Contains(low, "spanning-tree")
+		strings.Contains(low, "spanning-tree") ||
+		strings.Contains(low, "switchport mode") ||
+		strings.Contains(low, "switchport trunk native vlan") ||
+		strings.Contains(low, "switchport access vlan")
 	if !ok {
 		return fmt.Errorf("cli: нет признаков configure/interface — %s", compactCLIErr(out))
 	}

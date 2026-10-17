@@ -100,10 +100,54 @@ func (s *Store) ListPortMetricSamples(ctx context.Context, deviceID int64, metri
 	return out, rows.Err()
 }
 
-func (s *Store) PruneMetricSamples(ctx context.Context, olderThan time.Time) (int64, error) {
-	tag, err := s.pool.Exec(ctx, `DELETE FROM metric_samples WHERE sampled_at < $1`, olderThan)
+// PruneMetricSamples удаляет старые метрики.
+// olderThan — util/cpu/rate и прочее; printerOlderThan — «долгие» ряды: page_count, toner_*, ups_*.
+func (s *Store) PruneMetricSamples(ctx context.Context, olderThan, printerOlderThan time.Time) (int64, error) {
+	var total int64
+	tag, err := s.pool.Exec(ctx, `
+		DELETE FROM metric_samples
+		WHERE sampled_at < $1
+		  AND metric_type <> 'page_count'
+		  AND metric_type NOT LIKE 'toner_%'
+		  AND metric_type NOT LIKE 'ups_%'`, olderThan)
 	if err != nil {
 		return 0, err
 	}
-	return tag.RowsAffected(), nil
+	total += tag.RowsAffected()
+	tag2, err := s.pool.Exec(ctx, `
+		DELETE FROM metric_samples
+		WHERE sampled_at < $1
+		  AND (metric_type = 'page_count' OR metric_type LIKE 'toner_%' OR metric_type LIKE 'ups_%')`, printerOlderThan)
+	if err != nil {
+		return total, err
+	}
+	total += tag2.RowsAffected()
+	return total, nil
+}
+
+// DownsampleMetricSamples равномерно ужимает ряд (среднее по корзинам) для длинных периодов.
+func DownsampleMetricSamples(samples []MetricSample, maxPoints int) []MetricSample {
+	if maxPoints <= 0 || len(samples) <= maxPoints {
+		return samples
+	}
+	out := make([]MetricSample, 0, maxPoints)
+	n := len(samples)
+	for i := 0; i < maxPoints; i++ {
+		start := i * n / maxPoints
+		end := (i + 1) * n / maxPoints
+		if end <= start {
+			end = start + 1
+		}
+		if end > n {
+			end = n
+		}
+		var sum float64
+		for j := start; j < end; j++ {
+			sum += float64(samples[j].Value)
+		}
+		mid := samples[start+(end-start-1)/2]
+		mid.Value = float32(sum / float64(end-start))
+		out = append(out, mid)
+	}
+	return out
 }

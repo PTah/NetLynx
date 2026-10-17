@@ -74,7 +74,7 @@ type VlanDeleteImpact = {
 };
 
 type PortVlanOp = "set_access" | "trunk_allow" | "remove";
-type AllowedMode = "add" | "remove" | "all" | "except";
+type AllowedMode = "add" | "remove" | "all" | "except" | "set";
 
 function isSwitchPort(p: PortHint): boolean {
   const n = (p.if_name ?? "").trim().toLowerCase();
@@ -248,6 +248,8 @@ export function DeviceVlanTab({ deviceId, canWrite, settingsWritable, ports, rel
   const [op, setOp] = useState<PortVlanOp>("set_access");
   const [allowedMode, setAllowedMode] = useState<AllowedMode>("add");
   const [allowedList, setAllowedList] = useState("");
+  /** 0 = не менять native; иначе switchport trunk native vlan N */
+  const [nativeVlan, setNativeVlan] = useState(0);
   const [createId, setCreateId] = useState(0);
   const [createName, setCreateName] = useState("");
   const [selected, setSelected] = useState<Set<number>>(() => new Set());
@@ -398,11 +400,18 @@ export function DeviceVlanTab({ deviceId, canWrite, settingsWritable, ports, rel
       const warn = trunkAllowAccessWarning(allowedMode, allowedList);
       if (warn && !window.confirm(warn)) return;
       beginBusy("Идёт обновление конфига на свитче (trunk allowed vlan)…");
-      apiPatch<VlansPayload>(`/api/v1/devices/${deviceId}/interfaces/${ifIndex}/vlan`, {
+      const trunkBody: {
+        op: string;
+        allowed_mode: string;
+        allowed_vlans: string;
+        vlan_id?: number;
+      } = {
         op: "trunk_allow",
         allowed_mode: allowedMode,
         allowed_vlans: allowedList,
-      })
+      };
+      if (nativeVlan >= 1 && nativeVlan <= 4094) trunkBody.vlan_id = nativeVlan;
+      apiPatch<VlansPayload>(`/api/v1/devices/${deviceId}/interfaces/${ifIndex}/vlan`, trunkBody)
         .then(afterWrite)
         .catch((ex: Error) => setErr(ex.message))
         .finally(endBusy);
@@ -922,6 +931,35 @@ export function DeviceVlanTab({ deviceId, canWrite, settingsWritable, ports, rel
         {op === "trunk_allow" && (
           <>
             <label>
+              Native VLAN
+              <br />
+              <select
+                value={nativeVlan}
+                disabled={!w || busy}
+                onChange={(e) => setNativeVlan(Number(e.target.value))}
+                style={{ minWidth: 120 }}
+                title="switchport trunk native vlan … (пусто = не менять)"
+              >
+                <option value={0}>— не менять —</option>
+                {(() => {
+                  const ids = new Map<number, string>();
+                  ids.set(1, "default");
+                  for (const r of rows) {
+                    if (r.vlan_id >= 1 && r.vlan_id <= 4094) ids.set(r.vlan_id, r.name ?? "");
+                  }
+                  if (nativeVlan > 0) ids.set(nativeVlan, ids.get(nativeVlan) ?? "");
+                  return [...ids.entries()]
+                    .sort((a, b) => a[0] - b[0])
+                    .map(([id, name]) => (
+                      <option key={id} value={id}>
+                        {id}
+                        {name ? ` ${name}` : ""}
+                      </option>
+                    ));
+                })()}
+              </select>
+            </label>
+            <label>
               Allow vlan
               <br />
               <select
@@ -931,9 +969,10 @@ export function DeviceVlanTab({ deviceId, canWrite, settingsWritable, ports, rel
                 style={{ minWidth: 120 }}
                 title="switchport trunk allowed vlan …"
               >
+                <option value="all">all</option>
+                <option value="set">список (set)</option>
                 <option value="add">add</option>
                 <option value="remove">remove</option>
-                <option value="all">all</option>
                 <option value="except">except</option>
               </select>
             </label>
@@ -967,10 +1006,20 @@ export function DeviceVlanTab({ deviceId, canWrite, settingsWritable, ports, rel
       {op === "trunk_allow" && (
         <>
           <p style={{ color: "#7a8499", fontSize: "0.8rem", marginTop: "0.35rem" }}>
-            На свитч: <code>switchport mode trunk</code> и{" "}
+            На свитч: <code>switchport mode trunk</code>
+            {nativeVlan > 0 ? (
+              <>
+                , <code>switchport trunk native vlan {nativeVlan}</code>
+              </>
+            ) : null}{" "}
+            и{" "}
             <code>
               switchport trunk allowed vlan{" "}
-              {allowedMode === "all" ? "all" : `${allowedMode} ${allowedList.trim() || "…"}`}
+              {allowedMode === "all"
+                ? "all"
+                : allowedMode === "set"
+                  ? allowedList.trim() || "…"
+                  : `${allowedMode} ${allowedList.trim() || "…"}`}
             </code>
             . ELTEX: add/remove/all; SNR также except и списки через «;».
           </p>

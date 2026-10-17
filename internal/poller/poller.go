@@ -462,10 +462,15 @@ func (e *Engine) pruneMetrics(ctx context.Context) {
 		return
 	}
 	cutoff := time.Now().Add(-time.Duration(e.cfg.MetricsRetentionDays) * 24 * time.Hour)
-	if n, err := e.st.PruneMetricSamples(ctx, cutoff); err != nil {
+	printerDays := e.cfg.MetricsPrinterRetentionDays
+	if printerDays <= 0 {
+		printerDays = e.cfg.MetricsRetentionDays
+	}
+	printerCutoff := time.Now().Add(-time.Duration(printerDays) * 24 * time.Hour)
+	if n, err := e.st.PruneMetricSamples(ctx, cutoff, printerCutoff); err != nil {
 		e.log.Warn("prune metrics", "err", err)
 	} else if n > 0 {
-		e.log.Info("prune metrics", "deleted", n)
+		e.log.Info("prune metrics", "deleted", n, "retention_days", e.cfg.MetricsRetentionDays, "printer_retention_days", printerDays)
 	}
 }
 
@@ -595,19 +600,35 @@ func (e *Engine) pollOne(ctx context.Context, d store.PollDevice) error {
 		sysUptimeCs = &v
 	}
 
-	cpuProfileName, cpuPct, _ := snmp.ReadCPU(g, sysDescr)
-	var cpuProfile *string
-	if cpuProfileName != "" {
-		cp := cpuProfileName
-		cpuProfile = &cp
-	}
-
 	cat := ""
 	if prevDev != nil {
 		cat = prevDev.DeviceCategory
 	}
+	isPrinter := snmp.LooksLikePrinter(cat, sysDescr)
+	isUPS := snmp.LooksLikeUPS(cat, sysDescr)
+
+	var cpuProfileName string
+	var cpuPct *float32
+	var cpuProfile *string
+	if isPrinter || isUPS {
+		// У МФУ и ИБП CPU по SNMP нет / бессмысленен — не читаем и сбрасываем залипшие 100%.
+		if err := e.st.ClearDeviceCPU(ctx, d.ID); err != nil {
+			e.log.Debug("clear printer cpu", "device_id", d.ID, "err", err)
+		}
+	} else {
+		cpuProfileName, cpuPct, _ = snmp.ReadCPU(g, sysDescr)
+		if cpuProfileName != "" {
+			cp := cpuProfileName
+			cpuProfile = &cp
+		}
+	}
+
 	var printer *snmp.PrinterReading
-	if snmp.LooksLikePrinter(cat, sysDescr) {
+	var prevToners []models.PrinterToner
+	if prevDev != nil {
+		prevToners = prevDev.LastToners
+	}
+	if isPrinter {
 		p, pErr := snmp.ReadPrinter(g, sysDescr)
 		if pErr != nil {
 			e.log.Debug("printer mib", "device_id", d.ID, "err", pErr)
@@ -616,9 +637,17 @@ func (e *Engine) pollOne(ctx context.Context, d store.PollDevice) error {
 		}
 	}
 	if printer != nil && printer.HasData() {
+		e.emitTonerThresholdAlerts(ctx, d, prevToners, printer)
 		if err := e.st.UpdateDevicePrinterSnapshot(ctx, d.ID, printer.PageCount, printer.Toners); err != nil {
 			e.log.Warn("printer snapshot", "device_id", d.ID, "err", err)
 		}
+	}
+
+	// ИБП: только UPS-MIB. IF-MIB/FDB/LLDP/PoE/STP у ИБП нет — не ходим туда вовсе.
+	if isUPS {
+		e.pollUPS(ctx, d, prevDev, g, sysName, time.Now())
+		sn, sd := sysName, sysDescr
+		return e.st.UpdateDevicePollMeta(ctx, d.ID, true, nil, &sn, &sd, nil, nil, nil, sysUptimeCs)
 	}
 
 	var chassisMAC *string

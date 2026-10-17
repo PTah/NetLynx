@@ -163,8 +163,45 @@ func cardStatusLine(eventType, category string, payload map[string]interface{}, 
 			return fmt.Sprintf("%s снова в сети с %s после %s отсутствия в сети", noun, clock, dur)
 		}
 		return fmt.Sprintf("%s снова в сети с %s", noun, clock)
+	case "TONER_LOW", "TONER_CRITICAL":
+		label, _ := payload["toner_label"].(string)
+		label = strings.TrimSpace(label)
+		if label == "" {
+			label, _ = payload["toner_key"].(string)
+			label = strings.TrimSpace(label)
+		}
+		if label == "" {
+			label = "тонер"
+		}
+		pct := payloadFloat(payload, "pct")
+		th := payloadFloat(payload, "threshold_pct")
+		if strings.EqualFold(eventType, "TONER_CRITICAL") {
+			return fmt.Sprintf("%s: критический остаток «%s» %.0f%% (порог %.0f%%) в %s", noun, label, pct, th, clock)
+		}
+		return fmt.Sprintf("%s: низкий остаток «%s» %.0f%% (порог %.0f%%) в %s", noun, label, pct, th, clock)
 	default:
+		if isUPSEvent(eventType) {
+			return fmt.Sprintf("%s: %s в %s", noun, upsPayloadDetail(payload), clock)
+		}
 		return strings.TrimSpace(eventType) + " · " + clock
+	}
+}
+
+func payloadFloat(payload map[string]interface{}, key string) float64 {
+	if payload == nil {
+		return 0
+	}
+	switch v := payload[key].(type) {
+	case float64:
+		return v
+	case float32:
+		return float64(v)
+	case int:
+		return float64(v)
+	case int64:
+		return float64(v)
+	default:
+		return 0
 	}
 }
 
@@ -184,6 +221,8 @@ func deviceNounRU(category string) string {
 		return "Телефон"
 	case "mfu":
 		return "МФУ"
+	case "ups":
+		return "ИБП"
 	case "camera":
 		return "Камера"
 	default:

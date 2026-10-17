@@ -130,7 +130,7 @@ func (s *Store) ListDevices(ctx context.Context) ([]models.Device, error) {
 		       created_at, updated_at, last_poll_at, last_snmp_ok, last_snmp_error,
 		       last_ping_ok, last_ping_at, last_ping_rtt_ms, online_override, COALESCE(NULLIF(btrim(reachability_mode), ''), 'auto'), offline_since,
 		       sys_name, sys_descr, chassis_mac, cpu_profile, device_category, last_cpu_pct, last_cpu_at, last_sys_uptime_cs,
-		       last_page_count, last_toners, fdb_monitoring_status,
+		       last_page_count, last_toners, last_ups, last_ups_at, fdb_monitoring_status,
 		       ssh_user, ssh_password, ssh_port, ssh_enable_password, COALESCE(NULLIF(btrim(ssh_vendor), ''), 'auto'),
 		       COALESCE(trust_link_traps, false)
 		FROM devices ORDER BY id`)
@@ -142,6 +142,7 @@ func (s *Store) ListDevices(ctx context.Context) ([]models.Device, error) {
 	for rows.Next() {
 		var d models.Device
 		var tonerRaw []byte
+		var upsRaw []byte
 		if err := rows.Scan(
 			&d.ID, &d.Name, &d.Host, &d.Location, &d.UISPDeviceID, &d.UISPOverviewStatus, &d.SNMPVersion, &d.Community,
 			&d.V3User, &d.V3AuthProtocol, &d.V3PrivProtocol, &d.V3EngineID,
@@ -149,13 +150,14 @@ func (s *Store) ListDevices(ctx context.Context) ([]models.Device, error) {
 			&d.CreatedAt, &d.UpdatedAt, &d.LastPollAt, &d.LastSNMPOK, &d.LastSNMPError,
 			&d.LastPingOK, &d.LastPingAt, &d.LastPingRTTMs, &d.OnlineOverride, &d.ReachabilityMode, &d.OfflineSince,
 			&d.SysName, &d.SysDescr, &d.ChassisMAC, &d.CPUProfile, &d.DeviceCategory, &d.LastCPUPct, &d.LastCPUAt, &d.LastSysUptimeCs,
-			&d.LastPageCount, &tonerRaw, &d.FDBMonitoringStatus,
+			&d.LastPageCount, &tonerRaw, &upsRaw, &d.LastUPSAt, &d.FDBMonitoringStatus,
 			&d.SSHUser, &d.SSHPassword, &d.SSHPort, &d.SSHEnablePassword, &d.SSHVendor,
 			&d.TrustLinkTraps,
 		); err != nil {
 			return nil, err
 		}
 		d.LastToners = decodePrinterToners(tonerRaw)
+		d.LastUPS = decodeUPSSnapshot(upsRaw)
 		if d.DeviceCategory == "" {
 			d.DeviceCategory = DeviceCategorySwitch
 		}
@@ -174,6 +176,7 @@ func (s *Store) CountDevices(ctx context.Context) (int, error) {
 func (s *Store) GetDevice(ctx context.Context, id int64) (*models.Device, error) {
 	var d models.Device
 	var tonerRaw []byte
+	var upsRaw []byte
 	err := s.pool.QueryRow(ctx, `
 		SELECT id, name, COALESCE(host, '') AS host, location, uisp_device_id, uisp_overview_status, snmp_version, community,
 		       v3_user, v3_auth_protocol, v3_priv_protocol, v3_engine_id,
@@ -181,7 +184,7 @@ func (s *Store) GetDevice(ctx context.Context, id int64) (*models.Device, error)
 		       created_at, updated_at, last_poll_at, last_snmp_ok, last_snmp_error,
 		       last_ping_ok, last_ping_at, last_ping_rtt_ms, online_override, COALESCE(NULLIF(btrim(reachability_mode), ''), 'auto'), offline_since,
 		       sys_name, sys_descr, chassis_mac, cpu_profile, device_category, last_cpu_pct, last_cpu_at, last_sys_uptime_cs,
-		       last_page_count, last_toners, fdb_monitoring_status,
+		       last_page_count, last_toners, last_ups, last_ups_at, fdb_monitoring_status,
 		       ssh_user, ssh_password, ssh_port, ssh_enable_password, COALESCE(NULLIF(btrim(ssh_vendor), ''), 'auto'),
 		       COALESCE(trust_link_traps, false)
 		FROM devices WHERE id = $1`, id).Scan(
@@ -191,7 +194,7 @@ func (s *Store) GetDevice(ctx context.Context, id int64) (*models.Device, error)
 		&d.CreatedAt, &d.UpdatedAt, &d.LastPollAt, &d.LastSNMPOK, &d.LastSNMPError,
 		&d.LastPingOK, &d.LastPingAt, &d.LastPingRTTMs, &d.OnlineOverride, &d.ReachabilityMode, &d.OfflineSince,
 		&d.SysName, &d.SysDescr, &d.ChassisMAC, &d.CPUProfile, &d.DeviceCategory, &d.LastCPUPct, &d.LastCPUAt, &d.LastSysUptimeCs,
-		&d.LastPageCount, &tonerRaw, &d.FDBMonitoringStatus,
+		&d.LastPageCount, &tonerRaw, &upsRaw, &d.LastUPSAt, &d.FDBMonitoringStatus,
 		&d.SSHUser, &d.SSHPassword, &d.SSHPort, &d.SSHEnablePassword, &d.SSHVendor,
 		&d.TrustLinkTraps,
 	)
@@ -202,6 +205,7 @@ func (s *Store) GetDevice(ctx context.Context, id int64) (*models.Device, error)
 		return nil, err
 	}
 	d.LastToners = decodePrinterToners(tonerRaw)
+	d.LastUPS = decodeUPSSnapshot(upsRaw)
 	if d.DeviceCategory == "" {
 		d.DeviceCategory = DeviceCategorySwitch
 	}
@@ -336,6 +340,18 @@ func (s *Store) UpdateDevice(ctx context.Context, id int64, in CreateDeviceInput
 		return ErrDeviceNotFound
 	}
 	return nil
+}
+
+// ClearDeviceCPU сбрасывает last_cpu_* (для МФУ без осмысленного CPU по SNMP).
+func (s *Store) ClearDeviceCPU(ctx context.Context, id int64) error {
+	_, err := s.pool.Exec(ctx, `
+		UPDATE devices SET
+			last_cpu_pct = NULL,
+			last_cpu_at = NULL,
+			cpu_profile = NULL,
+			updated_at = now()
+		WHERE id = $1`, id)
+	return err
 }
 
 func (s *Store) UpdateDevicePollMeta(ctx context.Context, id int64, ok bool, errMsg *string, sysName, sysDescr, cpuProfile *string, cpuPct *float32, chassisMAC *string, sysUptimeCs *int64) error {

@@ -61,8 +61,10 @@ func (s *Server) handlePostPortPoEReset(w http.ResponseWriter, r *http.Request) 
 }
 
 type bulkPortVLANBody struct {
-	Op     string `json:"op"`
-	VLANID int    `json:"vlan_id"`
+	Op          string `json:"op"`
+	VLANID      int    `json:"vlan_id"`
+	AllowedMode string `json:"allowed_mode,omitempty"`
+	AllowedList string `json:"allowed_vlans,omitempty"`
 }
 
 type postBulkPortsBody struct {
@@ -148,11 +150,11 @@ func (s *Server) handlePostBulkPorts(w http.ResponseWriter, r *http.Request) {
 
 	if hasVLAN {
 		op := strings.TrimSpace(body.VLAN.Op)
-		if op != "set_access" && op != "no_vlan" {
-			writeError(w, http.StatusBadRequest, "vlan.op: set_access или no_vlan")
+		if op != "set_access" && op != "no_vlan" && op != "set_native" && op != "trunk_allow" {
+			writeError(w, http.StatusBadRequest, "vlan.op: set_access, set_native, trunk_allow или no_vlan")
 			return
 		}
-		via, err := s.pushBulkPortVLAN(r.Context(), deviceID, idxs, op, body.VLAN.VLANID)
+		via, err := s.pushBulkPortVLAN(r.Context(), deviceID, idxs, *body.VLAN)
 		if err != nil {
 			writeError(w, http.StatusBadGateway, err.Error())
 			return
@@ -160,8 +162,28 @@ func (s *Server) handlePostBulkPorts(w http.ResponseWriter, r *http.Request) {
 		applied["vlan_op"] = op
 		applied["vlan_id"] = body.VLAN.VLANID
 		applied["vlan_via"] = via
+		if op == "trunk_allow" {
+			applied["allowed_mode"] = body.VLAN.AllowedMode
+			applied["allowed_vlans"] = swcfg.NormalizeVLANList(body.VLAN.AllowedList)
+		}
 		if op == "no_vlan" {
 			notes = append(notes, "VLAN: No VLAN")
+		} else if op == "set_native" {
+			notes = append(notes, fmt.Sprintf("VLAN trunk native %d", body.VLAN.VLANID))
+		} else if op == "trunk_allow" {
+			am := strings.TrimSpace(body.VLAN.AllowedMode)
+			if am == "" {
+				am = "all"
+			}
+			extra := am
+			if am != "all" {
+				extra = am + " " + swcfg.NormalizeVLANList(body.VLAN.AllowedList)
+			}
+			if body.VLAN.VLANID > 0 {
+				notes = append(notes, fmt.Sprintf("VLAN trunk native %d, allowed %s", body.VLAN.VLANID, extra))
+			} else {
+				notes = append(notes, "VLAN trunk allowed "+extra)
+			}
 		} else {
 			notes = append(notes, fmt.Sprintf("VLAN access %d", body.VLAN.VLANID))
 		}
@@ -291,7 +313,9 @@ func (s *Server) pushBulkPortPoE(ctx context.Context, deviceID int64, ifIndexes 
 	})
 }
 
-func (s *Server) pushBulkPortVLAN(ctx context.Context, deviceID int64, ifIndexes []int, op string, vlanID int) (string, error) {
+func (s *Server) pushBulkPortVLAN(ctx context.Context, deviceID int64, ifIndexes []int, vlan bulkPortVLANBody) (string, error) {
+	op := strings.TrimSpace(vlan.Op)
+	vlanID := vlan.VLANID
 	ifaces, err := s.st.ListInterfacesByDevice(ctx, deviceID)
 	if err != nil {
 		return "", err
@@ -306,9 +330,11 @@ func (s *Server) pushBulkPortVLAN(ctx context.Context, deviceID int64, ifIndexes
 			return "", fmt.Errorf("порт ifIndex=%d не найден", idx)
 		}
 		ch := swcfg.PortVLANChange{
-			Op:       op,
-			VLANID:   vlanID,
-			PortMode: store.ResolveInterfacePortRole(found.PortRole, found.CLIPortMode),
+			Op:          op,
+			VLANID:      vlanID,
+			AllowedMode: strings.TrimSpace(vlan.AllowedMode),
+			AllowedList: vlan.AllowedList,
+			PortMode:    store.ResolveInterfacePortRole(found.PortRole, found.CLIPortMode),
 		}
 		if found.CliAccessVlan != nil {
 			ch.PrevAccessVLAN = found.CliAccessVlan
@@ -324,9 +350,11 @@ func (s *Server) pushBulkPortVLAN(ctx context.Context, deviceID int64, ifIndexes
 		// Для range/однотипных портов берём VLAN-смену по первому порту (op/vlan_id одинаковы).
 		first := byIdx[ifIndexes[0]]
 		ch := swcfg.PortVLANChange{
-			Op:       op,
-			VLANID:   vlanID,
-			PortMode: store.ResolveInterfacePortRole(first.PortRole, first.CLIPortMode),
+			Op:          op,
+			VLANID:      vlanID,
+			AllowedMode: strings.TrimSpace(vlan.AllowedMode),
+			AllowedList: vlan.AllowedList,
+			PortMode:    store.ResolveInterfacePortRole(first.PortRole, first.CLIPortMode),
 		}
 		if first.CliAccessVlan != nil {
 			ch.PrevAccessVLAN = first.CliAccessVlan

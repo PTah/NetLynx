@@ -39,6 +39,8 @@ func iconFileStem(raw string) string {
 		return c
 	case "ilo", "ipmi":
 		return "ilo-idrac-ipmi"
+	case "ups":
+		return "industrial"
 	default:
 		return "other"
 	}

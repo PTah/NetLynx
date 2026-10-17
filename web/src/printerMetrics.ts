@@ -46,3 +46,29 @@ export function isColorMfu(toners: PrinterToner[] | null | undefined): boolean {
   const keys = new Set(toners.map((t) => t.key));
   return keys.has("cyan") || keys.has("magenta") || keys.has("yellow");
 }
+
+/** Порог низкого тонера (оповещение TONER_LOW). */
+export const TONER_LOW_PCT = 5;
+/** Порог критического тонера (TONER_CRITICAL + мигание в UI). */
+export const TONER_CRITICAL_PCT = 2;
+
+/** Минимальный известный % среди картриджей; null если нет числовых значений. */
+export function minTonerPct(toners: PrinterToner[] | null | undefined): number | null {
+  if (!toners?.length) return null;
+  let min: number | null = null;
+  for (const t of toners) {
+    if (t.pct == null || !Number.isFinite(t.pct)) continue;
+    if (min == null || t.pct < min) min = t.pct;
+  }
+  return min;
+}
+
+export function isTonerCritical(toners: PrinterToner[] | null | undefined): boolean {
+  const m = minTonerPct(toners);
+  return m != null && m <= TONER_CRITICAL_PCT;
+}
+
+export function isTonerLow(toners: PrinterToner[] | null | undefined): boolean {
+  const m = minTonerPct(toners);
+  return m != null && m <= TONER_LOW_PCT;
+}

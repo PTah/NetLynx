@@ -22,7 +22,13 @@ type PortLiveSettings struct {
 	PortPriority int
 	PathCost     int // 0 = auto
 	AccessVLAN   *int
+	NativeVLAN   *int   // switchport trunk native vlan
 	PortMode     string // access | trunk | …
+	// Trunk allowed: All=true → «allowed vlan all»; иначе список (абсолютный / после add).
+	TrunkAllowedAll bool
+	TrunkAllowed    []int
+	// TrunkAllowedMode — как в конфиге: all | set | add | remove | except | ""
+	TrunkAllowedMode string
 }
 
 // ParseInterfaceFromRunningConfig — настройки одного interface из полного running-config.
@@ -209,6 +215,17 @@ func ParseInterfaceConfigSnippet(out string, wantIface ...string) PortLiveSettin
 				s.AccessVLAN = &v
 			}
 		}
+		if strings.HasPrefix(ll, "switchport trunk native vlan ") {
+			rest := strings.TrimSpace(ll[len("switchport trunk native vlan"):])
+			if n, err := strconv.Atoi(rest); err == nil && n > 0 && n <= 4094 {
+				v := n
+				s.NativeVLAN = &v
+			}
+		}
+		if strings.HasPrefix(ll, "switchport trunk allowed vlan ") {
+			rest := strings.TrimSpace(ll[len("switchport trunk allowed vlan"):])
+			applyTrunkAllowedLive(&s, rest)
+		}
 		if strings.HasPrefix(ll, "vlan pvid ") {
 			rest := strings.TrimSpace(ll[len("vlan pvid"):])
 			if n, err := strconv.Atoi(rest); err == nil && n > 0 && n <= 4094 && s.AccessVLAN == nil {
@@ -222,7 +239,44 @@ func ParseInterfaceConfigSnippet(out string, wantIface ...string) PortLiveSettin
 	} else if sawSTPEnable {
 		s.STPEnabled = true
 	}
+	// После полного блока: на trunk PVID/access без явного native → native.
+	if strings.EqualFold(strings.TrimSpace(s.PortMode), "trunk") && s.NativeVLAN == nil && s.AccessVLAN != nil {
+		v := *s.AccessVLAN
+		s.NativeVLAN = &v
+	}
+	// Bare trunk без allowed-строки = all VLAN.
+	if strings.EqualFold(strings.TrimSpace(s.PortMode), "trunk") && s.TrunkAllowedMode == "" {
+		s.TrunkAllowedAll = true
+		s.TrunkAllowedMode = TrunkAllowAll
+	}
 	return s
+}
+
+func applyTrunkAllowedLive(s *PortLiveSettings, rest string) {
+	rest = strings.TrimSpace(rest)
+	low := strings.ToLower(rest)
+	switch {
+	case low == "all":
+		s.TrunkAllowedAll = true
+		s.TrunkAllowedMode = TrunkAllowAll
+		s.TrunkAllowed = nil
+	case strings.HasPrefix(low, "add "):
+		s.TrunkAllowedAll = false
+		s.TrunkAllowedMode = TrunkAllowAdd
+		s.TrunkAllowed = ParseVLANIDList(rest[len("add "):])
+	case strings.HasPrefix(low, "remove "):
+		s.TrunkAllowedAll = false
+		s.TrunkAllowedMode = TrunkAllowRemove
+		s.TrunkAllowed = ParseVLANIDList(rest[len("remove "):])
+	case strings.HasPrefix(low, "except "):
+		s.TrunkAllowedAll = false
+		s.TrunkAllowedMode = TrunkAllowExcept
+		s.TrunkAllowed = ParseVLANIDList(rest[len("except "):])
+	default:
+		s.TrunkAllowedAll = false
+		s.TrunkAllowedMode = TrunkAllowSet
+		s.TrunkAllowed = ParseVLANIDList(rest)
+	}
 }
 
 // FetchPortLiveSettings читает running-config одного интерфейса.

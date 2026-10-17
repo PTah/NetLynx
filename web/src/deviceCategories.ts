@@ -20,6 +20,7 @@ export const BUILTIN_DEVICE_CATEGORIES: DeviceCategoryDef[] = [
   { id: "computer", label: "Компьютеры", color: "#9b59d0", blink: false, builtin: true, sort_order: 50 },
   { id: "phone", label: "Телефоны", color: "#e45c9a", blink: false, builtin: true, sort_order: 60 },
   { id: "mfu", label: "МФУ", color: "#8b5a2b", blink: false, builtin: true, sort_order: 70 },
+  { id: "ups", label: "ИБП", color: "#a0c4ff", blink: false, builtin: true, sort_order: 75 },
   { id: "camera", label: "Камеры", color: "#ff8c00", blink: true, builtin: true, sort_order: 80 },
   { id: "other", label: "Иные устройства", color: "#c5c9d0", blink: false, builtin: true, sort_order: 90 },
 ];
@@ -41,6 +42,7 @@ export function normalizeDeviceCategory(raw?: string | null): DeviceCategory {
     case "computer":
     case "phone":
     case "mfu":
+    case "ups":
     case "camera":
     case "other":
       return c;
@@ -57,6 +59,12 @@ export function normalizeDeviceCategory(raw?: string | null): DeviceCategory {
 export function isPrinterCategory(raw?: string | null): boolean {
   const c = (raw ?? "").trim().toLowerCase();
   return c === "mfu" || c === "мфу" || c === "принтер" || c === "printer" || c === "mfp";
+}
+
+/** Встроенный тип ИБП (в БД нормализуется в ups). */
+export function isUpsCategory(raw?: string | null): boolean {
+  const c = (raw ?? "").trim().toLowerCase();
+  return c === "ups" || c === "ибп" || c === "источник питания";
 }
 
 export function categoryById(
