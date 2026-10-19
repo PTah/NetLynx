@@ -1,3 +1,4 @@
+<!-- Edited by nc.ai 0.8.8.2 on new-admin-pc 2026-10-19 10:33:52 -->
 # NetLynx
 
 SNMP-мониторинг коммутаторов, веб-UI.
@@ -12,15 +13,63 @@ SNMP-мониторинг коммутаторов, веб-UI.
 
 **Скриншоты:** [SCREENSHOTS.md](SCREENSHOTS.md)
 
+**Разделы:** [Установка](#установка-с-нуля) · [Что умеет](#что-умеет-netlynx) · [Настройки окружения](#настройки-окружения-env) · [Обновление и эксплуатация](#обновление-и-эксплуатация) · [Журнал версий](#значимые-изменения-кратко) · [Состав](#из-чего-состоит-netlynx)
+
+## Что умеет NetLynx
+
+| Возможность | Коротко | Документ |
+|---|---|---|
+| Опрос по SNMP | порты, скорость, утилизация, CPU, события Link Up/Down, flap, broadcast storm; лёгкий опрос каждые 15–60 с, тяжёлый (LLDP/CDP/ARP/PoE/STP/FDB) — раз в 5 мин | [Polling-and-Topology-Cache.md](docs/Polling-and-Topology-Cache.md) |
+| Топология | LLDP/CDP + FDB, карта, ручные линки, поиск пути, blast-radius (VLAN / shutdown порта) | [Manual-Topology-Links.md](docs/Manual-Topology-Links.md) |
+| Обнаружение и инвентарь | подсеть по SNMP/ICMP, «Обнаружено» → «Узлы», типы устройств, UISP | [Autodiscover.md](docs/Autodiscover.md) |
+| Порты и VLAN | access/trunk/native/allowed, VLAN database, PoE (детект, ватты, reset), описание порта, mass-edit | [PoE-detection.md](docs/PoE-detection.md), [Vendors.md](docs/Vendors.md) |
+| Расследования | где MAC, почему петля, кто за портом | [MAC-Investigation.md](docs/MAC-Investigation.md), [Loop-Investigation.md](docs/Loop-Investigation.md) |
+| МФУ / принтеры | счётчик страниц, остаток тонера, графики | [Printer-MIB.md](docs/Printer-MIB.md) |
+| ИБП | UPS-MIB: заряд, автономия, вход/выход, нагрузка, температура, аварии; события и история | [UPS.md](docs/UPS.md) |
+| События и уведомления | журнал событий, Telegram / email / webhook, фильтры по типам и важности, статистика offline и питания ИБП | [Notifications.md](docs/Notifications.md) |
+| Роли и доступ | viewer / operator / admin, JWT + сессии, Basic как аварийный вход | [Roles.md](docs/Roles.md) |
+| Секреты и бэкапы | AES-GCM для community/SSH/SMTP/токенов; ZIP-бэкап БД + env; снимки `show run` и MikroTik `/export` | [Secrets.md](docs/Secrets.md), [Config-History.md](docs/Config-History.md) |
+
+## Настройки окружения (env)
+
+Файл: `/etc/netlynx/netlynx.env` на Linux (шаблон — [.env.example](.env.example)). После правки: `sudo systemctl restart NetLynx`. Секреты (community, SMTP, токены) хранятся в БД зашифрованными — см. [Secrets.md](docs/Secrets.md).
+
+| Переменная | По умолчанию | Зачем |
+|---|---|---|
+| `DATABASE_URL` | `postgres://…@127.0.0.1:5433/invetor` | PostgreSQL (БД называется `invetor` — исторически) |
+| `HTTP_ADDR` | `:8080` | адрес API + веб-UI (nginx опционально) |
+| `NETLYNX_ADMIN_USER` / `NETLYNX_ADMIN_PASSWORD` | `admin` / пароль из файла | первый вход; далее — пользователи в UI |
+| `NETLYNX_SECRETS_KEY` | — | ключ AES-GCM для секретов в БД (`secrets-genkey`) |
+| `POLL_SCHEDULER_SECONDS` | `10` | тик планировщика опроса |
+| `POLL_CRITICAL_INTERVAL_SECONDS` | `15` | верхняя граница лёгкого опроса для роутеров/коммутаторов/серверов |
+| `POLL_HEAVY_SECONDS` | `300` | тяжёлый опрос (LLDP/CDP/ARP/PoE/STP/FDB); можно переопределить в карточке узла |
+| `FDB_POLL_INTERVAL_SECONDS` | `900` | опрос FDB (внутри тяжёлого) |
+| `METRICS_ENABLED` / `METRICS_RETENTION_DAYS` | `true` / `7` | история метрик: вкл/выкл и срок хранения |
+| `METRICS_UTIL_INTERVAL_SECONDS` | `60` | как часто писать util/rate в историю |
+| `METRICS_PRINTER_RETENTION_DAYS` | `365` | хранение тонера/страниц/ИБП (`page_count`, `toner_*`, `ups_*`) |
+| `WEB_DIST` | `web/dist` | каталог собранного веба |
+| `NETLYNX_COOKIE_SECURE` | `false` | `true` при работе только по HTTPS |
+
+Полный список с комментариями — в [.env.example](.env.example).
+
+## Обновление и эксплуатация
+
+- **Обновить версию:** [Runbook-Linux.md → «Обновление версии»](docs/Runbook-Linux.md#обновление-версии) (git pull + `bash docs/deploy.sh`; миграции БД применяются автоматически при старте).
+- **Откатиться:** [Приложение C](docs/Runbook-Linux.md#приложение-c-откат-на-старую-версию).
+- **Проверить, что живо:** `curl -s http://127.0.0.1:8080/health` → `{"status":"ok","version":"…"}`.
+- **Логи службы:** `journalctl -u NetLynx -f` или **Настройки → Журнал** в UI.
+- **Резервные копии:** **Настройки → Резервные копии** + [Config-History.md](docs/Config-History.md).
+- **Если не работает:** [Runbook → «Если что-то пошло не так»](docs/Runbook-Linux.md#если-что-то-пошло-не-так) (служба, Postgres, порт, сборка web).
+
 ## Установка с нуля
 
 | Платформа | Документ |
 |-----------|----------|
 | **Linux** (рекомендуется) | [docs/Runbook-Linux.md](docs/Runbook-Linux.md) — сервер с нуля; вход в UI: [шаг 5](docs/Runbook-Linux.md#шаг-5-первый-вход-в-браузере) (`:8080` или nginx) |
-| **Linux, уровень Ctrl-C/Ctrl-V** *(админ с Habr)* | [Чеклист](docs/Runbook-Linux.md#краткий-чеклист-копируйте-блоками) — копируйте **весь блок** (пакеты → docker → clone → `bash docs/deploy.sh`). [deploy.sh](docs/deploy.sh) **ставит всё сам** (сборка, Postgres, systemd, health). [Шаг 5](docs/Runbook-Linux.md#шаг-5-первый-вход-в-браузере) — войти в UI. Runbook — если пропустили перelogin после `usermod docker` *(спойлер: `permission denied` — это не баг NetLynx)*. |
+| **Linux, уровень Ctrl-C/Ctrl-V** *(админ с Habr)* | [Чеклист](docs/Runbook-Linux.md#краткий-чеклист-копируйте-блоками) — копируйте **весь блок** (пакеты → docker → clone → `bash docs/deploy.sh`). [deploy.sh](docs/deploy.sh) **ставит всё сам** (сборка, Postgres, systemd, health). [Шаг 5](docs/Runbook-Linux.md#шаг-5-первый-вход-в-браузере) — войти в UI. Runbook — если пропустили перелогин после `usermod docker` *(спойлер: `permission denied` — это не баг NetLynx)*. |
 | **Windows Server** | [docs/Windows-Server-Setup.md](docs/Windows-Server-Setup.md) |
 
-После установки: SNMP community — [docs/SNMP-Community.md](docs/SNMP-Community.md); автообнаружение (нужны **SNMP + LLDP** на свитчах) — [docs/Autodiscover.md](docs/Autodiscover.md); опросы и кэш топологии (поллер, «ночной» blast-rebuild) — [docs/Polling-and-Topology-Cache.md](docs/Polling-and-Topology-Cache.md); вендоры — [docs/Vendors.md](docs/Vendors.md); МФУ/принтеры (страницы, тонер) — [docs/Printer-MIB.md](docs/Printer-MIB.md); ИБП по SNMP — [docs/UPS.md](docs/UPS.md).
+После установки: SNMP community — [docs/SNMP-Community.md](docs/SNMP-Community.md); автообнаружение (нужны **SNMP + LLDP** на свитчах) — [docs/Autodiscover.md](docs/Autodiscover.md); опросы и кэш топологии (поллер, «ночной» blast-rebuild) — [docs/Polling-and-Topology-Cache.md](docs/Polling-and-Topology-Cache.md); вендоры — [docs/Vendors.md](docs/Vendors.md); МФУ/принтеры (страницы, тонер) — [docs/Printer-MIB.md](docs/Printer-MIB.md); ИБП по SNMP — [docs/UPS.md](docs/UPS.md); уведомления (Telegram/email/webhook) — [docs/Notifications.md](docs/Notifications.md).
 
 Эталонный репозиторий git: [https://github.com/PTah/NetLynx](https://github.com/PTah/NetLynx) (ветка `main`).
 
@@ -34,6 +83,7 @@ SNMP-мониторинг коммутаторов, веб-UI.
 - **История конфигов и бэкапы:** [docs/Config-History.md](docs/Config-History.md) — снимки `show run`, бэкап `show run` / MikroTik `/export` в ZIP (`backup_router_cfg`).
 - Производители коммутаторов: [docs/Vendors.md](docs/Vendors.md)
 - Расследование MAC / flapping: [docs/MAC-Investigation.md](docs/MAC-Investigation.md)
+- Уведомления (Telegram / email / webhook), фильтры, типы событий: [docs/Notifications.md](docs/Notifications.md)
 - Петли LLDP: [docs/Loop-Investigation.md](docs/Loop-Investigation.md)
 - Postmortem: [docs/Postmortem.md](docs/Postmortem.md)
 - HTTPS через nginx (опционально): [docs/install-nginx.sh](docs/install-nginx.sh)

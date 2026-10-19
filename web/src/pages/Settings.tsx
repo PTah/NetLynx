@@ -52,6 +52,71 @@ function parseSettingsTab(raw: string | null): SettingsTab {
   return "inventory";
 }
 
+type NotifStatsKind = "reachability" | "ups";
+
+type NotifStatsRow = {
+  device_id: number;
+  device_name: string;
+  host: string;
+  primary_count: number;
+  recovery_count: number;
+  last_primary_at?: string;
+  avg_duration_sec?: number;
+};
+
+type NotifStatsResponse = {
+  kind: NotifStatsKind;
+  hours: number;
+  from: string;
+  to: string;
+  primary_type: string;
+  recovery_type: string;
+  rows: NotifStatsRow[];
+};
+
+/** Периоды отчёта статистики (значение = часы назад). */
+const NOTIF_STATS_PERIODS: { hours: number; label: string }[] = [
+  { hours: 1, label: "1 час" },
+  { hours: 2, label: "2 часа" },
+  { hours: 3, label: "3 часа" },
+  { hours: 4, label: "4 часа" },
+  { hours: 6, label: "6 часов" },
+  { hours: 8, label: "8 часов" },
+  { hours: 12, label: "12 часов" },
+  { hours: 24, label: "24 часа" },
+  { hours: 48, label: "48 часов" },
+  { hours: 72, label: "72 часа" },
+  { hours: 7 * 24, label: "7 дней" },
+  { hours: 14 * 24, label: "14 дней" },
+  { hours: 30 * 24, label: "30 дней" },
+  { hours: 60 * 24, label: "60 дней" },
+  { hours: 90 * 24, label: "90 дней" },
+  { hours: 120 * 24, label: "120 дней" },
+  { hours: 180 * 24, label: "180 дней" },
+  { hours: 365 * 24, label: "365 дней" },
+];
+
+function formatAvgDurationSec(sec: number | null | undefined): string {
+  if (sec == null || !Number.isFinite(sec)) return "—";
+  const s = Math.round(sec);
+  if (s < 60) return `${s} с`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m} мин`;
+  const h = Math.floor(m / 60);
+  const rm = m % 60;
+  if (h < 48) return rm ? `${h} ч ${rm} мин` : `${h} ч`;
+  const d = Math.floor(h / 24);
+  return `${d} дн.`;
+}
+
+function formatNotifStatsPeriodLabel(hours: number): string {
+  const hit = NOTIF_STATS_PERIODS.find((p) => p.hours === hours);
+  if (hit) return hit.label;
+  if (hours < 24) return `${hours} ч`;
+  if (hours % 24 === 0) return `${hours / 24} дн.`;
+  return `${hours} ч`;
+}
+
 type UispSettings = {
   enabled: boolean;
   base_url?: string | null;
@@ -213,6 +278,11 @@ export default function Settings() {
   const [notifErr, setNotifErr] = useState<string | null>(null);
   const [notifOk, setNotifOk] = useState<string | null>(null);
   const [emailTesting, setEmailTesting] = useState(false);
+  const [notifStatsKind, setNotifStatsKind] = useState<NotifStatsKind>("reachability");
+  const [notifStatsHours, setNotifStatsHours] = useState(String(30 * 24));
+  const [notifStats, setNotifStats] = useState<NotifStatsResponse | null>(null);
+  const [notifStatsBusy, setNotifStatsBusy] = useState(false);
+  const [notifStatsErr, setNotifStatsErr] = useState<string | null>(null);
   const [aboutVersion, setAboutVersion] = useState("");
   const [aboutCommit, setAboutCommit] = useState("");
   const [aboutBuiltAt, setAboutBuiltAt] = useState("");
@@ -659,6 +729,23 @@ export default function Settings() {
       .then(applyNotifSettings)
       .catch((e: Error) => setNotifErr(e.message));
   }, []);
+
+  const loadNotifStats = useCallback(() => {
+    const hoursNum = Number(notifStatsHours);
+    const hours =
+      Number.isFinite(hoursNum) && hoursNum >= 1 ? Math.min(365 * 24, Math.floor(hoursNum)) : 30 * 24;
+    setNotifStatsBusy(true);
+    setNotifStatsErr(null);
+    apiGet<NotifStatsResponse>(
+      `/api/v1/settings/notifications/stats?kind=${encodeURIComponent(notifStatsKind)}&hours=${hours}`,
+    )
+      .then((r) => setNotifStats(r))
+      .catch((e: Error) => {
+        setNotifStats(null);
+        setNotifStatsErr(e.message);
+      })
+      .finally(() => setNotifStatsBusy(false));
+  }, [notifStatsKind, notifStatsHours]);
 
   type TrapListenSettings = {
     listen_enabled: boolean;
@@ -1686,6 +1773,119 @@ export default function Settings() {
 
       {tab === "notifications" && (
         <div role="tabpanel">
+          <section className="settings-card" style={{ maxWidth: 960 }}>
+            <h2>Статистика</h2>
+            <p>
+              Сводка по журналу событий: какие устройства чаще уходили в оффлайн или сколько раз у ИБП пропадало питание.
+              Данные берутся из уже записанных событий (без отдельных настроек каналов).
+            </p>
+            <div
+              style={{
+                display: "flex",
+                flexWrap: "wrap",
+                gap: "0.75rem",
+                alignItems: "flex-end",
+                marginBottom: "0.75rem",
+              }}
+            >
+              <label>
+                События
+                <br />
+                <select
+                  value={notifStatsKind}
+                  onChange={(e) => setNotifStatsKind(e.target.value as NotifStatsKind)}
+                >
+                  <option value="reachability">Устройство оффлайн ↔ онлайн</option>
+                  <option value="ups">ИБП: питание пропало ↔ вернулось</option>
+                </select>
+              </label>
+              <label>
+                Период
+                <br />
+                <select value={notifStatsHours} onChange={(e) => setNotifStatsHours(e.target.value)}>
+                  {NOTIF_STATS_PERIODS.map((p) => (
+                    <option key={p.hours} value={String(p.hours)}>
+                      {p.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button type="button" disabled={notifStatsBusy} onClick={() => void loadNotifStats()}>
+                {notifStatsBusy ? "Загрузка…" : "Показать"}
+              </button>
+            </div>
+            {notifStatsErr && (
+              <p style={{ color: "#f88" }} role="alert">
+                {notifStatsErr}
+              </p>
+            )}
+            {notifStats && (
+              <>
+                <p style={{ margin: "0 0 0.5rem", color: "#9aa3b5", fontSize: "0.9rem" }}>
+                  {notifStats.kind === "reachability"
+                    ? "Счётчик «Ушло оффлайн» — события DEVICE_OFFLINE; «Снова онлайн» — DEVICE_ONLINE."
+                    : "Счётчик «Питание пропало» — UPS_ON_BATTERY; «Питание вернулось» — UPS_MAINS_OK."}{" "}
+                  Окно: {formatNotifStatsPeriodLabel(notifStats.hours)} (
+                  {new Date(notifStats.from).toLocaleString()} — {new Date(notifStats.to).toLocaleString()}
+                  ). Устройств в таблице: {notifStats.rows.length}.
+                </p>
+                {notifStats.rows.length === 0 ? (
+                  <p className="muted">За выбранный период таких событий нет.</p>
+                ) : (
+                  <div style={{ overflowX: "auto" }}>
+                    <table
+                      className="settings-cat-table"
+                      style={{ width: "100%", maxWidth: 920, borderCollapse: "collapse" }}
+                    >
+                      <thead>
+                        <tr>
+                          <th style={{ textAlign: "left" }}>Устройство</th>
+                          <th style={{ textAlign: "left" }}>Host</th>
+                          <th style={{ textAlign: "right" }}>
+                            {notifStats.kind === "reachability" ? "Ушло оффлайн" : "Питание пропало"}
+                          </th>
+                          <th style={{ textAlign: "right" }}>
+                            {notifStats.kind === "reachability" ? "Снова онлайн" : "Питание вернулось"}
+                          </th>
+                          {notifStats.kind === "reachability" && (
+                            <th style={{ textAlign: "right" }}>Ср. простой</th>
+                          )}
+                          <th style={{ textAlign: "left" }}>Последний раз</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {notifStats.rows.map((row) => (
+                          <tr key={row.device_id}>
+                            <td>
+                              <Link to={`/devices/${row.device_id}`}>{row.device_name}</Link>
+                            </td>
+                            <td>{row.host || "—"}</td>
+                            <td style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
+                              {row.primary_count}
+                            </td>
+                            <td style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
+                              {row.recovery_count}
+                            </td>
+                            {notifStats.kind === "reachability" && (
+                              <td style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
+                                {formatAvgDurationSec(row.avg_duration_sec)}
+                              </td>
+                            )}
+                            <td style={{ whiteSpace: "nowrap" }}>
+                              {row.last_primary_at
+                                ? new Date(row.last_primary_at).toLocaleString()
+                                : "—"}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </>
+            )}
+          </section>
+
           <section className="settings-card">
             <h2>Каналы уведомлений</h2>
       <p>

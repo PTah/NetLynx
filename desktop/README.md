@@ -2,12 +2,12 @@
 
 **Статус: черновик / заготовка под будущий клиент. Полноценного desktop-приложения пока нет.**
 
-В каталоге `desktop/` лежит ранний каркас на Electron (эксперимент для шага «Windows-клиент» из [TZ-snmp-switch-monitor.md](TZ-snmp-switch-monitor.md)). Это **не** автономная версия NetLynx и **не** замена серверу или веб-интерфейсу.
+В каталоге `desktop/` лежит ранний каркас на Electron (эксперимент для шага «Windows-клиент» из [TZ-snmp-switch-monitor.md](../docs/TZ-snmp-switch-monitor.md)). Это **не** автономная версия NetLynx и **не** замена серверу или веб-интерфейсу.
 
 ## Что планировалось (ТЗ)
 
 - Клиент Windows поверх того же REST API, что и веб-морда.
-- Стабильный контракт API — см. [API.md](API.md).
+- Стабильный контракт API — см. [API.md](../docs/API.md).
 
 ## Что есть сейчас (не для production)
 
@@ -16,7 +16,7 @@
 
 ## Как пользоваться NetLynx на Windows сегодня
 
-1. **Сервер** — [Windows-Server-Setup.md](Windows-Server-Setup.md) (Go + PostgreSQL + NSSM) **или** Linux-сервер + браузер.
+1. **Сервер** — [Windows-Server-Setup.md](../docs/Windows-Server-Setup.md) (Go + PostgreSQL + NSSM) **или** Linux-сервер + браузер.
 2. **Интерфейс** — веб в браузере (`http://<host>:8080` или через nginx).
 
 Сборка черновика (если нужна для разработки):

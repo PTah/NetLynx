@@ -134,6 +134,7 @@ func NewServer(st *store.Store, cfg config.Config, bi BuildInfo, hub *live.Hub, 
 		r.Get("/devices/{id}/vlans/delete-impact", s.handleVLANDeleteImpact)
 		r.Get("/devices/{id}/fdb/snapshots", s.handleListDeviceFDBSnapshots)
 		r.Get("/events", s.handleListEvents)
+		r.Get("/settings/notifications/stats", s.handleGetNotificationStats)
 		r.Get("/system/stats", s.handleSystemStats)
 		r.Get("/topology", s.handleGetTopology)
 		r.Get("/topology/path", s.handleGetTopologyPath)

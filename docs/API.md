@@ -167,6 +167,7 @@ http://<IP_или_имя_сервера>:8080
 | Метод | Путь | Роль | Описание |
 |-------|------|------|----------|
 | GET/PATCH | `/api/v1/settings/notifications` | operator | webhook, TG, email, **incident_action_*** (enabled, event_types, dry_run, cooldown_seconds) |
+| GET | `/api/v1/settings/notifications/stats` | viewer | сводка: `kind=reachability\|ups`, `hours` (1–8760; UI: 1ч…365д), или `days` (совместимость = N×24 ч); таблица по устройствам |
 | POST | `/api/v1/settings/notifications/email-test` | operator | тест SMTP |
 | GET/PATCH | `/api/v1/settings/uisp` | operator | UISP |
 | GET | `/api/v1/settings/device-categories` | viewer | типы |

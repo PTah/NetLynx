@@ -432,6 +432,45 @@ func (s *Server) handleGetNotifications(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, toPublicNotifications(ns))
 }
 
+// handleGetNotificationStats — сводка по DEVICE_OFFLINE/ONLINE или UPS_ON_BATTERY/MAINS_OK.
+// Query: kind=reachability|ups, hours=1…8760 (предпочтительнее), days=N (совместимость: N*24 ч).
+func (s *Server) handleGetNotificationStats(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	kind := store.EventStatsKind(strings.TrimSpace(q.Get("kind")))
+	if kind == "" {
+		kind = store.EventStatsReachability
+	}
+	hours := 0
+	if v := q.Get("hours"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			hours = n
+		}
+	} else if v := q.Get("days"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			hours = n * 24
+		}
+	}
+	limit := 100
+	if v := q.Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			limit = n
+		}
+	}
+	res, err := s.st.EventStatsByKind(r.Context(), kind, hours, limit)
+	if err != nil {
+		if strings.Contains(err.Error(), "неизвестный kind") {
+			writeError(w, http.StatusBadRequest, "kind: reachability | ups")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if res.Rows == nil {
+		res.Rows = []store.EventStatsRow{}
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
 type testEmailBody struct {
 	EmailFrom         *string `json:"email_from"`
 	EmailTo           *string `json:"email_to"`
