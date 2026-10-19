@@ -2,6 +2,8 @@
 
 Полная история изменений. В [README](../README.md) — последние версии и правила нумерации.
 
+**0.5.2** — документация, партия 4: Autodiscover, Vendors, PoE-detection — 19 из 30 документов на английском (весь эксплуатационный блок).
+
 **0.5.1** — документация, партия 3 перевода: Windows-Server-Setup, Config-History, Polling-and-Topology-Cache, Ignore-List, MAC-Investigation (16 из 30 документов на английском); исправлена склеенная строка таблицы «лёгкий/тяжёлый опрос».
 
 **0.5.0** — документация, партия 2 перевода: VLAN, Notifications, Secrets, Printer-MIB, Loop-Investigation, Manual-Topology-Links (всего 11 документов на английском в `docs/en/`), обновлён индекс `docs/README.md`.

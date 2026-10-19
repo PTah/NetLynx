@@ -120,6 +120,8 @@ History before the reset (the `0.13.x` line and older) is kept in the journal �
 
 Full journal of every version — [docs/Changelog.md](docs/Changelog.md) (Russian). Latest releases:
 
+**0.5.2** — docs, translation batch 4 (the whole operations set is now translated): [Autodiscover](docs/en/Autodiscover.md), [Vendors](docs/en/Vendors.md), [PoE-detection](docs/en/PoE-detection.md) — **19 of 30** documents in English, covering every admin and engineer guide.
+
 **0.5.1** — docs, translation batch 3: [Windows-Server-Setup](docs/en/Windows-Server-Setup.md), [Config-History](docs/en/Config-History.md), [Polling-and-Topology-Cache](docs/en/Polling-and-Topology-Cache.md), [Ignore-List](docs/en/Ignore-List.md), [MAC-Investigation](docs/en/MAC-Investigation.md) — **16 of 30** documents are in English now. Also fixed a merged table row in the Russian `Polling-and-Topology-Cache.md`.
 
 **0.5.0** — docs, translation batch 2: [VLAN](docs/en/VLAN.md), [Notifications](docs/en/Notifications.md), [Secrets](docs/en/Secrets.md), [Printer-MIB](docs/en/Printer-MIB.md), [Loop-Investigation](docs/en/Loop-Investigation.md), [Manual-Topology-Links](docs/en/Manual-Topology-Links.md) — 11 documents in English now.

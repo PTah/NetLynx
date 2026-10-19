@@ -1,5 +1,7 @@
 # Производители коммутаторов (Vendors)
 
+**Перевод:** [English version](en/Vendors.md)
+
 План поддержки SNMP/SSH в **NetLynx** для разных брендов.
 
 Камеры (Dahua / Hikvision / Trassir и др.) уже могут появляться в FDB с подписью OUI; ниже речь про **управляемые коммутаторы** тех же и других вендоров (у Dahua, Hikvision, HiWatch, Trassir есть L2/L3 managed switches — их тоже нужно поддерживать как свитчи, не только как «камеры за портом»).

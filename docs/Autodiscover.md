@@ -1,5 +1,7 @@
 ﻿# Autodiscover устройств на портах (LLDP / CDP)
 
+**Перевод:** [English version](en/Autodiscover.md)
+
 Как NetLynx **опрашивает** свитчи и **пересобирает** кэш графа (в т.ч. «ночной» rebuild в 3:00) — отдельно: [Polling-and-Topology-Cache.md](Polling-and-Topology-Cache.md).
 
 ## Что нужно на коммутаторах
