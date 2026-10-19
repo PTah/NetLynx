@@ -55,12 +55,12 @@ The full annotated list is in [.env.example](.env.example).
 
 ## Upgrade and operations
 
-- **Upgrade:** [Runbook-Linux.md → "Обновление версии"](docs/Runbook-Linux.md#обновление-версии) (`git pull` + `bash docs/deploy.sh`; DB migrations run automatically on start).
+- **Upgrade:** [Runbook-Linux.md → "Upgrade"](docs/Runbook-Linux.md#обновление-версии) (`git pull` + `bash docs/deploy.sh`; DB migrations run automatically on start).
 - **Roll back:** [Appendix C](docs/Runbook-Linux.md#приложение-c-откат-на-старую-версию).
 - **Check it is alive:** `curl -s http://127.0.0.1:8080/health` → `{"status":"ok","version":"…"}`.
 - **Service logs:** `journalctl -u NetLynx -f` or **Settings → Log** in the UI.
 - **Backups:** **Settings → Backups** plus [Config-History.md](docs/Config-History.md).
-- **If something is broken:** [Runbook → "Если что-то пошло не так"](docs/Runbook-Linux.md#если-что-то-пошло-не-так) (service, Postgres, port, web build).
+- **If something is broken:** [Runbook → "Troubleshooting"](docs/Runbook-Linux.md#если-что-то-пошло-не-так) (service, Postgres, port, web build).
 
 ## First run after installation
 
