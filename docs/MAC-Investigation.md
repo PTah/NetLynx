@@ -1,5 +1,7 @@
 # Расследование MAC-аномалий
 
+**Перевод:** [English version](en/MAC-Investigation.md)
+
 Модуль помогает разобрать **MAC flapping**, блуждающие адреса и ситуации «один MAC на нескольких access-портах», когда топология LLDP/CDP не показывает кольцо.
 
 См. также: [Loop-Investigation.md](Loop-Investigation.md) (петли устройств), [Postmortem.md](Postmortem.md) (таймлайн вокруг момента).

@@ -14,17 +14,17 @@ NetLynx documentation. **Russian is the primary language**; English versions liv
 | [VLAN.md](VLAN.md) | ✅ | ✅ [en](en/VLAN.md) | VLAN database, access/trunk/native/allowed, delete impact |
 | [Notifications.md](Notifications.md) | ✅ | ✅ [en](en/Notifications.md) | Telegram/email/webhook, filters, event types, statistics |
 | [Autodiscover.md](Autodiscover.md) | ✅ | ⏳ | discovery: LLDP/CDP, SNMP scan, promotion to inventory |
-| [Polling-and-Topology-Cache.md](Polling-and-Topology-Cache.md) | ✅ | ⏳ | light/heavy polling, priorities, blast cache |
+| [Polling-and-Topology-Cache.md](Polling-and-Topology-Cache.md) | ✅ | ✅ [en](en/Polling-and-Topology-Cache.md) | light/heavy polling, priorities, blast cache |
 | [Vendors.md](Vendors.md) | ✅ | ⏳ | supported vendors and their quirks |
 | [PoE-detection.md](PoE-detection.md) | ✅ | ⏳ | PoE detection, watts, reset, SSH fallback |
 | [Printer-MIB.md](Printer-MIB.md) | ✅ | ✅ [en](en/Printer-MIB.md) | MFPs: pages, toner, alerts |
-| [Config-History.md](Config-History.md) | ✅ | ⏳ | `show run` snapshots, diffs, backups |
-| [MAC-Investigation.md](MAC-Investigation.md) | ✅ | ⏳ | where a MAC lives, flapping |
+| [Config-History.md](Config-History.md) | ✅ | ✅ [en](en/Config-History.md) | `show run` snapshots, diffs, backups |
+| [MAC-Investigation.md](MAC-Investigation.md) | ✅ | ✅ [en](en/MAC-Investigation.md) | where a MAC lives, flapping |
 | [Loop-Investigation.md](Loop-Investigation.md) | ✅ | ✅ [en](en/Loop-Investigation.md) | LLDP/CDP loops |
 | [Manual-Topology-Links.md](Manual-Topology-Links.md) | ✅ | ✅ [en](en/Manual-Topology-Links.md) | manual links (SFP, VLAN cuts) |
-| [Ignore-List.md](Ignore-List.md) | ✅ | ⏳ | ignoring ports and events |
+| [Ignore-List.md](Ignore-List.md) | ✅ | ✅ [en](en/Ignore-List.md) | ignoring ports and events |
 | [Secrets.md](Secrets.md) | ✅ | ✅ [en](en/Secrets.md) | secrets at rest (`NETLYNX_SECRETS_KEY`) |
-| [Windows-Server-Setup.md](Windows-Server-Setup.md) | ✅ | ⏳ | Windows Server installation |
+| [Windows-Server-Setup.md](Windows-Server-Setup.md) | ✅ | ✅ [en](en/Windows-Server-Setup.md) | Windows Server installation |
 | [Port-Model-Catalog.md](Port-Model-Catalog.md) | ✅ | ⏳ | port model catalogue |
 | [ELTEX-Aging.md](ELTEX-Aging.md) | ✅ | ⏳ | Eltex aging specifics |
 | [Postmortem.md](Postmortem.md) | ✅ | ⏳ | incident timeline |

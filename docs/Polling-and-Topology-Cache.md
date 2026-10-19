@@ -1,5 +1,7 @@
 # Опросы и кэш топологии (blast-graph)
 
+**Перевод:** [English version](en/Polling-and-Topology-Cache.md)
+
 Как NetLynx **собирает** данные о сети и **запоминает** граф связности.
 
 Коротко: **ночного** обхода всей сети (автоматический ping-sweep / скан неизвестных подсетей по расписанию) **нет**. Сеть узнаётся **постоянно** через SNMP-поллер уже известных узлов в inventory. Отдельно: **ручной** скан management-подсети по SNMP — Настройки → Инвентарь → «Сканирование сети» (см. [Autodiscover.md](Autodiscover.md)). Ночью пересобирается **кэш графа** для blast/путей из уже накопленных LLDP/CDP/manual рёбер.
@@ -38,7 +40,8 @@
 
 | Уровень | Что делает | Периодичность |
 |---|---|---|
-| **Лёгкий** | ICMP-ping, `sysDescr`/`sysUpTime`, IF-MIB (статусы портов, счётчики, скорость), LINK_UP/LINK_DOWN, flap, утилизация, CPU, ИБП-UPS-MIB, тонер МФУ | `poll_interval_seconds` узла (для критичных — не реже `POLL_CRITICAL_INTERVAL_SECONDS`, по умолчанию 15 с) || **Тяжёлый** | LLDP/CDP-соседи, ARP, PoE (PSE-MIB + SSH-фолбэк + LLDP-PD), STP, chassis MAC, роли портов, FDB (`FDB_POLL_INTERVAL_SECONDS`) | `devices.heavy_poll_interval_seconds` (в карточке узла «Тяжёлый опрос (с)»; пусто/`NULL` = `POLL_HEAVY_SECONDS`, по умолчанию 300 с) |
+| **Лёгкий** | ICMP-ping, `sysDescr`/`sysUpTime`, IF-MIB (статусы портов, счётчики, скорость), LINK_UP/LINK_DOWN, flap, утилизация, CPU, ИБП-UPS-MIB, тонер МФУ | `poll_interval_seconds` узла (для критичных — не реже `POLL_CRITICAL_INTERVAL_SECONDS`, по умолчанию 15 с) |
+| **Тяжёлый** | LLDP/CDP-соседи, ARP, PoE (PSE-MIB + SSH-фолбэк + LLDP-PD), STP, chassis MAC, роли портов, FDB (`FDB_POLL_INTERVAL_SECONDS`) | `devices.heavy_poll_interval_seconds` (в карточке узла «Тяжёлый опрос (с)»; пусто/`NULL` = `POLL_HEAVY_SECONDS`, по умолчанию 300 с) |
 
 Приоритет типов узлов (влияет на очередность и на верхнюю границу лёгкого опроса):
 

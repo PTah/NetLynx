@@ -120,6 +120,8 @@ History before the reset (the `0.13.x` line and older) is kept in the journal �
 
 Full journal of every version — [docs/Changelog.md](docs/Changelog.md) (Russian). Latest releases:
 
+**0.5.1** — docs, translation batch 3: [Windows-Server-Setup](docs/en/Windows-Server-Setup.md), [Config-History](docs/en/Config-History.md), [Polling-and-Topology-Cache](docs/en/Polling-and-Topology-Cache.md), [Ignore-List](docs/en/Ignore-List.md), [MAC-Investigation](docs/en/MAC-Investigation.md) — **16 of 30** documents are in English now. Also fixed a merged table row in the Russian `Polling-and-Topology-Cache.md`.
+
 **0.5.0** — docs, translation batch 2: [VLAN](docs/en/VLAN.md), [Notifications](docs/en/Notifications.md), [Secrets](docs/en/Secrets.md), [Printer-MIB](docs/en/Printer-MIB.md), [Loop-Investigation](docs/en/Loop-Investigation.md), [Manual-Topology-Links](docs/en/Manual-Topology-Links.md) — 11 documents in English now.
 
 **0.4.9** — docs: English versions of five key documents — [Runbook-Linux](docs/en/Runbook-Linux.md), [API](docs/en/API.md), [Roles](docs/en/Roles.md), [SNMP-Community](docs/en/SNMP-Community.md), [UPS](docs/en/UPS.md); a bilingual index with translation status in [docs/README.md](docs/README.md); Russian documents now link to their English counterparts.

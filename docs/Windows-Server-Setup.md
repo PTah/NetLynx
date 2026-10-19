@@ -1,5 +1,7 @@
 # NetLynx на Windows Server
 
+**Перевод:** [English version](en/Windows-Server-Setup.md)
+
 Инструкция для запуска **сервера** NetLynx (`netlynxd.exe`) на Windows Server или Windows 10/11 Pro. Веб-интерфейс — в браузере (`http://<сервер>:8080`), как на Linux.
 
 > **Desktop-клиент** (`desktop/`) — отдельная история, **не готов**; см. [desktop/README.md](../desktop/README.md).
