@@ -1,5 +1,7 @@
 ﻿# SNMP Community в NetLynx
 
+**Перевод:** [English version](en/SNMP-Community.md)
+
 Как настроить опрос и управление коммутаторами по SNMPv1/v2c (и кратко — v3).
 
 ## Зачем

@@ -1,5 +1,7 @@
 # ИБП (UPS) по SNMP
 
+**Перевод:** [English version](en/UPS.md)
+
 NetLynx опрашивает ИБП по стандартной **UPS-MIB (RFC 1628, `1.3.6.1.2.1.33`)** — так работает большинство сетевых карт: APC/Schneider, Ippon (EPPC), Eaton, Powercom, CyberPower, Winpower-совместимые NMC.
 
 Проверено на: **Ippon RT II 6000** с картой `Network Management Card for UPS` (`sysObjectID = 1.3.6.1.4.1.935.10.1`), адрес `10.0.0.1`, community `public`.

@@ -1,5 +1,7 @@
 # Установка NetLynx на Linux (Ubuntu / Debian)
 
+**Перевод:** [English version](en/Runbook-Linux.md)
+
 Пошаговая инструкция: от чистой Ubuntu/Debian до работающего мониторинга коммутаторов в браузере.
 
 **NetLynx** — сервер на Go + PostgreSQL + веб-интерфейс. Опрос свитчей идёт по **SNMP**; данные и настройки хранятся в БД.

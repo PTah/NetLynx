@@ -1,5 +1,7 @@
 # HTTP API NetLynx
 
+**Перевод:** [English version](en/API.md)
+
 NetLynx отдаёт API **сам** — процесс `netlynxd` слушает порт из настроек (по умолчанию **8080**).
 
 **Базовый URL** (типичная установка без nginx):

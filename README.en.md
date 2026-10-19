@@ -6,13 +6,13 @@ The program **watches your switches over SNMP**: it polls them and shows their s
 
 It started as a personal office tool — mostly to find devices on the network and to draw the topology — and grew from there.
 
-Technical specification: [docs/TZ-snmp-switch-monitor.md](docs/TZ-snmp-switch-monitor.md). HTTP API: [docs/API.md](docs/API.md).
+Technical specification: [docs/TZ-snmp-switch-monitor.md](docs/TZ-snmp-switch-monitor.md). HTTP API: [docs/API.md](docs/en/API.md).
 
 **Русский:** [README.md](README.md)
 
 **Screenshots:** [SCREENSHOTS.md](SCREENSHOTS.md)
 
-> Detailed guides under `docs/` are written in Russian — that is the primary language of the project. This page is the English overview: install, first run, configuration, upgrade.
+> Detailed guides live under `docs/` (Russian is the primary language of the project). English versions are in [`docs/en/`](docs/en/) and are added in batches — the status table is in [`docs/README.md`](docs/README.md). This page is the English overview: install, first run, configuration, upgrade.
 
 **Sections:** [Installation](#installation-from-scratch) · [First run](#first-run-after-installation) · [What it does](#what-netlynx-does) · [Environment](#environment-settings-env) · [Upgrade & operations](#upgrade-and-operations) · [Recent releases](#recent-releases)
 
@@ -26,9 +26,9 @@ Technical specification: [docs/TZ-snmp-switch-monitor.md](docs/TZ-snmp-switch-mo
 | Ports & VLANs | access/trunk/native/allowed, VLAN database, PoE (detect, watts, reset), port description, mass edit | [VLAN.md](docs/VLAN.md), [PoE-detection.md](docs/PoE-detection.md) |
 | Investigations | where a MAC lives, why a loop happened, who is behind a port | [MAC-Investigation.md](docs/MAC-Investigation.md), [Loop-Investigation.md](docs/Loop-Investigation.md) |
 | MFPs / printers | page counter, toner left, charts | [Printer-MIB.md](docs/Printer-MIB.md) |
-| UPS | UPS-MIB: charge, runtime, input/output, load, temperature, alarms; events and history | [UPS.md](docs/UPS.md) |
+| UPS | UPS-MIB: charge, runtime, input/output, load, temperature, alarms; events and history | [UPS.md](docs/en/UPS.md) |
 | Events & notifications | event journal, Telegram / email / webhook, filters by type and severity, offline and UPS statistics | [Notifications.md](docs/Notifications.md) |
-| Roles & access | viewer / operator / admin, JWT + sessions, Basic auth as emergency login | [Roles.md](docs/Roles.md) |
+| Roles & access | viewer / operator / admin, JWT + sessions, Basic auth as emergency login | [Roles.md](docs/en/Roles.md) |
 | Secrets & backups | AES-GCM for communities/SSH/SMTP/tokens; ZIP backup of DB + env; `show run` and MikroTik `/export` snapshots | [Secrets.md](docs/Secrets.md), [Config-History.md](docs/Config-History.md) |
 
 ## Environment settings (env)
@@ -55,20 +55,20 @@ The full annotated list is in [.env.example](.env.example).
 
 ## Upgrade and operations
 
-- **Upgrade:** [Runbook-Linux.md → "Upgrade"](docs/Runbook-Linux.md#обновление-версии) (`git pull` + `bash docs/deploy.sh`; DB migrations run automatically on start).
-- **Roll back:** [Appendix C](docs/Runbook-Linux.md#приложение-c-откат-на-старую-версию).
+- **Upgrade:** [Runbook-Linux.md → "Upgrade"](docs/en/Runbook-Linux.md#обновление-версии) (`git pull` + `bash docs/deploy.sh`; DB migrations run automatically on start).
+- **Roll back:** [Appendix C](docs/en/Runbook-Linux.md#приложение-c-откат-на-старую-версию).
 - **Check it is alive:** `curl -s http://127.0.0.1:8080/health` → `{"status":"ok","version":"…"}`.
 - **Service logs:** `journalctl -u NetLynx -f` or **Settings → Log** in the UI.
 - **Backups:** **Settings → Backups** plus [Config-History.md](docs/Config-History.md).
-- **If something is broken:** [Runbook → "Troubleshooting"](docs/Runbook-Linux.md#если-что-то-пошло-не-так) (service, Postgres, port, web build).
+- **If something is broken:** [Runbook → "Troubleshooting"](docs/en/Runbook-Linux.md#если-что-то-пошло-не-так) (service, Postgres, port, web build).
 
 ## First run after installation
 
 Fifteen minutes to make the system useful (everything in the UI, admin role):
 
-1. **Change the admin password** — "Users" → `admin` → password (or create personal accounts right away: [Roles.md](docs/Roles.md)).
+1. **Change the admin password** — "Users" → `admin` → password (or create personal accounts right away: [Roles.md](docs/en/Roles.md)).
 2. **Mind the secrets.** Communities, SSH passwords, SMTP credentials and tokens are encrypted with `NETLYNX_SECRETS_KEY`, which the installer generates. Keep it safe: without it the secrets in the DB cannot be decrypted ([Secrets.md](docs/Secrets.md)).
-3. **Configure SNMP on the switches**: an RO community is enough for monitoring (RW only if you want VLAN/PoE changes), and `snmp-server host <NetLynx IP>` for traps ([SNMP-Community.md](docs/SNMP-Community.md)).
+3. **Configure SNMP on the switches**: an RO community is enough for monitoring (RW only if you want VLAN/PoE changes), and `snmp-server host <NetLynx IP>` for traps ([SNMP-Community.md](docs/en/SNMP-Community.md)).
 4. **Enable LLDP/CDP on the switches** — otherwise there is no topology and no discovery ([Autodiscover.md](docs/Autodiscover.md)).
 5. **Add devices**: "Discovered" → select → "To devices", or add manually (name, IP, type, community). The device type sets the polling priority: routers/switches/servers are polled every 15 s.
 6. **Open one switch card**: ports, VLANs, PoE, topology. If it is empty, check the vendor/SSH settings and the community ([Vendors.md](docs/Vendors.md)).
@@ -79,18 +79,18 @@ Fifteen minutes to make the system useful (everything in the UI, admin role):
 
 | Platform | Document |
 |---|---|
-| **Linux** (recommended) | [docs/Runbook-Linux.md](docs/Runbook-Linux.md) — a server from scratch; UI login: [step 5](docs/Runbook-Linux.md#шаг-5-первый-вход-в-браузере) (`:8080` or nginx) |
-| **Linux, copy-paste level** | [Checklist](docs/Runbook-Linux.md#краткий-чеклист-копируйте-блоками) — copy the **whole block** (packages → docker → clone → `bash docs/deploy.sh`). [deploy.sh](docs/deploy.sh) **does everything** (build, Postgres, systemd, health). Then [step 5](docs/Runbook-Linux.md#шаг-5-первый-вход-в-браузере) to log in. Read the runbook if you skipped re-login after `usermod docker` *(spoiler: `permission denied` is not a NetLynx bug)*. |
+| **Linux** (recommended) | [docs/Runbook-Linux.md](docs/en/Runbook-Linux.md) — a server from scratch; UI login: [step 5](docs/en/Runbook-Linux.md#шаг-5-первый-вход-в-браузере) (`:8080` or nginx) |
+| **Linux, copy-paste level** | [Checklist](docs/en/Runbook-Linux.md#краткий-чеклист-копируйте-блоками) — copy the **whole block** (packages → docker → clone → `bash docs/deploy.sh`). [deploy.sh](docs/deploy.sh) **does everything** (build, Postgres, systemd, health). Then [step 5](docs/en/Runbook-Linux.md#шаг-5-первый-вход-в-браузере) to log in. Read the runbook if you skipped re-login after `usermod docker` *(spoiler: `permission denied` is not a NetLynx bug)*. |
 | **Windows Server** | [docs/Windows-Server-Setup.md](docs/Windows-Server-Setup.md) |
 
-After installation: SNMP community — [docs/SNMP-Community.md](docs/SNMP-Community.md); discovery (needs **SNMP + LLDP** on switches) — [docs/Autodiscover.md](docs/Autodiscover.md); polling and topology cache — [docs/Polling-and-Topology-Cache.md](docs/Polling-and-Topology-Cache.md); vendors — [docs/Vendors.md](docs/Vendors.md); MFPs/printers — [docs/Printer-MIB.md](docs/Printer-MIB.md); UPS over SNMP — [docs/UPS.md](docs/UPS.md); notifications — [docs/Notifications.md](docs/Notifications.md).
+After installation: SNMP community — [docs/SNMP-Community.md](docs/en/SNMP-Community.md); discovery (needs **SNMP + LLDP** on switches) — [docs/Autodiscover.md](docs/Autodiscover.md); polling and topology cache — [docs/Polling-and-Topology-Cache.md](docs/Polling-and-Topology-Cache.md); vendors — [docs/Vendors.md](docs/Vendors.md); MFPs/printers — [docs/Printer-MIB.md](docs/Printer-MIB.md); UPS over SNMP — [docs/UPS.md](docs/en/UPS.md); notifications — [docs/Notifications.md](docs/Notifications.md).
 
 Reference git repository: [https://github.com/PTah/NetLynx](https://github.com/PTah/NetLynx) (branch `main`).
 
 Operations documents:
-- Access roles: [docs/Roles.md](docs/Roles.md)
+- Access roles: [docs/Roles.md](docs/en/Roles.md)
 - PoE and SNMP diagnostics: [docs/PoE-detection.md](docs/PoE-detection.md)
-- **SNMP RO/RW**: monitoring works with **RO**; **managing** a switch (shutdown, alias, incident actions) requires an **RW** community on the device ([docs/SNMP-Community.md](docs/SNMP-Community.md)).
+- **SNMP RO/RW**: monitoring works with **RO**; **managing** a switch (shutdown, alias, incident actions) requires an **RW** community on the device ([docs/SNMP-Community.md](docs/en/SNMP-Community.md)).
 - Discovery / LLDP topology: [docs/Autodiscover.md](docs/Autodiscover.md)
 - Polling and topology cache: [docs/Polling-and-Topology-Cache.md](docs/Polling-and-Topology-Cache.md)
 - Secrets at rest: [docs/Secrets.md](docs/Secrets.md)
@@ -119,6 +119,8 @@ History before the reset (the `0.13.x` line and older) is kept in the journal �
 ## Recent releases
 
 Full journal of every version — [docs/Changelog.md](docs/Changelog.md) (Russian). Latest releases:
+
+**0.4.9** — docs: English versions of five key documents — [Runbook-Linux](docs/en/Runbook-Linux.md), [API](docs/en/API.md), [Roles](docs/en/Roles.md), [SNMP-Community](docs/en/SNMP-Community.md), [UPS](docs/en/UPS.md); a bilingual index with translation status in [docs/README.md](docs/README.md); Russian documents now link to their English counterparts.
 
 **0.4.8** — docs: version journal moved to [docs/Changelog.md](docs/Changelog.md), added the **"First run"** checklist, a new [docs/VLAN.md](docs/VLAN.md) (VLAN database, access/trunk/native/allowed, delete-impact checks, limitations) and this full English README.
 
