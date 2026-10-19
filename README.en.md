@@ -120,6 +120,8 @@ History before the reset (the `0.13.x` line and older) is kept in the journal �
 
 Full journal of every version — [docs/Changelog.md](docs/Changelog.md) (Russian). Latest releases:
 
+**0.5.0** — docs, translation batch 2: [VLAN](docs/en/VLAN.md), [Notifications](docs/en/Notifications.md), [Secrets](docs/en/Secrets.md), [Printer-MIB](docs/en/Printer-MIB.md), [Loop-Investigation](docs/en/Loop-Investigation.md), [Manual-Topology-Links](docs/en/Manual-Topology-Links.md) — 11 documents in English now.
+
 **0.4.9** — docs: English versions of five key documents — [Runbook-Linux](docs/en/Runbook-Linux.md), [API](docs/en/API.md), [Roles](docs/en/Roles.md), [SNMP-Community](docs/en/SNMP-Community.md), [UPS](docs/en/UPS.md); a bilingual index with translation status in [docs/README.md](docs/README.md); Russian documents now link to their English counterparts.
 
 **0.4.8** — docs: version journal moved to [docs/Changelog.md](docs/Changelog.md), added the **"First run"** checklist, a new [docs/VLAN.md](docs/VLAN.md) (VLAN database, access/trunk/native/allowed, delete-impact checks, limitations) and this full English README.

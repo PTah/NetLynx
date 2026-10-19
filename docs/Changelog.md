@@ -2,6 +2,8 @@
 
 Полная история изменений. В [README](../README.md) — последние версии и правила нумерации.
 
+**0.5.0** — документация, партия 2 перевода: VLAN, Notifications, Secrets, Printer-MIB, Loop-Investigation, Manual-Topology-Links (всего 11 документов на английском в `docs/en/`), обновлён индекс `docs/README.md`.
+
 **0.4.9** — документация: английские версии пяти ключевых документов (Runbook-Linux, API, Roles, SNMP-Community, UPS) в `docs/en/`, двуязычный индекс `docs/README.md` со статусом перевода, перекрёстные ссылки RU↔EN.
 
 **0.4.8** — документация: журнал версий вынесен в журнал версий вынесен в `docs/Changelog.md` (в README — последние релизы) (в README — последние релизы), добавлен чек-лист **«Первый запуск после установки»**, новый [VLAN.md](VLAN.md) (база VLAN, access/trunk/native/allowed, проверка последствий удаления, ограничения) и полный английский [README.en.md](../README.en.md).

@@ -1,5 +1,7 @@
 # Секреты at-rest (шифрование в Postgres)
 
+**Перевод:** [English version](en/Secrets.md)
+
 SNMP community, пароли SNMPv3/SSH, SMTP, Telegram bot token, UISP API token и пароли backup **по умолчанию** могут храниться в Postgres открытым текстом. С ключом `NETLYNX_SECRETS_KEY` NetLynx пишет их как **AES-256-GCM** (`enc:v1:…`).
 
 Пароли пользователей UI (`users.password_hash`) — **bcrypt**, без изменений. Refresh-токены — хэш. JWT signing key в `app_secrets` на первом этапе не шифруется (backlog Phase 2 — [To-Do.md](To-Do.md#секреты-at-rest-aes-gcm)).

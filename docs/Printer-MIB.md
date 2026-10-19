@@ -1,5 +1,7 @@
 # Printer-MIB: страницы и тонер (МФУ / принтеры)
 
+**Перевод:** [English version](en/Printer-MIB.md)
+
 Kyocera и Sharp (и большинство сетевых МФУ) отдают данные по **IETF Printer-MIB, RFC 3805** (`1.3.6.1.2.1.43`). Фирменные ветки (Kyocera `1347`, Sharp `2385`) — только fallback, если стандарт молчит.
 
 NetLynx опрашивает Printer-MIB у узлов с типом **МФУ** (`mfu`; алиасы `принтер` / `printer`) и если `sysDescr` похож на печатную технику.

@@ -122,6 +122,8 @@ SNMP-мониторинг коммутаторов, веб-UI.
 
 Полный журнал всех версий — [docs/Changelog.md](docs/Changelog.md). Ниже — последние 8 релизов.
 
+**0.5.0** — документация, партия 2 перевода: [VLAN](docs/en/VLAN.md), [Notifications](docs/en/Notifications.md), [Secrets](docs/en/Secrets.md), [Printer-MIB](docs/en/Printer-MIB.md), [Loop-Investigation](docs/en/Loop-Investigation.md), [Manual-Topology-Links](docs/en/Manual-Topology-Links.md) — всего 11 документов на английском.
+
 **0.4.9** — документация: английские версии пяти ключевых документов — [Runbook-Linux](docs/en/Runbook-Linux.md), [API](docs/en/API.md), [Roles](docs/en/Roles.md), [SNMP-Community](docs/en/SNMP-Community.md), [UPS](docs/en/UPS.md); двуязычный индекс со статусом перевода — [docs/README.md](docs/README.md); в русских документах появилась ссылка на английскую версию.
 
 **0.4.8** — документация: журнал версий вынесен в [docs/Changelog.md](docs/Changelog.md) (в README — последние релизы), добавлен чек-лист **«Первый запуск после установки»**, новый [docs/VLAN.md](docs/VLAN.md) (база VLAN, access/trunk/native/allowed, проверка последствий удаления, ограничения) и полный английский [README.en.md](README.en.md).

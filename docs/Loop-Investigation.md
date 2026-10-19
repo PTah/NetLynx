@@ -1,5 +1,7 @@
 # Петли топологии (blast-cache / LLDP)
 
+**Перевод:** [English version](en/Loop-Investigation.md)
+
 Отдельный отчёт о **циклах в графе соседей** inventory. Не смешивать с MAC flapping ([MAC-Investigation.md](MAC-Investigation.md)): здесь ищем кольца **устройств**.
 
 С **0.9.0** по умолчанию DFS идёт по **topology blast cache** (тот же скелет, что VLAN blast: LLDP+CDP+manual). Если кэш пуст — fallback на live LLDP.
