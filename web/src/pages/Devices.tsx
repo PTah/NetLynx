@@ -260,6 +260,7 @@ export default function Devices() {
       .then((r) => {
         if (r.ok) {
           setSnmpDlg(`SNMP OK\nsysName: ${r.sys_name ?? ""}\n\nsysDescr:\n${r.sys_descr ?? ""}`);
+          void reload();
         } else {
           setSnmpDlg(`SNMP ошибка: ${r.error ?? "неизвестно"}`);
         }

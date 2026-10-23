@@ -42,6 +42,6 @@ Create body: `{a_device_id, a_if_index, b_device_id, b_if_index, note?}`.
 ## UI
 
 - **Topology**: "Link" mode, purple dashed line for pure-manual links, inspector (note / delete).
-- **Device card**: "Manual links" section — table, add / edit / restore / delete.
+- **Device card**: for non-switch/router devices — **“Connected to…”** (auto LLDP/CDP/FDB to switch/port); below that, the “Manual links” section — table, add / edit / restore / delete.
 
 See also [Autodiscover.md](../Autodiscover.md).

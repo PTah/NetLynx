@@ -23,7 +23,7 @@ Technical specification: [docs/TZ-snmp-switch-monitor.md](docs/TZ-snmp-switch-mo
 | SNMP polling | ports, speed, utilisation, CPU, Link Up/Down events, flaps, broadcast storms; light poll every 15–60 s, heavy poll (LLDP/CDP/ARP/PoE/STP/FDB) every 5 min | [Polling-and-Topology-Cache.md](docs/Polling-and-Topology-Cache.md) |
 | Topology | LLDP/CDP + FDB, map, manual links, path finder, blast radius (VLAN / port shutdown) | [Manual-Topology-Links.md](docs/Manual-Topology-Links.md) |
 | Discovery & inventory | subnet scan over SNMP/ICMP, "Discovered" → "Devices", device types, UISP | [Autodiscover.md](docs/Autodiscover.md) |
-| Ports & VLANs | access/trunk/native/allowed, VLAN database, PoE (detect, watts, reset), port description, mass edit | [VLAN.md](docs/VLAN.md), [PoE-detection.md](docs/PoE-detection.md) |
+| Ports & VLANs | access/trunk/native/allowed, VLAN database, live port settings over SSH, PoE (detect, watts, reset / schedule), mass edit; FDB “who is behind the port” (incl. SNR ifIndex 5001+) | [VLAN.md](docs/en/VLAN.md), [PoE-detection.md](docs/en/PoE-detection.md), [Vendors.md](docs/en/Vendors.md) |
 | Investigations | where a MAC lives, why a loop happened, who is behind a port | [MAC-Investigation.md](docs/MAC-Investigation.md), [Loop-Investigation.md](docs/Loop-Investigation.md) |
 | MFPs / printers | page counter, toner left, charts | [Printer-MIB.md](docs/Printer-MIB.md) |
 | UPS | UPS-MIB: charge, runtime, input/output, load, temperature, alarms; events and history | [UPS.md](docs/en/UPS.md) |
@@ -119,6 +119,20 @@ History before the reset (the `0.13.x` line and older) is kept in the journal �
 ## Recent releases
 
 Full journal of every version — [docs/Changelog.md](docs/Changelog.md) (Russian). Latest releases:
+
+**0.5.9** — docs: VLAN/API/Vendors/Polling aligned with 0.5.6–0.5.8 (immediate “done”, live settings, SNR FDB).
+
+**0.5.8** — SNR FDB over SNMP: map ifIndex 5001–5009 (ge1–ge9); previously the MAC table stayed empty while CLI showed entries.
+
+**0.5.7** — SNR port settings read one interface and no longer sit on `--More--` until the SSH timeout.
+
+**0.5.6** — VLAN tab: a green “done” line as soon as the switch accepts the command, without waiting for `show run`. If the reply is slow, the form says not to click again.
+
+**0.5.5** — port card: **scheduled PoE reset** (once daily or N times starting at a time; 3× from 03:00 → 03:00/11:00/19:00).
+
+**0.5.4** — SNMP backoff no longer silences switches; “Check SNMP” updates status and triggers a full poll (UI used to stick on timeout while SNMP was already fine).
+
+**0.5.3** — monitoring priorities by device type (critical → NAS → UPS/PC → AP/phones → cameras/MFPs); softer offline debounce for flaky endpoints; device card **“Connected to…”** (auto LLDP/CDP/FDB) above “Manual links”.
 
 **0.5.2** — docs, translation batch 4 (the whole operations set is now translated): [Autodiscover](docs/en/Autodiscover.md), [Vendors](docs/en/Vendors.md), [PoE-detection](docs/en/PoE-detection.md) — **19 of 30** documents in English, covering every admin and engineer guide.
 

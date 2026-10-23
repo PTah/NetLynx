@@ -60,7 +60,9 @@ http://<IP_или_имя_сервера>:8080
 | GET | `/api/v1/devices/{id}/detail` | узел + порты + события + neighbors |
 | GET | `/api/v1/devices/{id}/interfaces` | порты |
 | GET | `/api/v1/devices/{id}/interfaces/{ifIndex}/clients` | MAC/IP (FDB+ARP) |
-| GET | `/api/v1/devices/{id}/interfaces/{ifIndex}/settings` | ignore, thresholds |
+| POST | `/api/v1/devices/{id}/interfaces/{ifIndex}/clients/refresh` | operator+: живой SNMP FDB+ARP по всему узлу (без mac-move событий); ответ — клиенты этого порта |
+| GET | `/api/v1/devices/{id}/interfaces/{ifIndex}/settings` | live-настройки порта (SSH / кэш show run): admin, PoE, VLAN/trunk, STP, …; `?force=1` — без кэша |
+| GET | `/api/v1/devices/{id}/interfaces/{ifIndex}/poe-reset-schedule` | расписание сброса PoE |
 | GET | `/api/v1/devices/{id}/interfaces/{ifIndex}/shut-impact` | превью риска shutdown: clients, LLDP/CDP, **downstream** (multi-hop blast-cache), cut_paths |
 | GET | `/api/v1/devices/{id}/events` | события узла |
 | GET | `/api/v1/devices/{id}/metrics` | история метрик (`metric_type`: `cpu_pct`, `page_count`, `toner_*_pct`, `ups_*` — см. [UPS.md](UPS.md), `util_*`; `from`/`to` RFC3339; `max_points` downsample). Тонер/страницы/ИБП хранятся дольше util (`METRICS_PRINTER_RETENTION_DAYS`) |
@@ -69,7 +71,7 @@ http://<IP_или_имя_сервера>:8080
 | GET | `/api/v1/devices/{id}/config/snapshots/{snapId}` | один снимок |
 | GET | `/api/v1/devices/{id}/config/diff?from=&to=` | diff (можно опустить — последний) |
 | GET | `/api/v1/devices/{id}/vlans` | VLAN database + членство портов (show run / порты); FDB только для уже известных VLAN (не создаёт строки-призраки) |
-| GET | `/api/v1/devices/{id}/vlans/delete-impact?vlan_ids=` | blast-radius удаления VLAN: топология (STP/heuristic), VLAN на trunk, вниз/redundant, FDB; глубина `VLAN_BLAST_MAX_DEPTH` (default 32); SVI/mgmt (`mgmt_risks`, severity `critical`); шлюзы с SVI (`gateways`); `blocks_delete` пока false (advisory); override UPLINK/DOWNLINK |
+| GET | `/api/v1/devices/{id}/vlans/delete-impact?vlan_ids=` | blast-radius удаления VLAN: топология (STP/heuristic), VLAN на trunk, вниз/redundant, FDB; глубина `VLAN_BLAST_MAX_DEPTH` (default 32); SVI/mgmt (`mgmt_risks`, severity `critical`); шлюзы с SVI (`gateways`); `blocks_delete=true` если management SVI = host (удаление потом даёт 409); override UPLINK/DOWNLINK |
 | GET | `/api/v1/devices/{id}/fdb/snapshots` | ежедневные снимки FDB |
 | GET | `/api/v1/ports/search?q=` | поиск порта |
 
@@ -105,16 +107,19 @@ http://<IP_или_имя_сервера>:8080
 | PATCH | `.../interfaces/{ifIndex}/admin` | admin up/down |
 | PATCH | `.../interfaces/{ifIndex}/poe` | PoE |
 | POST | `.../interfaces/{ifIndex}/poe-reset` | сброс PoE (`{ seconds: 1..60 }`, по умолчанию 10); EdgeSwitch: `poe reset N`; иначе power-cycle |
+| GET | `.../interfaces/{ifIndex}/poe-reset-schedule` | расписание сброса PoE (viewer+); время сервера; `mode`: `at_time` \| `times_per_day` |
+| PUT | `.../interfaces/{ifIndex}/poe-reset-schedule` | `{ enabled, mode, time?: "HH:MM", start_hour?, start_minute?, times_per_day?, reset_seconds? }`; `times_per_day` N начиная с времени → равный шаг 24h/N (3× с 03:00 → 03:00/11:00/19:00) |
+| DELETE | `.../interfaces/{ifIndex}/poe-reset-schedule` | удалить расписание |
 | POST | `.../interfaces/bulk` | массово ≥2 портов: `{ if_indexes, admin_up?, poe_mode?, vlan?: {op,vlan_id}, poe_reset_seconds? }`; на EdgeSwitch подряд — `interface 0/4-0/7` |
 | PATCH | `.../interfaces/{ifIndex}/isolate` | изоляция |
 | PATCH | `.../interfaces/{ifIndex}/dhcp-snooping` | DHCP snooping |
 | PATCH | `.../interfaces/{ifIndex}/flow-control` | flow control |
 | PATCH | `.../interfaces/{ifIndex}/stp` | STP |
-| PATCH | `.../interfaces/{ifIndex}/vlan` | `{ op, vlan_id?, allowed_mode?, allowed_vlans? }` — `set_access` / `remove` / `trunk_allow` (`add`\|`remove`\|`all`\|`except`) / `no_vlan` (очистка: EdgeSwitch general + participation auto); legacy `add_tagged`; ответ: `vlans[]`. UI предупреждает, если в allowed нет VLAN 1 (риск потери SSH/Web) |
-| POST | `/api/v1/devices/{id}/vlans` | `{ "vlan_id": N, "name"? }` — создать в vlan database; ответ: `vlans[]` + `source` |
-| DELETE | `/api/v1/devices/{id}/vlans` | `{ "vlan_ids": [167,30,31] }` — массовое удаление (`no vlan …`); **409**, если VLAN ещё на портах (access/tagged); UI перед confirm дергает delete-impact (blast-radius вниз по топологии) |
-| PATCH | `/api/v1/devices/{id}/vlans/{vlanId}` | `{ "name": "..." }` — имя в vlan database; ответ: `vlans[]` + `source` для UI |
-| DELETE | `/api/v1/devices/{id}/vlans/{vlanId}` | удалить один VLAN; **409**, если прописан на портах; ответ: `vlans[]` + `source`; UI — delete-impact (топология, не костыль UPLINK) |
+| PATCH | `.../interfaces/{ifIndex}/vlan` | `{ op, vlan_id?, allowed_mode?, allowed_vlans? }` — `set_access` / `remove` / `trunk_allow` (`add`\|`remove`\|`all`\|`except`\|`set`) / `no_vlan`; legacy `add_tagged`; ответ сразу после SSH: `ok`, `message`, `vlans[]`, `source` (`show run` в фоне). UI: «Готово» + предупреждение при долгой тишине. Предупреждение, если в allowed нет VLAN 1 |
+| POST | `/api/v1/devices/{id}/vlans` | `{ "vlan_id": N, "name"? }` — создать в vlan database; ответ: `message`, `vlans[]`, `source` |
+| DELETE | `/api/v1/devices/{id}/vlans` | `{ "vlan_ids": [167,30,31] }` — массовое удаление (`no vlan …`); **409**, если VLAN ещё на портах или mgmt SVI; UI перед confirm — delete-impact |
+| PATCH | `/api/v1/devices/{id}/vlans/{vlanId}` | `{ "name": "..." }` — имя в vlan database; ответ: `message`, `vlans[]`, `source` |
+| DELETE | `/api/v1/devices/{id}/vlans/{vlanId}` | удалить один VLAN; **409**, если на портах или mgmt; ответ: `message`, `vlans[]`, `source` |
 | PATCH | `.../interfaces/{ifIndex}/thresholds` | util |
 | PUT/DELETE | `.../interfaces/{ifIndex}/ignore` | ignore |
 | GET | `/api/v1/devices/{id}/port-ignores` | список (operator); на detail viewer видит флаги |

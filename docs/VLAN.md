@@ -50,12 +50,16 @@ NetLynx умеет читать и менять VLAN-конфигурацию к
 Дополнительно:
 
 - **Native VLAN** — отдельное поле для транка (что уходит нетегированным).
-- **Allowed VLAN** — список разрешённых VLAN на транке; режимы: `add` (добавить), `remove` (убрать), `set` (задать ровно этот список), `all` (разрешить все).
-- Изменение порта: `PATCH /api/v1/devices/{id}/ports/{ifIndex}/vlan` (`mode`, `access_vlan`, `native_vlan`, `allowed_mode`, `allowed_vlans`).
+- **Allowed VLAN** — список разрешённых VLAN на транке; режимы: `add` (добавить), `remove` (убрать), `set` (задать ровно этот список), `all` (разрешить все), `except`.
+- Изменение порта: `PATCH /api/v1/devices/{id}/interfaces/{ifIndex}/vlan` с телом `{ op, vlan_id?, allowed_mode?, allowed_vlans? }` (`set_access` / `remove` / `trunk_allow` / `no_vlan`). То же доступно из вкладки VLAN и из расширенных настроек порта.
 
-После применения NetLynx возвращает, что именно сделал (`via`: tagged/untagged) — это видно в уведомлении в UI.
+После применения под формой появляется зелёная строка «Готово: …» и поле `message` в ответе API — команда на коммутаторе уже выполнена. Перечитка `show run` идёт **в фоне** и не задерживает ответ (на SNR полный dump часто долгий). Если ответа нет ~25 с, UI предупреждает: запись могла уже пройти, повторно не нажимайте, пока не будет «Готово» или ошибки.
 
 Если на порту висит PoE-устройство, порт не выключается: VLAN применяется «на лету» (сброс PoE — отдельная кнопка).
+
+### Расширенные настройки порта (live)
+
+Окно «Расширенные настройки» читает порт через SSH: `GET …/interfaces/{ifIndex}/settings` (при необходимости `?force=1`). Сначала берётся кэш/`show run` снимка; иначе — короткий `show running-config interface …`. На **SNR** не используется долгий `show running-config current-mode` в начале; пейджер `--More--` листается, чтобы окно не висело на «Читаем настройки с устройства…».
 
 ## Смежные вещи
 
@@ -71,17 +75,19 @@ NetLynx умеет читать и менять VLAN-конфигурацию к
 - VLAN 1 — особый случай: на большинстве вендоров её нельзя удалить/переименовать, «No VLAN» ≠ «VLAN 1».
 - Если SSH-сессия занята (кто-то в терминале), коммутатор может отказать — повторите операцию.
 - Массовые изменения применяются последовательно; при ошибке на одном порте остальные всё равно применяются, ошибка возвращается в ответе.
+- Management SVI = `devices.host`: удаление этого VLAN **блокируется** (API 409, в delete-impact — `blocks_delete`).
 
 ## API
 
 | Метод | Путь | Назначение |
 |---|---|---|
-| GET | `/api/v1/devices/{id}/vlans` | VLAN-база узла (источник: `config`/`snmp`) |
-| POST | `/api/v1/devices/{id}/vlans` | создать VLAN |
-| PATCH | `/api/v1/devices/{id}/vlans/{vlanId}` | переименовать |
+| GET | `/api/v1/devices/{id}/vlans` | VLAN-база узла (источник: `config_cache` / `snapshot` / `ports`) |
+| POST | `/api/v1/devices/{id}/vlans` | создать VLAN; ответ: `message`, `vlans[]`, `source` |
+| PATCH | `/api/v1/devices/{id}/vlans/{vlanId}` | переименовать; ответ: `message`, `vlans[]` |
 | DELETE | `/api/v1/devices/{id}/vlans/{vlanId}` | удалить VLAN |
 | DELETE | `/api/v1/devices/{id}/vlans` | удалить список (`vlan_ids`) |
-| GET | `/api/v1/devices/{id}/vlans/delete-impact` | предупреждение перед удалением |
-| PATCH | `/api/v1/devices/{id}/ports/{ifIndex}/vlan` | режим порта + VLAN |
+| GET | `/api/v1/devices/{id}/vlans/delete-impact` | предупреждение перед удалением (`blocks_delete` для mgmt SVI) |
+| PATCH | `/api/v1/devices/{id}/interfaces/{ifIndex}/vlan` | VLAN на порту; ответ: `message`, `vlans[]`, `source` |
+| GET | `/api/v1/devices/{id}/interfaces/{ifIndex}/settings` | live-настройки порта (SSH / кэш show run) |
 
-Полный список — [API.md](API.md).
+Полный список — [API.md](API.md). Нюансы SNR/EdgeSwitch — [Vendors.md](Vendors.md).

@@ -149,6 +149,12 @@ func main() {
 		apiSrv.RunBackupScheduler(ctx)
 	}()
 
+	workers.Add(1)
+	go func() {
+		defer workers.Done()
+		apiSrv.RunPoEResetScheduler(ctx)
+	}()
+
 	cfgSnapSched := configsnapshot.NewScheduler(slog.Default(), st, cfg)
 	cfgSnapSched.SetReporter(sshRep)
 	workers.Add(1)

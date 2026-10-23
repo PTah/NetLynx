@@ -29,6 +29,7 @@ type Server struct {
 	sseTickets            *sseTicketStore
 	backupRun             *backup.Runner
 	wifiFilterInvalidator wifiFilterCacheInvalidator
+	pollRequester         pollRequester
 	runningConfigCache    sync.Map // int64 → deviceRunningConfigEntry
 	// runningConfigDirtyAt — device_id → time.Time: после CLI/SNMP записи на порт
 	// memory-кэш сброшен; snapshot БД до следующего show run считать устаревшим.
@@ -43,6 +44,12 @@ type Server struct {
 // wifiFilterCacheInvalidator — poller сбрасывает кэш WiFi MAC после PATCH настроек.
 type wifiFilterCacheInvalidator interface {
 	InvalidateWiFiFilterCache()
+}
+
+// pollRequester — сброс SNMP-backoff и внеочередной опрос после snmp-test / смены community.
+type pollRequester interface {
+	ClearSNMPBackoff(deviceID int64)
+	RequestPoll(deviceID int64)
 }
 
 type BuildInfo struct {
@@ -67,6 +74,9 @@ func NewServer(st *store.Store, cfg config.Config, bi BuildInfo, hub *live.Hub, 
 		s.backupRun.SetPollPauser(pollPauser)
 		if wfi, ok := pollPauser.(wifiFilterCacheInvalidator); ok {
 			s.wifiFilterInvalidator = wfi
+		}
+		if pr, ok := pollPauser.(pollRequester); ok {
+			s.pollRequester = pr
 		}
 	}
 	s.backupRun.RecoverInterrupted(context.Background())
@@ -120,6 +130,7 @@ func NewServer(st *store.Store, cfg config.Config, bi BuildInfo, hub *live.Hub, 
 		r.Get("/devices/{id}/interfaces/{ifIndex}/clients", s.handleListPortClients)
 		r.Post("/devices/{id}/interfaces/{ifIndex}/clients/refresh", s.handleRefreshPortClients)
 		r.Get("/devices/{id}/interfaces/{ifIndex}/settings", s.handleGetPortSettings)
+		r.Get("/devices/{id}/interfaces/{ifIndex}/poe-reset-schedule", s.handleGetPortPoEResetSchedule)
 		r.Get("/devices/{id}/interfaces/{ifIndex}/shut-impact", s.handlePortShutImpact)
 		r.Get("/ports/search", s.handleSearchPorts)
 		r.Get("/investigate/mac", s.handleInvestigateMAC)
@@ -169,6 +180,8 @@ func NewServer(st *store.Store, cfg config.Config, bi BuildInfo, hub *live.Hub, 
 		r.Patch("/devices/{id}/interfaces/{ifIndex}/admin", s.handlePatchPortAdmin)
 		r.Patch("/devices/{id}/interfaces/{ifIndex}/poe", s.handlePatchPortPoE)
 		r.Post("/devices/{id}/interfaces/{ifIndex}/poe-reset", s.handlePostPortPoEReset)
+		r.Put("/devices/{id}/interfaces/{ifIndex}/poe-reset-schedule", s.handlePutPortPoEResetSchedule)
+		r.Delete("/devices/{id}/interfaces/{ifIndex}/poe-reset-schedule", s.handleDeletePortPoEResetSchedule)
 		r.Post("/devices/{id}/interfaces/bulk", s.handlePostBulkPorts)
 		r.Patch("/devices/{id}/interfaces/{ifIndex}/isolate", s.handlePatchPortIsolate)
 		r.Patch("/devices/{id}/interfaces/{ifIndex}/dhcp-snooping", s.handlePatchPortDHCPSnoop)

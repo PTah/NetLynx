@@ -60,7 +60,9 @@ Details: [Roles.md](Roles.md).
 | GET | `/api/v1/devices/{id}/detail` | device + ports + events + neighbors |
 | GET | `/api/v1/devices/{id}/interfaces` | ports |
 | GET | `/api/v1/devices/{id}/interfaces/{ifIndex}/clients` | MAC/IP (FDB+ARP) |
-| GET | `/api/v1/devices/{id}/interfaces/{ifIndex}/settings` | ignore, thresholds |
+| POST | `/api/v1/devices/{id}/interfaces/{ifIndex}/clients/refresh` | operator+: live SNMP FDB+ARP for the whole device (no mac-move events); response is clients for this port |
+| GET | `/api/v1/devices/{id}/interfaces/{ifIndex}/settings` | live port settings (SSH / show run cache): admin, PoE, VLAN/trunk, STP, …; `?force=1` skips cache |
+| GET | `/api/v1/devices/{id}/interfaces/{ifIndex}/poe-reset-schedule` | PoE reset schedule |
 | GET | `/api/v1/devices/{id}/interfaces/{ifIndex}/shut-impact` | shutdown risk preview: clients, LLDP/CDP, **downstream** (multi-hop blast cache), cut_paths |
 | GET | `/api/v1/devices/{id}/events` | device events |
 | GET | `/api/v1/devices/{id}/metrics` | metrics history (`metric_type`: `cpu_pct`, `page_count`, `toner_*_pct`, `ups_*` — see [UPS.md](UPS.md), `util_*`; `from`/`to` RFC3339; `max_points` downsample). Toner/pages/UPS are kept longer than util (`METRICS_PRINTER_RETENTION_DAYS`) |
@@ -69,7 +71,7 @@ Details: [Roles.md](Roles.md).
 | GET | `/api/v1/devices/{id}/config/snapshots/{snapId}` | one snapshot |
 | GET | `/api/v1/devices/{id}/config/diff?from=&to=` | diff (can be omitted — latest) |
 | GET | `/api/v1/devices/{id}/vlans` | VLAN database + port membership (show run / ports); FDB only for already known VLANs (no ghost rows) |
-| GET | `/api/v1/devices/{id}/vlans/delete-impact?vlan_ids=` | VLAN deletion blast radius: topology (STP/heuristic), VLANs on trunks, downstream/redundant, FDB; depth `VLAN_BLAST_MAX_DEPTH` (default 32); SVI/mgmt (`mgmt_risks`, severity `critical`); gateways with SVI (`gateways`); `blocks_delete` still false (advisory); UPLINK/DOWNLINK override |
+| GET | `/api/v1/devices/{id}/vlans/delete-impact?vlan_ids=` | VLAN deletion blast radius: topology (STP/heuristic), VLANs on trunks, downstream/redundant, FDB; depth `VLAN_BLAST_MAX_DEPTH` (default 32); SVI/mgmt (`mgmt_risks`, severity `critical`); gateways with SVI (`gateways`); `blocks_delete=true` when management SVI = host (delete then returns 409); UPLINK/DOWNLINK override |
 | GET | `/api/v1/devices/{id}/fdb/snapshots` | daily FDB snapshots |
 | GET | `/api/v1/ports/search?q=` | port search |
 
@@ -105,16 +107,19 @@ Details: [Roles.md](Roles.md).
 | PATCH | `.../interfaces/{ifIndex}/admin` | admin up/down |
 | PATCH | `.../interfaces/{ifIndex}/poe` | PoE |
 | POST | `.../interfaces/{ifIndex}/poe-reset` | PoE reset (`{ seconds: 1..60 }`, default 10); EdgeSwitch: `poe reset N`; otherwise a power cycle |
+| GET | `.../interfaces/{ifIndex}/poe-reset-schedule` | PoE reset schedule (viewer+); server local time; `mode`: `at_time` \| `times_per_day` |
+| PUT | `.../interfaces/{ifIndex}/poe-reset-schedule` | `{ enabled, mode, time?: "HH:MM", start_hour?, start_minute?, times_per_day?, reset_seconds? }`; `times_per_day` N from start time → equal step 24h/N (3× from 03:00 → 03:00/11:00/19:00) |
+| DELETE | `.../interfaces/{ifIndex}/poe-reset-schedule` | delete schedule |
 | POST | `.../interfaces/bulk` | bulk for ≥2 ports: `{ if_indexes, admin_up?, poe_mode?, vlan?: {op,vlan_id}, poe_reset_seconds? }`; on EdgeSwitch sequentially — `interface 0/4-0/7` |
 | PATCH | `.../interfaces/{ifIndex}/isolate` | isolation |
 | PATCH | `.../interfaces/{ifIndex}/dhcp-snooping` | DHCP snooping |
 | PATCH | `.../interfaces/{ifIndex}/flow-control` | flow control |
 | PATCH | `.../interfaces/{ifIndex}/stp` | STP |
-| PATCH | `.../interfaces/{ifIndex}/vlan` | `{ op, vlan_id?, allowed_mode?, allowed_vlans? }` — `set_access` / `remove` / `trunk_allow` (`add`\|`remove`\|`all`\|`except`) / `no_vlan` (clear: EdgeSwitch general + participation auto); legacy `add_tagged`; response: `vlans[]`. The UI warns when VLAN 1 is missing from allowed (risk of losing SSH/Web access) |
-| POST | `/api/v1/devices/{id}/vlans` | `{ "vlan_id": N, "name"? }` — create in the VLAN database; response: `vlans[]` + `source` |
-| DELETE | `/api/v1/devices/{id}/vlans` | `{ "vlan_ids": [167,30,31] }` — bulk delete (`no vlan …`); **409** if the VLAN is still on ports (access/tagged); before confirm the UI calls delete-impact (blast radius down the topology) |
-| PATCH | `/api/v1/devices/{id}/vlans/{vlanId}` | `{ "name": "..." }` — name in the VLAN database; response: `vlans[]` + `source` |
-| DELETE | `/api/v1/devices/{id}/vlans/{vlanId}` | delete one VLAN; **409** if configured on ports; response: `vlans[]` + `source`; UI uses delete-impact (topology, not the UPLINK crutch) |
+| PATCH | `.../interfaces/{ifIndex}/vlan` | `{ op, vlan_id?, allowed_mode?, allowed_vlans? }` — `set_access` / `remove` / `trunk_allow` (`add`\|`remove`\|`all`\|`except`\|`set`) / `no_vlan`; legacy `add_tagged`; response right after SSH: `ok`, `message`, `vlans[]`, `source` (`show run` in background). UI: confirmation line + warning if the reply is slow. Warns when VLAN 1 is missing from allowed |
+| POST | `/api/v1/devices/{id}/vlans` | `{ "vlan_id": N, "name"? }` — create in the VLAN database; response: `message`, `vlans[]`, `source` |
+| DELETE | `/api/v1/devices/{id}/vlans` | `{ "vlan_ids": [167,30,31] }` — bulk delete (`no vlan …`); **409** if still on ports or mgmt SVI; UI calls delete-impact before confirm |
+| PATCH | `/api/v1/devices/{id}/vlans/{vlanId}` | `{ "name": "..." }` — name in the VLAN database; response: `message`, `vlans[]`, `source` |
+| DELETE | `/api/v1/devices/{id}/vlans/{vlanId}` | delete one VLAN; **409** if on ports or mgmt; response: `message`, `vlans[]`, `source` |
 | PATCH | `.../interfaces/{ifIndex}/thresholds` | util |
 | PUT/DELETE | `.../interfaces/{ifIndex}/ignore` | ignore |
 | GET | `/api/v1/devices/{id}/port-ignores` | list (operator); in detail view viewer sees the flags |

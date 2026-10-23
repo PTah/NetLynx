@@ -84,6 +84,13 @@ func (s *Server) handleGetDeviceDetail(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	// Автоподключение к свитчу/роутеру (LLDP/CDP/FDB) — не для самих switch/router.
+	cat := store.NormalizeDeviceCategory(d.DeviceCategory)
+	if cat != store.DeviceCategorySwitch && cat != store.DeviceCategoryRouter {
+		if att, err := s.st.FindAutoDeviceAttachment(r.Context(), id); err == nil && att != nil {
+			out["attachment"] = att
+		}
+	}
 	writeJSON(w, http.StatusOK, out)
 }
 

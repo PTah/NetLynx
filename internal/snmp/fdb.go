@@ -63,6 +63,7 @@ func WalkFDBWithStats(g *gosnmp.GoSNMP) (map[string]FDBLearnedEntry, map[int]FDB
 	if len(baseToIf) == 0 {
 		return nil, nil, fmt.Errorf("bridge port map empty")
 	}
+	knownIf := fdbKnownIfIndexes(baseToIf)
 
 	entries := map[string]FDBLearnedEntry{}
 	_ = walk(g, oidDot1dTpFdbPort, func(pdu gosnmp.SnmpPDU) error {
@@ -70,12 +71,9 @@ func WalkFDBWithStats(g *gosnmp.GoSNMP) (map[string]FDBLearnedEntry, map[int]FDB
 		if err != nil {
 			return nil
 		}
-		basePort := int(pduInt64(pdu))
-		if basePort <= 0 {
-			return nil
-		}
-		ifIndex, ok := baseToIf[basePort]
-		if !ok || ifIndex <= 0 {
+		port := int(pduInt64(pdu))
+		ifIndex := resolveFDBIfIndex(port, baseToIf, knownIf)
+		if ifIndex <= 0 {
 			return nil
 		}
 		entries[mac] = FDBLearnedEntry{IfIndex: ifIndex}
@@ -88,12 +86,9 @@ func WalkFDBWithStats(g *gosnmp.GoSNMP) (map[string]FDBLearnedEntry, map[int]FDB
 		if err != nil {
 			return nil
 		}
-		basePort := int(pduInt64(pdu))
-		if basePort <= 0 {
-			return nil
-		}
-		ifIndex, ok := baseToIf[basePort]
-		if !ok || ifIndex <= 0 {
+		port := int(pduInt64(pdu))
+		ifIndex := resolveFDBIfIndex(port, baseToIf, knownIf)
+		if ifIndex <= 0 {
 			return nil
 		}
 		v := vlanID
@@ -108,6 +103,34 @@ func WalkFDBWithStats(g *gosnmp.GoSNMP) (map[string]FDBLearnedEntry, map[int]FDB
 	})
 
 	return entries, buildFDBIfStats(entries, vlansByIf), nil
+}
+
+// fdbKnownIfIndexes — множество ifIndex из dot1dBasePortIfIndex (значения).
+func fdbKnownIfIndexes(baseToIf map[int]int) map[int]struct{} {
+	out := make(map[int]struct{}, len(baseToIf))
+	for _, ifIndex := range baseToIf {
+		if ifIndex > 0 {
+			out[ifIndex] = struct{}{}
+		}
+	}
+	return out
+}
+
+// resolveFDBIfIndex переводит значение порта из FDB в ifIndex.
+// Стандарт: bridge-port → ifIndex через baseToIf.
+// SNR (S2985/S5010 и др.): в dot1d/dot1q FDB уже лежит ifIndex (5001=ge1 … 5009=ge9),
+// а не bridge-port 1…9 — иначе все MAC отбрасывались бы.
+func resolveFDBIfIndex(port int, baseToIf map[int]int, knownIf map[int]struct{}) int {
+	if port <= 0 {
+		return 0
+	}
+	if ifIndex, ok := baseToIf[port]; ok && ifIndex > 0 {
+		return ifIndex
+	}
+	if _, ok := knownIf[port]; ok {
+		return port
+	}
+	return 0
 }
 
 func buildFDBIfStats(entries map[string]FDBLearnedEntry, vlansByIf map[int]map[int]struct{}) map[int]FDBIfStats {

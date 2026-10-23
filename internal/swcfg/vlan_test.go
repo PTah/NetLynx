@@ -497,3 +497,70 @@ interface 0/14
 		t.Fatal("explicit allowed 10 must carry")
 	}
 }
+
+func TestOverlayPortVLAN_SetAccessMovesPort(t *testing.T) {
+	inv := []VLANInventoryRow{
+		{VLANID: 1, InDatabase: true, AccessPorts: []VLANPortRef{{IfIndex: 5, IfName: "1/0/5", Role: "access"}}, TaggedPorts: []VLANPortRef{}},
+		{VLANID: 20, InDatabase: true, Name: "office", AccessPorts: []VLANPortRef{}, TaggedPorts: []VLANPortRef{}},
+	}
+	out := OverlayPortVLAN(inv, 5, "1/0/5", PortVLANChange{Op: VLANOpSetAccess, VLANID: 20})
+	if hasPort(out[0].AccessPorts, 5) {
+		t.Fatalf("vlan 1 still has port: %+v", out[0].AccessPorts)
+	}
+	var moved bool
+	for _, row := range out {
+		if row.VLANID == 20 && hasPort(row.AccessPorts, 5) {
+			moved = true
+		}
+	}
+	if !moved {
+		t.Fatalf("vlan 20 missing port: %+v", out)
+	}
+	if hasPort(inv[0].AccessPorts, 5) == false {
+		t.Fatal("overlay must not mutate the source inventory")
+	}
+}
+
+func TestOverlayPortVLAN_TrunkAdd(t *testing.T) {
+	inv := []VLANInventoryRow{
+		{VLANID: 10, InDatabase: true, AccessPorts: []VLANPortRef{{IfIndex: 3, IfName: "1/0/3"}}, TaggedPorts: []VLANPortRef{}},
+		{VLANID: 20, InDatabase: true, AccessPorts: []VLANPortRef{}, TaggedPorts: []VLANPortRef{}},
+	}
+	out := OverlayPortVLAN(inv, 3, "1/0/3", PortVLANChange{
+		Op: VLANOpTrunkAllow, AllowedMode: TrunkAllowAdd, AllowedList: "20", VLANID: 1,
+	})
+	for _, row := range out {
+		if row.VLANID == 10 && hasPort(row.AccessPorts, 3) {
+			t.Fatalf("access membership should be cleared: %+v", row)
+		}
+		if row.VLANID == 20 && !hasPort(row.TaggedPorts, 3) {
+			t.Fatalf("vlan 20 should be tagged: %+v", row)
+		}
+		if row.VLANID == 1 && hasPort(row.TaggedPorts, 3) {
+			t.Fatalf("native must not be tagged: %+v", row)
+		}
+	}
+}
+
+func TestOverlayVLANDatabase_CreateAndDelete(t *testing.T) {
+	inv := []VLANInventoryRow{
+		{VLANID: 1, InDatabase: true, AccessPorts: []VLANPortRef{}, TaggedPorts: []VLANPortRef{}},
+		{VLANID: 30, InDatabase: true, Name: "old", AccessPorts: []VLANPortRef{}, TaggedPorts: []VLANPortRef{}},
+	}
+	created := OverlayVLANDatabase(inv, VLANDatabaseChange{Op: VLANDBOpCreate, VLANID: 40, Name: "cam"})
+	var found bool
+	for _, row := range created {
+		if row.VLANID == 40 && row.InDatabase && row.Name == "cam" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("create overlay: %+v", created)
+	}
+	deleted := OverlayVLANDatabase(created, VLANDatabaseChange{Op: VLANDBOpDelete, VLANIDs: []int{30}})
+	for _, row := range deleted {
+		if row.VLANID == 30 {
+			t.Fatalf("vlan 30 should be gone: %+v", deleted)
+		}
+	}
+}

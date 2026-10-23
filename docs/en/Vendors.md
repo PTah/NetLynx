@@ -21,7 +21,7 @@ Current state (reference **0.6.0**, the level table keeps its meaning). **W3** (
 |--------|-------|-------|
 | Ubiquiti EdgeSwitch | **L2–L3** | Main focus; XP has CLI limitations |
 | ELTEX (MES) | **L2–L3** | CLI + aging docs |
-| SNR / NAG | **L2–L3** | Private PoE MIB + CLI |
+| SNR / NAG | **L2–L3** | Private PoE MIB + CLI; FDB SNMP: ifIndex 5001+ (see below) |
 | Cisco | **L2** (W1) | CPU; SSH IOS-like; `show run` backup |
 | Huawei | **L2** (W1) | CPU; VRP system-view; `display current-configuration` |
 | MikroTik | **L2** (W1) | CPU; SSH disable/comment/PoE; `/export` |
@@ -86,6 +86,16 @@ Names with hyphens/spaces are quoted. VLAN 1 cannot be deleted. The live models 
 | **Fastpath IEEE (no allowed list)** | `vlan participation include` + `vlan tagging` per ID; `all`/`except` are not emitted in this style |
 
 In the UI, `add` without VLAN 1 (and `remove`/`except` touching management) shows a warning about losing SSH/Web access (native/VLAN 1).
+
+### SNR: FDB and live port settings
+
+| Topic | NetLynx behaviour |
+|-------|-------------------|
+| **FDB (SNMP)** | In `dot1dTpFdbPort` / Q-BRIDGE SNR often returns an **ifIndex already** (`5001`=ge1 … `5009`=ge9 / SFP uplink), not bridge-port `1…9`. NetLynx accepts both; otherwise the UI MAC table stays empty while `show mac` is full. See [Polling-and-Topology-Cache.md](Polling-and-Topology-Cache.md). |
+| **Advanced port settings** | Read with `show running-config interface …` (one port); the `--More--` pager is advanced. Do not start with a long `current-mode` from config. |
+| **VLAN writes** | API / green “done” right after CLI; `show run` in the background (full dump on SNR is slow). |
+
+EdgeSwitch: classic `dot1dTpFdbPort` is often empty — MACs come from Q-BRIDGE (as before). On a downlink to SNR, FDB usually has few MACs (source learning on ingress); on SNR ge9 toward the core — many; that is switch behaviour, not a UI filter.
 
 ## Work waves
 

@@ -348,7 +348,9 @@ func runShowInterfaceConfig(client *ssh.Client, timeout time.Duration, v Vendor,
 	if err := sess.Shell(); err != nil {
 		return "", err
 	}
-	waitQuiet(&outBuf, 400*time.Millisecond, timeout)
+	// Педжер (--More--) waitQuiet не листает и тогда ждёт весь SSH-таймаут.
+	// Баннер и show листаем пробелом и не дольше нескольких секунд.
+	waitDump(in, &outBuf, 400*time.Millisecond, 4*time.Second)
 
 	privCmd, confCmd, _ := confEnterCmds(v)
 	send := func(s string, quiet time.Duration) error {
@@ -356,6 +358,13 @@ func runShowInterfaceConfig(client *ssh.Client, timeout time.Duration, v Vendor,
 			return err
 		}
 		waitQuiet(&outBuf, quiet, timeout)
+		return nil
+	}
+	show := func(s string, max time.Duration) error {
+		if _, err := in.Write([]byte(s + "\r\n")); err != nil {
+			return err
+		}
+		waitDump(in, &outBuf, 450*time.Millisecond, max)
 		return nil
 	}
 
@@ -376,40 +385,69 @@ func runShowInterfaceConfig(client *ssh.Client, timeout time.Duration, v Vendor,
 		_ = send("terminal datadump", 400*time.Millisecond)
 	}
 
-	showCmd := ShowInterfaceConfigCmd(v, iface)
-	if v == VendorSNR {
-		// fallback path: config → interface → show running-config current-mode
+	// Сначала короткий show одного порта — как в ручном SSH. На SNR current-mode
+	// из (config) часто печатает весь конфиг и встаёт на --More-- до конца таймаута.
+	shown := false
+	for _, showCmd := range showInterfaceCmds(v, iface) {
+		beforeShow := outBuf.Len()
+		if err := show(showCmd, 8*time.Second); err != nil {
+			return outBuf.String() + errBuf.String(), err
+		}
+		if interfaceSnippetOK(outBuf.String()[beforeShow:], iface) {
+			shown = true
+			break
+		}
+	}
+	if v == VendorSNR && !shown {
 		_ = send(confCmd, 500*time.Millisecond)
 		_ = send("interface "+iface, 450*time.Millisecond)
 		beforeShow := outBuf.Len()
-		if err := send("show running-config current-mode", 0); err != nil {
+		if err := show("show running-config current-mode", 8*time.Second); err != nil {
 			return outBuf.String() + errBuf.String(), err
 		}
-		waitDump(in, &outBuf, 600*time.Millisecond, 12*time.Second)
-		chunk := outBuf.String()[beforeShow:]
-		if strings.Contains(strings.ToLower(chunk), "interface") || len(strings.TrimSpace(chunk)) > 40 {
-			_, _ = in.Write([]byte("exit\r\nexit\r\n"))
-			_ = in.Close()
-			_ = sess.Wait()
-			return outBuf.String() + errBuf.String(), nil
+		if !interfaceSnippetOK(outBuf.String()[beforeShow:], iface) {
+			_ = send("exit", 300*time.Millisecond)
+			_ = send("exit", 300*time.Millisecond)
+		} else {
+			_, _ = in.Write([]byte("end\r\n"))
 		}
-		_ = send("exit", 300*time.Millisecond)
-		_ = send("exit", 300*time.Millisecond)
 	}
 
-	if err := send(showCmd, 0); err != nil {
-		return outBuf.String() + errBuf.String(), err
-	}
-	dumpMax := timeout
-	if dumpMax > 20*time.Second {
-		dumpMax = 20 * time.Second
-	}
-	if dumpMax < 8*time.Second {
-		dumpMax = 8 * time.Second
-	}
-	waitDump(in, &outBuf, 600*time.Millisecond, dumpMax)
 	_, _ = in.Write([]byte("exit\r\n"))
 	_ = in.Close()
 	_ = sess.Wait()
 	return outBuf.String() + errBuf.String(), nil
+}
+
+// showInterfaceCmds — команды чтения одного интерфейса, от более точной к запасной.
+func showInterfaceCmds(v Vendor, iface string) []string {
+	iface = strings.TrimSpace(iface)
+	cmd := ShowInterfaceConfigCmd(v, iface)
+	if v != VendorSNR {
+		return []string{cmd}
+	}
+	cmds := []string{cmd}
+	low := strings.ToLower(iface)
+	if iface != "" && !strings.Contains(low, "ethernet") && !strings.Contains(low, "port-channel") && !strings.HasPrefix(low, "vlan") {
+		alt := "show running-config interface ethernet " + iface
+		if alt != cmd {
+			cmds = append(cmds, alt)
+		}
+	}
+	return cmds
+}
+
+// interfaceSnippetOK — в куске есть блок этого интерфейса, а не ошибка CLI.
+func interfaceSnippetOK(chunk, iface string) bool {
+	low := strings.ToLower(chunk)
+	if strings.Contains(low, "invalid input") || strings.Contains(low, "% invalid") ||
+		strings.Contains(low, "unknown command") || strings.Contains(low, "incomplete command") ||
+		strings.Contains(low, "command not found") {
+		return false
+	}
+	name := strings.ToLower(strings.TrimSpace(iface))
+	if name != "" && strings.Contains(low, "interface "+name) {
+		return true
+	}
+	return strings.Contains(low, "interface ")
 }

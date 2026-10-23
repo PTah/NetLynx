@@ -1,4 +1,4 @@
-import { FormEvent, Fragment, useEffect, useMemo, useState } from "react";
+import { FormEvent, Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { apiDeleteJson, apiGet, apiPatch, apiPost } from "../api";
 
@@ -30,6 +30,15 @@ type VlansPayload = {
   source?: string;
   vlans?: VlanRow[];
   ok?: boolean;
+  message?: string;
+};
+
+type PortExpect = {
+  ifIndex: number;
+  op: string;
+  vlanId: number;
+  allowedMode: string;
+  allowedList: string;
 };
 
 type VlanDeleteImpactNeighbor = {
@@ -114,6 +123,91 @@ function inferVlansFromPorts(ports: PortHint[]): VlanRow[] {
 function formatPorts(list: VlanPortRef[] | undefined): string {
   if (!list?.length) return "—";
   return list.map((p) => p.if_name || String(p.if_index)).join(", ");
+}
+
+function parseVlanIds(raw: string): number[] {
+  const out: number[] = [];
+  for (const part of raw.split(/[,;\s]+/)) {
+    const t = part.trim();
+    if (!t) continue;
+    const range = t.split("-");
+    if (range.length === 2) {
+      const a = Number(range[0]);
+      const b = Number(range[1]);
+      if (a >= 1 && b >= a && b <= 4094 && b - a < 512) {
+        for (let n = a; n <= b; n++) out.push(n);
+      }
+      continue;
+    }
+    const n = Number(t);
+    if (n >= 1 && n <= 4094) out.push(n);
+  }
+  return out;
+}
+
+function portHas(list: VlanRow[], vlanId: number, ifIndex: number, tagged: boolean): boolean {
+  const row = list.find((r) => r.vlan_id === vlanId);
+  if (!row) return false;
+  const ports = tagged ? row.tagged_ports : row.access_ports;
+  return (ports || []).some((p) => p.if_index === ifIndex);
+}
+
+/** Свежий show run уже содержит команду — можно заменить оптимистичный список. */
+function portChangeVisible(list: VlanRow[], exp: PortExpect): boolean {
+  const idx = exp.ifIndex;
+  if (idx <= 0) return false;
+  if (exp.op === "set_access") return portHas(list, exp.vlanId, idx, false);
+  if (exp.op === "no_vlan") {
+    return !list.some(
+      (r) =>
+        r.vlan_id !== 1 &&
+        ((r.access_ports || []).some((p) => p.if_index === idx) ||
+          (r.tagged_ports || []).some((p) => p.if_index === idx))
+    );
+  }
+  if (exp.op === "remove") {
+    return !portHas(list, exp.vlanId, idx, false) && !portHas(list, exp.vlanId, idx, true);
+  }
+  if (exp.op === "trunk_allow") {
+    const ids = parseVlanIds(exp.allowedList);
+    if (exp.allowedMode === "remove") return ids.length > 0 && ids.every((id) => !portHas(list, id, idx, true));
+    if (exp.allowedMode === "all" || exp.allowedMode === "except") {
+      return list.some((r) => (r.tagged_ports || []).some((p) => p.if_index === idx));
+    }
+    return ids.some((id) => portHas(list, id, idx, true));
+  }
+  return false;
+}
+
+function dbChangeVisible(
+  list: VlanRow[],
+  kind: "create" | "name" | "delete",
+  ids: number[],
+  name?: string
+): boolean {
+  if (kind === "delete") return ids.every((id) => !list.some((r) => r.vlan_id === id && r.in_database));
+  if (kind === "create") return ids.every((id) => list.some((r) => r.vlan_id === id && r.in_database));
+  const row = list.find((r) => r.vlan_id === ids[0]);
+  return !!row && (row.name || "") === (name || "");
+}
+
+function writeFailureText(ex: unknown): string {
+  const msg = ex instanceof Error ? ex.message : String(ex || "Ошибка запроса");
+  const low = msg.toLowerCase();
+  const lost =
+    low.includes("failed to fetch") ||
+    low.includes("network") ||
+    low.includes("timeout") ||
+    low.includes("gateway") ||
+    low.includes("502") ||
+    low.includes("504") ||
+    low.includes("aborted") ||
+    low.includes("load failed");
+  if (!lost) return msg;
+  return (
+    msg +
+    " Ответ NetLynx не получен. Команда на коммутатор могла уже выполниться — обновите вкладку и проверьте привязку порта, не повторяйте вслепую."
+  );
 }
 
 function vlanNotInDbHint(r: VlanRow): { text: string; title: string } | null {
@@ -240,8 +334,10 @@ export function DeviceVlanTab({ deviceId, canWrite, settingsWritable, ports, rel
   const [apiReady, setApiReady] = useState(false);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
+  const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
   const [busyNote, setBusyNote] = useState("");
+  const writeGen = useRef(0);
   const [nameDraft, setNameDraft] = useState<Record<number, string>>({});
   const [vlanId, setVlanId] = useState<number | null>(null);
   const [ifIndex, setIfIndex] = useState(0);
@@ -294,9 +390,9 @@ export function DeviceVlanTab({ deviceId, canWrite, settingsWritable, ports, rel
     return false;
   };
 
-  const load = () => {
+  const load = (opts?: { keepErr?: boolean }) => {
     setLoading(true);
-    setErr("");
+    if (!opts?.keepErr) setErr("");
     apiGet<VlansPayload>(`/api/v1/devices/${deviceId}/vlans`)
       .then((r) => {
         if (!applyPayload(r)) {
@@ -319,6 +415,7 @@ export function DeviceVlanTab({ deviceId, canWrite, settingsWritable, ports, rel
   }, [inferred, apiReady]);
 
   useEffect(() => {
+    setNotice("");
     setApiReady(false);
     setSource("ports");
     setRows(inferVlansFromPorts(ports));
@@ -341,9 +438,11 @@ export function DeviceVlanTab({ deviceId, canWrite, settingsWritable, ports, rel
         : "пока только с портов (access VLAN / FDB). Имена появятся после show run.";
 
   const beginBusy = (note: string) => {
+    writeGen.current += 1;
     setBusy(true);
     setBusyNote(note);
     setErr("");
+    setNotice("");
   };
 
   const endBusy = () => {
@@ -351,9 +450,37 @@ export function DeviceVlanTab({ deviceId, canWrite, settingsWritable, ports, rel
     setBusyNote("");
   };
 
-  const afterWrite = (r: VlansPayload) => {
+  useEffect(() => {
+    if (!busy) return;
+    const t = window.setTimeout(() => {
+      setBusyNote((cur) =>
+        cur.includes("могла уже выполниться")
+          ? cur
+          : `${cur} Долго нет ответа: команда на коммутатор могла уже выполниться. Дождитесь зелёной строки «Готово» или текста ошибки и не нажимайте повторно.`
+      );
+    }, 25000);
+    return () => window.clearTimeout(t);
+  }, [busy]);
+
+  const afterWrite = (r: VlansPayload, fallback: string) => {
     if (!applyPayload(r)) load();
+    setNotice((r.message || "").trim() || fallback);
     onApplied?.();
+  };
+
+  const reconcileWhen = (visible: (list: VlanRow[]) => boolean) => {
+    const gen = writeGen.current;
+    for (const ms of [8000, 20000, 50000, 90000]) {
+      window.setTimeout(() => {
+        if (writeGen.current !== gen) return;
+        apiGet<VlansPayload>(`/api/v1/devices/${deviceId}/vlans`)
+          .then((r) => {
+            if (writeGen.current !== gen || !r.vlans || !visible(r.vlans)) return;
+            applyPayload(r);
+          })
+          .catch(() => {});
+      }, ms);
+    }
   };
 
   const onCreate = (e: FormEvent) => {
@@ -373,14 +500,18 @@ export function DeviceVlanTab({ deviceId, canWrite, settingsWritable, ports, rel
     });
     setNameDraft((prev) => ({ ...prev, [createId]: name }));
     setVlanId(createId);
+    const createdId = createId;
     apiPost<VlansPayload>(`/api/v1/devices/${deviceId}/vlans`, {
-      vlan_id: createId,
+      vlan_id: createdId,
       ...(name ? { name } : {}),
     })
-      .then(afterWrite)
-      .catch((ex: Error) => {
-        setErr(ex.message);
-        load();
+      .then((r) => {
+        afterWrite(r, `Готово: VLAN ${createdId} создан в vlan database. Команда на коммутаторе выполнена.`);
+        reconcileWhen((list) => dbChangeVisible(list, "create", [createdId], name));
+      })
+      .catch((ex: unknown) => {
+        setErr(writeFailureText(ex));
+        load({ keepErr: true });
       })
       .finally(() => {
         endBusy();
@@ -411,31 +542,52 @@ export function DeviceVlanTab({ deviceId, canWrite, settingsWritable, ports, rel
         allowed_vlans: allowedList,
       };
       if (nativeVlan >= 1 && nativeVlan <= 4094) trunkBody.vlan_id = nativeVlan;
+      const expectTrunk: PortExpect = {
+        ifIndex,
+        op: "trunk_allow",
+        vlanId: nativeVlan,
+        allowedMode,
+        allowedList,
+      };
       apiPatch<VlansPayload>(`/api/v1/devices/${deviceId}/interfaces/${ifIndex}/vlan`, trunkBody)
-        .then(afterWrite)
-        .catch((ex: Error) => setErr(ex.message))
+        .then((r) => {
+          afterWrite(r, "Готово: trunk allowed vlan записан на порт. Команда на коммутаторе выполнена.");
+          reconcileWhen((list) => portChangeVisible(list, expectTrunk));
+        })
+        .catch((ex: unknown) => setErr(writeFailureText(ex)))
         .finally(endBusy);
       return;
     }
     if (vlanId === 0) {
       beginBusy("Идёт очистка VLAN на порту (No VLAN)…");
+      const expectNo: PortExpect = { ifIndex, op: "no_vlan", vlanId: 0, allowedMode: "", allowedList: "" };
       apiPatch<VlansPayload>(`/api/v1/devices/${deviceId}/interfaces/${ifIndex}/vlan`, {
         op: "no_vlan",
       })
-        .then(afterWrite)
-        .catch((ex: Error) => setErr(ex.message))
+        .then((r) => {
+          afterWrite(r, "Готово: VLAN снят с порта (No VLAN). Команда на коммутаторе выполнена.");
+          reconcileWhen((list) => portChangeVisible(list, expectNo));
+        })
+        .catch((ex: unknown) => setErr(writeFailureText(ex)))
         .finally(endBusy);
       return;
     }
     const id = selectedVlanId;
     if (id < 1 || id > 4094) return;
     beginBusy("Идёт обновление конфига на свитче (VLAN на порту)…");
+    const expectAccess: PortExpect = { ifIndex, op, vlanId: id, allowedMode: "", allowedList: "" };
     apiPatch<VlansPayload>(`/api/v1/devices/${deviceId}/interfaces/${ifIndex}/vlan`, {
       op,
       vlan_id: id,
     })
-      .then(afterWrite)
-      .catch((ex: Error) => setErr(ex.message))
+      .then((r) => {
+        afterWrite(
+          r,
+          `Готово: на порт записан VLAN ${id}. Команда на коммутаторе выполнена.`
+        );
+        reconcileWhen((list) => portChangeVisible(list, expectAccess));
+      })
+      .catch((ex: unknown) => setErr(writeFailureText(ex)))
       .finally(endBusy);
   };
 
@@ -448,10 +600,13 @@ export function DeviceVlanTab({ deviceId, canWrite, settingsWritable, ports, rel
     // Сразу показать имя в таблице; ответ API уточнит полный список (в т.ч. новый VLAN).
     setRows((prev) => prev.map((row) => (row.vlan_id === id ? { ...row, name, in_database: true } : row)));
     apiPatch<VlansPayload>(`/api/v1/devices/${deviceId}/vlans/${id}`, { name })
-      .then(afterWrite)
-      .catch((ex: Error) => {
-        setErr(ex.message);
-        load();
+      .then((r) => {
+        afterWrite(r, `Готово: имя VLAN ${id} записано. Команда на коммутаторе выполнена.`);
+        reconcileWhen((list) => dbChangeVisible(list, "name", [id], name));
+      })
+      .catch((ex: unknown) => {
+        setErr(writeFailureText(ex));
+        load({ keepErr: true });
       })
       .finally(endBusy);
   };
@@ -493,10 +648,13 @@ export function DeviceVlanTab({ deviceId, canWrite, settingsWritable, ports, rel
             body: JSON.stringify({ vlan_ids: clean }),
           });
     req
-      .then(afterWrite)
-      .catch((ex: Error) => {
-        setErr(ex.message);
-        load();
+      .then((r) => {
+        afterWrite(r, `Готово: VLAN ${list} удалён из vlan database. Команда на коммутаторе выполнена.`);
+        reconcileWhen((rows) => dbChangeVisible(rows, "delete", clean));
+      })
+      .catch((ex: unknown) => {
+        setErr(writeFailureText(ex));
+        load({ keepErr: true });
       })
       .finally(endBusy);
   };
@@ -632,6 +790,10 @@ export function DeviceVlanTab({ deviceId, canWrite, settingsWritable, ports, rel
       {busy ? (
         <p style={{ color: "#9dd", fontSize: "0.9rem", marginTop: "-0.35rem" }} role="status" aria-live="polite">
           {busyNote || "Идёт обновление конфига…"} Подождите — идёт SSH и запись на свитч; кнопки временно недоступны.
+        </p>
+      ) : notice ? (
+        <p style={{ color: "#9bd08b", fontSize: "0.95rem", marginTop: "-0.35rem" }} role="status" aria-live="polite">
+          {notice}
         </p>
       ) : (
         <p style={{ color: "#7a8499", fontSize: "0.8rem", marginTop: "-0.35rem" }}>
@@ -997,6 +1159,21 @@ export function DeviceVlanTab({ deviceId, canWrite, settingsWritable, ports, rel
           {busy ? "Пишем…" : "Применить на порт"}
         </button>
       </form>
+      {busy && (
+        <p style={{ color: "#9dd", fontSize: "0.9rem", marginTop: "0.45rem" }} role="status" aria-live="polite">
+          {busyNote || "Идёт запись VLAN на порт…"} Результат появится здесь: «Готово» или текст ошибки. Пока строка на месте, повторно не нажимайте.
+        </p>
+      )}
+      {notice && !busy && (
+        <p style={{ color: "#9bd08b", fontSize: "0.95rem", marginTop: "0.45rem" }} role="status" aria-live="polite">
+          {notice}
+        </p>
+      )}
+      {err && (
+        <p style={{ color: "#f88", marginTop: "0.45rem" }} role="alert">
+          {err}
+        </p>
+      )}
       {op !== "trunk_allow" && selectedVlanId === 0 && (
         <p style={{ color: "#7a8499", fontSize: "0.8rem", marginTop: "0.35rem" }}>
           No VLAN: на порту <code>vlan participation auto 2-4093</code>, <code>include 1</code>,{" "}

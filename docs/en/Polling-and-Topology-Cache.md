@@ -29,8 +29,8 @@ Code: `internal/poller`; neighbours are written by `UpsertPortNeighbors` / `Sync
 | Rule | Behaviour |
 |---|---|
 | "Online" | `auto`: ICMP **or** SNMP; `ping`: ICMP only (SNMP not polled); `online`/`offline` — manual mark |
-| `DEVICE_OFFLINE` (normal) | after **2 consecutive** failed polls — a short SNMP blip with a live ICMP does not send an email |
-| `DEVICE_OFFLINE` (gone) | **immediately on the first poll** when a device that used to answer ICMP went silent on both ICMP and SNMP (that is no blip) |
+| `DEVICE_OFFLINE` (normal) | after **N consecutive** failed polls: critical/NAS/UPS/PC — **2**; AP/phones/cameras/MFPs — **3** (debounce) |
+| `DEVICE_OFFLINE` (gone) | for critical/important — **immediately on the first poll** when ICMP used to work and both ICMP and SNMP went silent; for AP/phones/cameras instant ping-dead is **off** |
 | `DEVICE_ONLINE` | on the first successful poll after a recorded offline episode |
 | NetLynx restart | the confirmation counter is in memory; if the process restarts mid-outage, `DEVICE_OFFLINE` is caught up once the outage exceeds 2 poll intervals (at least 3 minutes) |
 
@@ -45,11 +45,15 @@ Polling is split into two levels, so that a critical device going down is visibl
 
 Device type priority (affects queue order and the upper bound of the light interval):
 
-| Priority | Types | Interval |
+| Priority | Types | Interval / alert |
 |---|---|---|
-| Critical | router, switch, server | at least 15 s (`POLL_CRITICAL_INTERVAL_SECONDS`) |
-| Important | UPS, NAS, computer, iLO/IPMI | interval from the device card |
-| Normal | SIP phones, cameras, MFPs, TVs, etc. | interval from the device card |
+| Critical | router, switch, server | at least 15 s (`POLL_CRITICAL_INTERVAL_SECONDS`); OFFLINE after 2 polls or immediately when ICMP dies |
+| High | NAS | interval from the device card; queued right after critical |
+| Important | UPS, computer, iLO/IPMI | interval from the device card; OFFLINE after 2 polls |
+| Soft | access points, SIP phones | interval from the device card; OFFLINE after **3** polls (no instant ping-dead) |
+| Low | cameras, MFPs, other | interval from the device card; OFFLINE after **3** polls |
+
+The device card “Poll every N s” value is honoured (for critical types it is the upper bound, at least every 15 s). The “Trust SNMP traps” checkbox (`trust_link_traps`) enables instant LINK_* from traps when mode is `per_device`.
 
 On a light poll, fields that only come with the heavy poll (PoE flags, port roles) are **not overwritten** — `UpsertInterfaces` keeps the previous values (`COALESCE` / role from the snapshot).
 
@@ -59,13 +63,25 @@ Poll queue: the scheduler (`POLL_SCHEDULER_SECONDS`, 10 s by default) takes all 
 
 #### Devices without an SNMP agent (backoff)
 
-For devices that answer ICMP but not SNMP (cameras, PCs, TVs, some APs), after **3 consecutive failures** SNMP polling pauses for **15 minutes** — ICMP keeps working and reachability / `DEVICE_OFFLINE` / `DEVICE_ONLINE` are computed as usual. A successful SNMP poll resets the counter. This saves poll slots: without backoff such devices produced ~70 timeouts per minute, 5–10 seconds each.
+For devices **without expected SNMP** (cameras, MFPs, APs, phones, “other”) that answer ICMP but not SNMP, after **3 consecutive failures** SNMP polling pauses for **15 minutes** — ICMP keeps working. A successful SNMP poll (or “Check SNMP”) resets the counter. Without backoff such devices produced ~70 timeouts per minute.
 
-If a device does have SNMP but it disappeared temporarily (agent reboot), the backoff lifts itself after 15 minutes and polling resumes.
+**No backoff** for switch, router, server, NAS, UPS, PC — SNMP is required for “online”, and a pause hid a live switch for 15 minutes after one transient timeout.
 
 #### FDB on devices without bridge-MIB
 
 If an FDB poll fails ("bridge port map empty" — servers, some APs, devices without `BRIDGE-MIB`), the attempt is still recorded in `last_fdb_poll_at`: such a device is not retried on every heavy poll, it waits for its own `FDB_POLL_INTERVAL_SECONDS`. The device card shows "FDB unavailable".
+
+#### FDB: port mapping (vendors)
+
+Poll: `dot1dBasePortIfIndex` (bridge-port → ifIndex) plus `dot1dTpFdbPort` and/or Q-BRIDGE `dot1qTpFdbPort`. Manual refresh: `POST …/interfaces/{ifIndex}/clients/refresh` (whole-device FDB/ARP, no mac-move events).
+
+| Vendor | Quirk |
+|--------|--------|
+| **Cisco / classic** | FDB value = **bridge-port** → map via `dot1dBasePortIfIndex`. |
+| **Ubiquiti EdgeSwitch** | Classic `dot1dTpFdbPort` is often empty — MACs from **Q-BRIDGE**; ARP missing on some firmware. |
+| **SNR (S5010 etc.)** | FDB often already holds an **ifIndex** (`5001`=ge1 … `5008`=ge8, `5009`=ge9), not bridge-port `1…9`. NetLynx accepts both (since **0.5.8**). Otherwise CLI `show mac` is full while the UI / port card stays empty and FDB status is `unavailable`. |
+
+The “who is behind this port” list does **not** filter trunk/uplink: if `device_fdb_entries` has no rows for that ifIndex, the UI is empty. LLDP can still be alive (discovery ≠ unicast learning).
 
 ### 2. Nightly (and periodic) blast-cache rebuild
 

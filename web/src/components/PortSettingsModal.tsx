@@ -81,6 +81,54 @@ export type PortSettingsSaveOpts = {
   trunkAllowedList: string;
 };
 
+/** Расписание сброса PoE (время сервера NetLynx). */
+export type PoEResetScheduleMode = "at_time" | "times_per_day";
+
+export type PoEResetSchedule = {
+  enabled: boolean;
+  mode: PoEResetScheduleMode;
+  start_hour: number;
+  start_minute: number;
+  times_per_day: number;
+  reset_seconds: number;
+  next_slots?: string[];
+  last_run_at?: string | null;
+  last_status?: string | null;
+  last_error?: string | null;
+};
+
+export type PoEResetScheduleSave = {
+  enabled: boolean;
+  mode: PoEResetScheduleMode;
+  time: string;
+  times_per_day: number;
+  reset_seconds: number;
+};
+
+/** Слоты: N раз в сутки начиная с HH:MM, шаг 24h/N (03:00 ×3 → 03:00/11:00/19:00). */
+export function computePoEResetSlots(timeHHMM: string, timesPerDay: number): string[] {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(timeHHMM.trim());
+  if (!m) return [];
+  let h = Number(m[1]);
+  let min = Number(m[2]);
+  if (h < 0 || h > 23 || min < 0 || min > 59) return [];
+  let n = Math.round(timesPerDay) || 1;
+  if (n < 1) n = 1;
+  if (n > 24) n = 24;
+  const interval = Math.floor((24 * 60) / n);
+  const start = h * 60 + min;
+  const out: string[] = [];
+  for (let i = 0; i < n; i++) {
+    const t = (start + i * interval) % (24 * 60);
+    out.push(`${String(Math.floor(t / 60)).padStart(2, "0")}:${String(t % 60).padStart(2, "0")}`);
+  }
+  return out;
+}
+
+function formatHHMM(hour: number, minute: number): string {
+  return `${String(hour ?? 0).padStart(2, "0")}:${String(minute ?? 0).padStart(2, "0")}`;
+}
+
 function normTrunkAllowedMode(v: string | null | undefined): TrunkAllowedMode {
   const m = (v ?? "").toLowerCase();
   if (m === "all" || m === "set" || m === "add" || m === "remove" || m === "except") return m;
@@ -109,6 +157,9 @@ type Props = {
   onSave: (opts: PortSettingsSaveOpts) => Promise<void>;
   /** Сброс PoE (EdgeSwitch: poe reset N). */
   onPoEReset?: (seconds: number) => Promise<void>;
+  /** Расписание сброса PoE (только одиночный порт). */
+  loadPoESchedule?: () => Promise<PoEResetSchedule>;
+  onSavePoESchedule?: (s: PoEResetScheduleSave) => Promise<PoEResetSchedule>;
 };
 
 function normEdge(v: string | undefined | null): EdgePortValue {
@@ -157,6 +208,8 @@ export function PortSettingsModal({
   onClose,
   onSave,
   onPoEReset,
+  loadPoESchedule,
+  onSavePoESchedule,
 }: Props) {
   const bulkMode = Array.isArray(bulkPorts) && bulkPorts.length >= 2;
   const primary = bulkMode ? bulkPorts![0] : port;
@@ -180,16 +233,25 @@ export function PortSettingsModal({
   const [saving, setSaving] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [poeResetSec, setPoeResetSec] = useState(10);
+  const [schedEnabled, setSchedEnabled] = useState(false);
+  const [schedMode, setSchedMode] = useState<PoEResetScheduleMode>("at_time");
+  const [schedTime, setSchedTime] = useState("03:00");
+  const [schedTimes, setSchedTimes] = useState(3);
+  const [schedSaving, setSchedSaving] = useState(false);
+  const [schedNote, setSchedNote] = useState<string | null>(null);
+  const [schedLast, setSchedLast] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   /** null = ещё не загрузили / нет данных; Set = известные VLAN из database */
   const [knownVlans, setKnownVlans] = useState<Set<number> | null>(null);
   const loadLiveRef = useRef(loadLiveSettings);
   const loadKnownVlansRef = useRef(loadKnownVlans);
+  const loadPoEScheduleRef = useRef(loadPoESchedule);
   const vlanInputRef = useRef<HTMLSelectElement | null>(null);
   /** Закрывать по клику на фон только если pointerdown тоже был на фоне (не drag-выделение из input). */
   const backdropPtrDownRef = useRef(false);
   loadLiveRef.current = loadLiveSettings;
   loadKnownVlansRef.current = loadKnownVlans;
+  loadPoEScheduleRef.current = loadPoESchedule;
 
   const bulkKey = bulkMode ? bulkPorts!.map((p) => p.if_index).join(",") : "";
 
@@ -213,6 +275,13 @@ export function PortSettingsModal({
     setTrunkAllowedList(poll.trunkAllowedList);
     setPoe24v(poe24vSupported);
     setPoeResetSec(10);
+    setSchedEnabled(false);
+    setSchedMode("at_time");
+    setSchedTime("03:00");
+    setSchedTimes(3);
+    setSchedSaving(false);
+    setSchedNote(null);
+    setSchedLast(null);
     setErr(null);
     setSaving(false);
     setResetting(false);
@@ -238,6 +307,31 @@ export function PortSettingsModal({
       return () => {
         cancelled = true;
       };
+    }
+
+    const schedFn = loadPoEScheduleRef.current;
+    if (schedFn) {
+      schedFn()
+        .then((sc) => {
+          if (cancelled) return;
+          setSchedEnabled(Boolean(sc.enabled));
+          setSchedMode(sc.mode === "times_per_day" ? "times_per_day" : "at_time");
+          setSchedTime(formatHHMM(sc.start_hour ?? 3, sc.start_minute ?? 0));
+          setSchedTimes(sc.times_per_day >= 2 ? sc.times_per_day : 3);
+          if (sc.reset_seconds >= 1 && sc.reset_seconds <= 60) {
+            setPoeResetSec(sc.reset_seconds);
+          }
+          if (sc.last_run_at) {
+            const st = sc.last_status === "ok" ? "ok" : sc.last_status === "fail" ? "ошибка" : sc.last_status || "";
+            const errPart = sc.last_error ? `: ${sc.last_error}` : "";
+            setSchedLast(`Последний сброс: ${sc.last_run_at}${st ? ` (${st}${errPart})` : ""}`);
+          } else {
+            setSchedLast(null);
+          }
+        })
+        .catch(() => {
+          /* расписание опционально */
+        });
     }
 
     const loadFn = loadLiveRef.current;
@@ -440,6 +534,46 @@ export function PortSettingsModal({
       setResetting(false);
     }
   }
+
+  async function doSavePoESchedule() {
+    if (!onSavePoESchedule || !canWrite || schedSaving || saving || resetting || bulkMode) return;
+    const sec = Math.min(60, Math.max(1, Math.round(poeResetSec) || 10));
+    const times = schedMode === "times_per_day" ? Math.min(24, Math.max(2, Math.round(schedTimes) || 2)) : 1;
+    setSchedSaving(true);
+    setErr(null);
+    setSchedNote(null);
+    try {
+      const saved = await onSavePoESchedule({
+        enabled: schedEnabled,
+        mode: schedMode,
+        time: schedTime || "03:00",
+        times_per_day: times,
+        reset_seconds: sec,
+      });
+      setSchedEnabled(Boolean(saved.enabled));
+      setSchedMode(saved.mode === "times_per_day" ? "times_per_day" : "at_time");
+      setSchedTime(formatHHMM(saved.start_hour ?? 3, saved.start_minute ?? 0));
+      if (saved.times_per_day >= 2) setSchedTimes(saved.times_per_day);
+      const preview =
+        saved.next_slots && saved.next_slots.length
+          ? saved.next_slots.join(" / ")
+          : computePoEResetSlots(schedTime || "03:00", times).join(" / ");
+      setSchedNote(
+        saved.enabled
+          ? `Расписание сохранено. Сбросы: ${preview || "—"} (время сервера)`
+          : "Расписание выключено и сохранено",
+      );
+    } catch (ex) {
+      setErr(ex instanceof Error ? ex.message : "Ошибка сохранения расписания");
+    } finally {
+      setSchedSaving(false);
+    }
+  }
+
+  const schedPreviewSlots = computePoEResetSlots(
+    schedTime || "03:00",
+    schedMode === "times_per_day" ? Math.min(24, Math.max(2, Math.round(schedTimes) || 2)) : 1,
+  );
 
   // Portal в body: иначе модалка внутри .device-detail-body (overflow-y:auto) при фокусе/вводе
   // в VLAN уезжает вместе со скроллом / клипается overflow:hidden — выглядит как «закрылась».
@@ -786,21 +920,21 @@ export function PortSettingsModal({
                   min={1}
                   max={60}
                   value={poeResetSec}
-                  disabled={controlsDisabled}
+                  disabled={controlsDisabled || schedSaving}
                   onChange={(e) => setPoeResetSec(Number(e.target.value) || 10)}
                   style={inputStyle}
                 />
               </label>
               <button
                 type="button"
-                disabled={controlsDisabled}
+                disabled={controlsDisabled || schedSaving}
                 onClick={() => void doPoEReset()}
                 style={{
                   ...btnSecondary,
                   marginTop: 14,
                   borderColor: "#8a5a2b",
                   color: "#f0c090",
-                  opacity: controlsDisabled ? 0.45 : 1,
+                  opacity: controlsDisabled || schedSaving ? 0.45 : 1,
                 }}
               >
                 {resetting ? "Сброс…" : "PoE Reset"}
@@ -810,6 +944,101 @@ export function PortSettingsModal({
               EdgeSwitch: <code>poe reset N</code> (1–60 с). MikroTik: power-cycle. Cisco/Eltex/SNR и др.: краткий
               power-cycle (off → пауза → on).
             </p>
+
+            {!bulkMode && onSavePoESchedule && (
+              <div
+                style={{
+                  marginTop: "0.75rem",
+                  paddingTop: "0.65rem",
+                  borderTop: "1px solid #2a3344",
+                }}
+              >
+                <div style={{ fontSize: "0.8rem", color: "#9aa3b5", marginBottom: 8 }}>Сброс по расписанию</div>
+                <label style={{ ...rowStyle, marginBottom: 8, opacity: controlsDisabled ? 0.55 : 1 }}>
+                  <input
+                    type="checkbox"
+                    checked={schedEnabled}
+                    disabled={controlsDisabled || schedSaving}
+                    onChange={(e) => setSchedEnabled(e.target.checked)}
+                  />
+                  <span>Включить (время сервера NetLynx)</span>
+                </label>
+
+                <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 8, opacity: controlsDisabled ? 0.55 : 1 }}>
+                  <label style={{ fontSize: "0.85rem", display: "flex", alignItems: "center", gap: 8 }}>
+                    <input
+                      type="radio"
+                      name="poe-sched-mode"
+                      checked={schedMode === "at_time"}
+                      disabled={controlsDisabled || schedSaving}
+                      onChange={() => setSchedMode("at_time")}
+                    />
+                    По времени (раз в сутки)
+                  </label>
+                  <label style={{ fontSize: "0.85rem", display: "flex", alignItems: "center", gap: 8 }}>
+                    <input
+                      type="radio"
+                      name="poe-sched-mode"
+                      checked={schedMode === "times_per_day"}
+                      disabled={controlsDisabled || schedSaving}
+                      onChange={() => setSchedMode("times_per_day")}
+                    />
+                    Несколько раз в сутки
+                  </label>
+                </div>
+
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "flex-end" }}>
+                  <label style={{ ...fieldLabel, flex: "0 0 auto", width: 110 }}>
+                    {schedMode === "times_per_day" ? "Начиная с" : "Время"}
+                    <input
+                      type="time"
+                      value={schedTime}
+                      disabled={controlsDisabled || schedSaving}
+                      onChange={(e) => setSchedTime(e.target.value || "03:00")}
+                      style={inputStyle}
+                    />
+                  </label>
+                  {schedMode === "times_per_day" && (
+                    <label style={{ ...fieldLabel, flex: "0 0 auto", width: 100 }}>
+                      Раз в сутки
+                      <input
+                        type="number"
+                        min={2}
+                        max={24}
+                        value={schedTimes}
+                        disabled={controlsDisabled || schedSaving}
+                        onChange={(e) => setSchedTimes(Number(e.target.value) || 2)}
+                        style={inputStyle}
+                      />
+                    </label>
+                  )}
+                  <button
+                    type="button"
+                    disabled={controlsDisabled || schedSaving || resetting}
+                    onClick={() => void doSavePoESchedule()}
+                    style={{
+                      ...btnSecondary,
+                      opacity: controlsDisabled || schedSaving || resetting ? 0.45 : 1,
+                    }}
+                  >
+                    {schedSaving ? "Сохранение…" : "Сохранить расписание"}
+                  </button>
+                </div>
+
+                {schedPreviewSlots.length > 0 && (
+                  <p style={{ margin: "0.45rem 0 0", fontSize: "0.72rem", color: "#9aa3b5", lineHeight: 1.35 }}>
+                    Сбросы: <code>{schedPreviewSlots.join(" / ")}</code>
+                    {schedMode === "times_per_day" ? " (равный шаг за сутки)" : ""}
+                  </p>
+                )}
+                {schedNote && (
+                  <p style={{ margin: "0.35rem 0 0", fontSize: "0.75rem", color: "#7eb8ff", lineHeight: 1.35 }}>{schedNote}</p>
+                )}
+                {schedLast && (
+                  <p style={{ margin: "0.25rem 0 0", fontSize: "0.7rem", color: "#7a8499", lineHeight: 1.35 }}>{schedLast}</p>
+                )}
+              </div>
+            )}
           </div>
         )}
 
@@ -825,11 +1054,11 @@ export function PortSettingsModal({
           </button>
           <button
             type="submit"
-            disabled={!canWrite || !canSubmit || saving || loading || resetting}
+            disabled={!canWrite || !canSubmit || saving || loading || resetting || schedSaving}
             style={{
               ...btnPrimary,
-              opacity: !canWrite || !canSubmit || saving || loading || resetting ? 0.45 : 1,
-              cursor: !canWrite || !canSubmit || saving || loading || resetting ? "not-allowed" : "pointer",
+              opacity: !canWrite || !canSubmit || saving || loading || resetting || schedSaving ? 0.45 : 1,
+              cursor: !canWrite || !canSubmit || saving || loading || resetting || schedSaving ? "not-allowed" : "pointer",
             }}
           >
             {saving ? "Сохранение…" : bulkMode ? `Применить к ${bulkPorts!.length}` : "Сохранить"}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -216,10 +217,14 @@ func (s *Server) handlePatchPortVLAN(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	s.invalidateDeviceRunningConfig(deviceID)
 	_ = s.st.UpdateInterfaceVLANAfterCLI(r.Context(), deviceID, ifIndex, ch.Op, ch.VLANID)
-	s.refreshConfigAfterVLANDB(r.Context(), deviceID, creds)
+	// Ответ — сразу после CLI. show run на SNR часто занимает десятки секунд и больше;
+	// раньше UI молчал всё это время, хотя VLAN на порту уже был записан.
+	s.invalidateDeviceRunningConfig(deviceID)
+	s.refreshConfigAfterVLANDBAsync(deviceID, creds)
 	via, inv, _ := s.deviceVLANInventory(r.Context(), deviceID)
+	inv = swcfg.OverlayPortVLAN(inv, ifIndex, iface, ch)
+	msg := portVLANAppliedMessage(iface, ch)
 	details := map[string]interface{}{
 		"if_index":      ifIndex,
 		"op":            ch.Op,
@@ -227,13 +232,15 @@ func (s *Server) handlePatchPortVLAN(w http.ResponseWriter, r *http.Request) {
 		"allowed_mode":  ch.AllowedMode,
 		"allowed_vlans": swcfg.NormalizeVLANList(ch.AllowedList),
 		"via":           "ssh",
+		"message":       msg,
 	}
 	s.audit(r, "port.vlan.update", "device", &deviceID, details)
 	s.emitConfigEditEvent(r, deviceID, &ifIndex, "port.vlan", details)
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"ok": true, "op": ch.Op, "vlan_id": ch.VLANID, "via": "ssh",
 		"allowed_mode": ch.AllowedMode, "allowed_vlans": swcfg.NormalizeVLANList(ch.AllowedList),
-		"source": via, "vlans": inv,
+		"message": msg,
+		"source":  via, "vlans": inv,
 	})
 }
 
@@ -255,6 +262,14 @@ func parseVLANIDParam(r *http.Request) (int, error) {
 	return n, nil
 }
 
+func (s *Server) refreshConfigAfterVLANDBAsync(deviceID int64, creds swcfg.Creds) {
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+		defer cancel()
+		s.refreshConfigAfterVLANDB(ctx, deviceID, creds)
+	}()
+}
+
 func (s *Server) refreshConfigAfterVLANDB(ctx context.Context, deviceID int64, creds swcfg.Creds) {
 	s.invalidateDeviceRunningConfig(deviceID)
 	var raw []byte
@@ -263,6 +278,7 @@ func (s *Server) refreshConfigAfterVLANDB(ctx context.Context, deviceID int64, c
 		if attempt > 0 {
 			select {
 			case <-ctx.Done():
+				slog.Warn("vlan config refresh cancelled", "device_id", deviceID, "err", ctx.Err())
 				return
 			case <-time.After(time.Duration(attempt) * 700 * time.Millisecond):
 			}
@@ -273,10 +289,62 @@ func (s *Server) refreshConfigAfterVLANDB(ctx context.Context, deviceID int64, c
 		}
 	}
 	if err != nil || len(raw) == 0 {
+		slog.Warn("vlan config refresh failed", "device_id", deviceID, "err", err)
 		return
 	}
 	s.putDeviceRunningConfig(deviceID, raw)
 	_, _, _ = s.st.SaveConfigSnapshotIfChanged(ctx, deviceID, string(raw), "port_sync")
+}
+
+func portVLANAppliedMessage(ifName string, ch swcfg.PortVLANChange) string {
+	port := strings.TrimSpace(ifName)
+	if port == "" {
+		port = "порту"
+	}
+	tail := " Команда на коммутаторе выполнена; список может ещё раз обновиться после show run."
+	switch ch.Op {
+	case swcfg.VLANOpNoVLAN:
+		return "Готово: с порта " + port + " снят VLAN (No VLAN)." + tail
+	case swcfg.VLANOpSetAccess:
+		return fmt.Sprintf("Готово: на порт %s записан VLAN %d (access).%s", port, ch.VLANID, tail)
+	case swcfg.VLANOpRemove:
+		return fmt.Sprintf("Готово: VLAN %d убран с порта %s.%s", ch.VLANID, port, tail)
+	case swcfg.VLANOpSetNative:
+		return fmt.Sprintf("Готово: на порту %s native VLAN %d.%s", port, ch.VLANID, tail)
+	case swcfg.VLANOpAddTagged:
+		return fmt.Sprintf("Готово: VLAN %d добавлен как tagged на порт %s.%s", ch.VLANID, port, tail)
+	case swcfg.VLANOpTrunkAllow:
+		mode := strings.ToLower(strings.TrimSpace(ch.AllowedMode))
+		list := swcfg.NormalizeVLANList(ch.AllowedList)
+		detail := mode
+		if mode != swcfg.TrunkAllowAll && list != "" {
+			detail = mode + " " + list
+		}
+		if ch.VLANID > 0 {
+			detail += fmt.Sprintf(", native %d", ch.VLANID)
+		}
+		return fmt.Sprintf("Готово: на порту %s записан trunk allowed vlan (%s).%s", port, detail, tail)
+	default:
+		return "Готово: VLAN на порту " + port + " записан." + tail
+	}
+}
+
+func vlanDBAppliedMessage(ch swcfg.VLANDatabaseChange) string {
+	tail := " Команда на коммутаторе выполнена; список может ещё раз обновиться после show run."
+	switch ch.Op {
+	case swcfg.VLANDBOpCreate:
+		name := strings.TrimSpace(ch.Name)
+		if name != "" {
+			return fmt.Sprintf("Готово: VLAN %d (%s) создан в vlan database.%s", ch.VLANID, name, tail)
+		}
+		return fmt.Sprintf("Готово: VLAN %d создан в vlan database.%s", ch.VLANID, tail)
+	case swcfg.VLANDBOpSetName:
+		return fmt.Sprintf("Готово: имя VLAN %d записано (%s).%s", ch.VLANID, strings.TrimSpace(ch.Name), tail)
+	case swcfg.VLANDBOpDelete:
+		return fmt.Sprintf("Готово: VLAN %s удалён из vlan database.%s", swcfg.FormatVLANIDList(ch.DeleteIDs()), tail)
+	default:
+		return "Готово: vlan database обновлена." + tail
+	}
 }
 
 func (s *Server) handleCreateDeviceVLAN(w http.ResponseWriter, r *http.Request) {
@@ -315,16 +383,20 @@ func (s *Server) handleCreateDeviceVLAN(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	s.refreshConfigAfterVLANDB(r.Context(), deviceID, creds)
+	s.invalidateDeviceRunningConfig(deviceID)
+	s.refreshConfigAfterVLANDBAsync(deviceID, creds)
 	via, inv, _ := s.deviceVLANInventory(r.Context(), deviceID)
+	inv = swcfg.OverlayVLANDatabase(inv, ch)
+	msg := vlanDBAppliedMessage(ch)
 	details := map[string]interface{}{
-		"vlan_id": body.VLANID, "name": name, "via": "ssh",
+		"vlan_id": body.VLANID, "name": name, "via": "ssh", "message": msg,
 	}
 	s.audit(r, "vlan.database.create", "device", &deviceID, details)
 	s.emitConfigEditEvent(r, deviceID, nil, "vlan.database.create", details)
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"ok": true, "vlan_id": body.VLANID, "name": name, "via": "ssh",
-		"source": via, "vlans": inv,
+		"message": msg,
+		"source":  via, "vlans": inv,
 	})
 }
 
@@ -369,16 +441,20 @@ func (s *Server) handlePatchDeviceVLAN(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	s.refreshConfigAfterVLANDB(r.Context(), deviceID, creds)
+	s.invalidateDeviceRunningConfig(deviceID)
+	s.refreshConfigAfterVLANDBAsync(deviceID, creds)
 	via, inv, _ := s.deviceVLANInventory(r.Context(), deviceID)
+	inv = swcfg.OverlayVLANDatabase(inv, ch)
+	msg := vlanDBAppliedMessage(ch)
 	details := map[string]interface{}{
-		"vlan_id": vlanID, "name": name, "via": "ssh",
+		"vlan_id": vlanID, "name": name, "via": "ssh", "message": msg,
 	}
 	s.audit(r, "vlan.database.name", "device", &deviceID, details)
 	s.emitConfigEditEvent(r, deviceID, nil, "vlan.database.name", details)
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"ok": true, "vlan_id": vlanID, "name": name, "via": "ssh",
-		"source": via, "vlans": inv,
+		"message": msg,
+		"source":  via, "vlans": inv,
 	})
 }
 
@@ -480,16 +556,20 @@ func (s *Server) applyDeleteDeviceVLANs(w http.ResponseWriter, r *http.Request, 
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	s.refreshConfigAfterVLANDB(r.Context(), deviceID, creds)
+	s.invalidateDeviceRunningConfig(deviceID)
+	s.refreshConfigAfterVLANDBAsync(deviceID, creds)
 	via, inv, _ := s.deviceVLANInventory(r.Context(), deviceID)
+	inv = swcfg.OverlayVLANDatabase(inv, ch)
 	deleted := ch.DeleteIDs()
+	msg := vlanDBAppliedMessage(ch)
 	details := map[string]interface{}{
-		"vlan_ids": deleted, "via": "ssh",
+		"vlan_ids": deleted, "via": "ssh", "message": msg,
 	}
 	s.audit(r, "vlan.database.delete", "device", &deviceID, details)
 	s.emitConfigEditEvent(r, deviceID, nil, "vlan.database.delete", details)
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"ok": true, "vlan_ids": deleted, "via": "ssh",
-		"source": via, "vlans": inv,
+		"message": msg,
+		"source":  via, "vlans": inv,
 	})
 }

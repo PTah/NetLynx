@@ -21,7 +21,7 @@
 |--------|---------|---------|
 | Ubiquiti EdgeSwitch | **L2–L3** | Основной фокус; XP — ограничения CLI |
 | ELTEX (MES) | **L2–L3** | CLI + aging docs |
-| SNR / NAG | **L2–L3** | Private PoE MIB + CLI |
+| SNR / NAG | **L2–L3** | Private PoE MIB + CLI; FDB SNMP: ifIndex 5001+ (см. ниже) |
 | Cisco | **L2** (W1) | CPU; SSH IOS-like; бэкап show run |
 | Huawei | **L2** (W1) | CPU; VRP system-view; display current-configuration |
 | MikroTik | **L2** (W1) | CPU; SSH disable/comment/PoE; `/export` |
@@ -86,6 +86,16 @@ Ubiquiti / ELTEX / SNR — уже в продукте; доработки по �
 | **Fastpath IEEE (нет allowed list)** | `vlan participation include` + `vlan tagging` по ID; `all`/`except` на этом стиле не эмитятся |
 
 В UI при `add` без VLAN 1 (и при `remove`/`except`, затрагивающих управление) — предупреждение о риске потери SSH/Web (native/VLAN 1).
+
+### SNR: FDB и live-настройки порта
+
+| Тема | Поведение NetLynx |
+|------|-------------------|
+| **FDB (SNMP)** | В `dot1dTpFdbPort` / Q-BRIDGE SNR часто отдаёт **уже ifIndex** (`5001`=ge1 … `5009`=ge9 / SFP+аплинк), а не bridge-port `1…9`. NetLynx принимает оба варианта; иначе таблица MAC в UI пустая при живом `show mac`. См. [Polling-and-Topology-Cache.md](Polling-and-Topology-Cache.md). |
+| **Расширенные настройки порта** | Чтение: `show running-config interface …` (один порт), пейджер `--More--` листается. Не начинать с долгого `current-mode` из config. |
+| **Запись VLAN** | Ответ API/`«Готово»` сразу после CLI; `show run` в фоне (полный dump на SNR медленный). |
+
+EdgeSwitch: классический `dot1dTpFdbPort` часто пуст — MAC из Q-BRIDGE (как раньше). На downlink к SNR в FDB обычно мало MAC (учёба source на входящем кадре), на SNR ge9 к ядру — много; это железо, не фильтр UI.
 
 ## Волны работ
 

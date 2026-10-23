@@ -302,6 +302,11 @@ func (s *Server) handlePatchDevice(w http.ResponseWriter, r *http.Request) {
 	}
 	s.audit(r, "device.update", "device", &id, details)
 	s.emitConfigEditEvent(r, id, nil, "device.snmp", details)
+	// Смена community/v3 — сбросить backoff и сразу опросить (иначе 15 мин «тишины»).
+	if s.pollRequester != nil {
+		s.pollRequester.ClearSNMPBackoff(id)
+		s.pollRequester.RequestPoll(id)
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "id": id})
 }
 
@@ -415,6 +420,17 @@ func (s *Server) handleSNMPTest(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeJSON(w, http.StatusOK, map[string]interface{}{"ok": false, "error": err.Error()})
 		return
+	}
+	// Успешная ручная проверка должна обновить карточку: иначе UI остаётся на
+	// «request timeout», а поллер мог уже уйти в SNMP-backoff и не опрашивать узел.
+	sn, sd := sysName, sysDescr
+	if err := s.st.UpdateDevicePollMeta(r.Context(), id, true, nil, &sn, &sd, nil, nil, nil, nil); err != nil {
+		writeJSON(w, http.StatusOK, map[string]interface{}{"ok": false, "error": "snmp ok, но статус не сохранён: " + err.Error()})
+		return
+	}
+	if s.pollRequester != nil {
+		s.pollRequester.ClearSNMPBackoff(id)
+		s.pollRequester.RequestPoll(id)
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"ok":        true,

@@ -571,6 +571,8 @@ function formatConfigEditChange(change: string): string {
       return "порт: PoE";
     case "port.poe_reset":
       return "порт: PoE reset";
+    case "port.poe_reset_schedule":
+      return "порт: расписание PoE reset";
     case "port.bulk":
       return "порты: массово";
     case "port.isolate":
@@ -664,6 +666,26 @@ function formatConfigEditDetail(p: Record<string, unknown>): string {
   if (change === "port.poe_reset") {
     const sec = asNum(p.seconds);
     if (sec != null) parts.push(`${sec} с`);
+    if (str(p.source) === "schedule") parts.push("по расписанию");
+    if (p.ok === false && str(p.error)) parts.push(str(p.error));
+  }
+
+  if (change === "port.poe_reset_schedule") {
+    if (p.deleted === true) parts.push("удалено");
+    else if (typeof p.enabled === "boolean") parts.push(p.enabled ? "вкл" : "выкл");
+    if (p.mode != null) {
+      const mode = str(p.mode);
+      if (mode === "at_time") parts.push("раз в сутки");
+      else if (mode === "times_per_day") {
+        const n = asNum(p.times_per_day);
+        parts.push(n != null ? `${n}×/сутки` : "несколько раз");
+      }
+    }
+    const hh = asNum(p.start_hour);
+    const mm = asNum(p.start_minute);
+    if (hh != null && mm != null) {
+      parts.push(`${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`);
+    }
   }
 
   const action = str(p.action);

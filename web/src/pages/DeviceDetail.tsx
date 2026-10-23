@@ -11,7 +11,12 @@ import {
   isLikelyFiberPort,
   showPoEIndicator,
 } from "../components/PortOverviewGrid";
-import { PortSettingsModal, type PortLiveSettings, type PortSettingsTarget } from "../components/PortSettingsModal";
+import {
+  PortSettingsModal,
+  type PoEResetSchedule,
+  type PortLiveSettings,
+  type PortSettingsTarget,
+} from "../components/PortSettingsModal";
 import { formatBitRate, TrafficSparkline } from "../components/TrafficSparkline";
 import { formatEventSummary, formatEventTypeLabel } from "../eventFormat";
 import { usePersistedColumnWidths } from "../hooks/usePersistedColumnWidths";
@@ -20,6 +25,7 @@ import { formatPortSpeedFromRow, linkMbps } from "../linkSpeedFormat";
 import { deviceLinkState, resolveDeviceBack } from "../navigation";
 import {
   type DeviceCategory,
+  deviceCategoryLabel,
   isPrinterCategory,
   isUpsCategory,
   normalizeDeviceCategory,
@@ -294,6 +300,16 @@ function portVlanDisplay(p: Pick<IfRow, "port_role" | "cli_access_vlan" | "cli_p
   return "";
 }
 
+type DeviceAttachment = {
+  parent_id: number;
+  parent_name?: string;
+  parent_host?: string;
+  parent_category?: string;
+  port_name?: string;
+  if_index?: number;
+  protocol?: string;
+};
+
 type Detail = {
   device: Device & { sys_descr?: string | null; util_high_pct?: number | null; util_ok_pct?: number | null; fdb_poll_interval_seconds?: number | null };
   interfaces: IfRow[];
@@ -301,6 +317,8 @@ type Detail = {
   neighbors?: Neighbor[];
   /** MAC из ARP L3-узлов по IP, если chassis_mac пуст */
   arp_observed_macs?: string[];
+  /** Автоопределённое подключение к свитчу/роутеру (не для switch/router) */
+  attachment?: DeviceAttachment | null;
 };
 
 function ifNaturalSortKey(p: IfRow): number {
@@ -1501,8 +1519,10 @@ export default function DeviceDetail() {
     if (!id) return;
     apiPost<SnmpTestResult>(`/api/v1/devices/${id}/snmp-test`, {})
       .then((r) => {
-        if (r.ok) setSnmpDlg(`SNMP OK\nsysName: ${r.sys_name ?? ""}\n\nsysDescr:\n${r.sys_descr ?? ""}`);
-        else setSnmpDlg(`Ошибка: ${r.error ?? ""}`);
+        if (r.ok) {
+          setSnmpDlg(`SNMP OK\nsysName: ${r.sys_name ?? ""}\n\nsysDescr:\n${r.sys_descr ?? ""}`);
+          load(); // статус last_snmp_ok обновляется на сервере — перечитать карточку
+        } else setSnmpDlg(`Ошибка: ${r.error ?? ""}`);
       })
       .catch((e: Error) => setErr(e.message));
   };
@@ -2565,6 +2585,45 @@ export default function DeviceDetail() {
 
           {showPanel("ports") && (
           <div role={showTabs ? "tabpanel" : undefined} aria-label={showTabs ? "Порты" : undefined}>
+          {(() => {
+            const cat = normalizeDeviceCategory(data.device.device_category);
+            if (cat === "switch" || cat === "router") return null;
+            const att = data.attachment;
+            if (!att || !att.parent_id) return null;
+            const parentLabel =
+              (att.parent_name && att.parent_name.trim()) ||
+              (att.parent_host && att.parent_host.trim()) ||
+              `#${att.parent_id}`;
+            const portLabel =
+              (att.port_name && att.port_name.trim()) ||
+              (att.if_index != null && att.if_index > 0 ? `if${att.if_index}` : "");
+            const proto = (att.protocol || "").trim().toUpperCase();
+            const kind = deviceCategoryLabel(att.parent_category, categories);
+            return (
+              <div style={{ marginBottom: "1.25rem" }}>
+                <h2 style={{ marginBottom: "0.35rem" }}>Подключен к…</h2>
+                <p style={{ margin: 0, fontSize: "0.95rem" }}>
+                  {kind ? `${kind}: ` : null}
+                  <Link to={`/devices/${att.parent_id}`} state={deviceLinkState(back)}>
+                    {parentLabel}
+                  </Link>
+                  {portLabel ? (
+                    <>
+                      , порт <code>{portLabel}</code>
+                    </>
+                  ) : null}
+                  {proto ? (
+                    <span style={{ color: "#9aa3b5", marginLeft: "0.5rem", fontSize: "0.85rem" }}>
+                      ({proto})
+                    </span>
+                  ) : null}
+                </p>
+                <p style={{ margin: "0.35rem 0 0", color: "#9aa3b5", fontSize: "0.85rem" }}>
+                  Автоопределение по LLDP/CDP/FDB. Ручные связи — ниже.
+                </p>
+              </div>
+            );
+          })()}
           <h2>Ручные связи</h2>
           <p style={{ marginTop: 0, color: "#9aa3b5", fontSize: "0.9rem" }}>
             Если LLDP/CDP врёт или молчит (VLAN на одном SFP и т.п.), задайте порт↔порт вручную. Пока связь{" "}
@@ -2870,6 +2929,44 @@ export default function DeviceDetail() {
                   );
                   load();
                 }}
+                loadPoESchedule={
+                  portBulkOpen
+                    ? undefined
+                    : async () => {
+                        if (!portSettings) throw new Error("Порт не выбран");
+                        return apiGet<PoEResetSchedule>(
+                          `/api/v1/devices/${id}/interfaces/${portSettings.if_index}/poe-reset-schedule`,
+                        );
+                      }
+                }
+                onSavePoESchedule={
+                  portBulkOpen
+                    ? undefined
+                    : async (s) => {
+                        if (!portSettings) throw new Error("Порт не выбран");
+                        const saved = await apiPut<PoEResetSchedule>(
+                          `/api/v1/devices/${id}/interfaces/${portSettings.if_index}/poe-reset-schedule`,
+                          {
+                            enabled: s.enabled,
+                            mode: s.mode,
+                            time: s.time,
+                            times_per_day: s.times_per_day,
+                            reset_seconds: s.reset_seconds,
+                          },
+                        );
+                        const portLabel = portSettings.if_name?.trim() || String(portSettings.if_index);
+                        const slots =
+                          saved.next_slots && saved.next_slots.length
+                            ? saved.next_slots.join("/")
+                            : "";
+                        setDescrMsg(
+                          saved.enabled
+                            ? `Порт ${portLabel}: расписание PoE reset — ${slots || s.time}`
+                            : `Порт ${portLabel}: расписание PoE reset выключено`,
+                        );
+                        return saved;
+                      }
+                }
                 onSave={async ({
                   adminUp,
                   poeMode,

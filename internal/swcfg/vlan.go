@@ -686,6 +686,240 @@ func InventoryVLANOnPort(inv []VLANInventoryRow, vlanID, ifIndex int) bool {
 	return false
 }
 
+// OverlayPortVLAN накладывает уже выполненную команду порта на список VLAN,
+// не дожидаясь следующего show run. Список из снимка иначе ещё показывает старую привязку.
+func OverlayPortVLAN(inv []VLANInventoryRow, ifIndex int, ifName string, ch PortVLANChange) []VLANInventoryRow {
+	if ifIndex <= 0 {
+		return inv
+	}
+	rows := cloneVLANInventory(inv)
+	refAccess := VLANPortRef{IfIndex: ifIndex, IfName: strings.TrimSpace(ifName), Role: "access"}
+	refTrunk := VLANPortRef{IfIndex: ifIndex, IfName: strings.TrimSpace(ifName), Role: "trunk"}
+	switch ch.Op {
+	case VLANOpSetAccess, VLANOpNoVLAN:
+		id := ch.VLANID
+		if ch.Op == VLANOpNoVLAN {
+			id = 1
+		}
+		rows = stripPortVLAN(rows, ifIndex, true, true)
+		rows = addAccessPort(rows, id, refAccess)
+	case VLANOpRemove:
+		rows = stripPortFromVLAN(rows, ch.VLANID, ifIndex, true, true)
+	case VLANOpSetNative:
+		rows = stripPortVLAN(rows, ifIndex, true, false)
+		if ch.VLANID > 0 {
+			rows = stripPortFromVLAN(rows, ch.VLANID, ifIndex, false, true)
+		}
+	case VLANOpTrunkAllow, VLANOpAddTagged:
+		rows = stripPortVLAN(rows, ifIndex, true, false)
+		mode := strings.ToLower(strings.TrimSpace(ch.AllowedMode))
+		ids := ParseVLANIDList(NormalizeVLANList(ch.AllowedList))
+		if ch.Op == VLANOpAddTagged {
+			mode = TrunkAllowAdd
+			if ch.VLANID > 0 {
+				ids = []int{ch.VLANID}
+			}
+		}
+		native := 0
+		if ch.Op == VLANOpTrunkAllow {
+			native = ch.VLANID
+		}
+		switch mode {
+		case TrunkAllowRemove:
+			for _, id := range ids {
+				rows = stripPortFromVLAN(rows, id, ifIndex, false, true)
+			}
+		case TrunkAllowAll:
+			rows = stripPortVLAN(rows, ifIndex, false, true)
+			for _, id := range inventoryDatabaseIDs(rows) {
+				if id == native {
+					continue
+				}
+				rows = addTaggedPort(rows, id, refTrunk)
+			}
+		case TrunkAllowExcept:
+			skip := map[int]struct{}{}
+			if native > 0 {
+				skip[native] = struct{}{}
+			}
+			for _, id := range ids {
+				skip[id] = struct{}{}
+			}
+			rows = stripPortVLAN(rows, ifIndex, false, true)
+			for _, id := range inventoryDatabaseIDs(rows) {
+				if _, ok := skip[id]; ok {
+					continue
+				}
+				rows = addTaggedPort(rows, id, refTrunk)
+			}
+		default:
+			if mode == TrunkAllowSet {
+				rows = stripPortVLAN(rows, ifIndex, false, true)
+			}
+			for _, id := range ids {
+				if native > 0 && id == native {
+					continue
+				}
+				rows = addTaggedPort(rows, id, refTrunk)
+			}
+		}
+	}
+	sort.Slice(rows, func(i, j int) bool { return rows[i].VLANID < rows[j].VLANID })
+	return rows
+}
+
+// OverlayVLANDatabase накладывает create/rename/delete на список, пока show run ещё не перечитан.
+func OverlayVLANDatabase(inv []VLANInventoryRow, ch VLANDatabaseChange) []VLANInventoryRow {
+	rows := cloneVLANInventory(inv)
+	switch ch.Op {
+	case VLANDBOpCreate, VLANDBOpSetName:
+		rows = ensureVLANRow(rows, ch.VLANID)
+		for i := range rows {
+			if rows[i].VLANID != ch.VLANID {
+				continue
+			}
+			rows[i].InDatabase = true
+			if name := strings.TrimSpace(ch.Name); name != "" || ch.Op == VLANDBOpSetName {
+				rows[i].Name = name
+			}
+		}
+	case VLANDBOpDelete:
+		drop := map[int]struct{}{}
+		for _, id := range ch.DeleteIDs() {
+			drop[id] = struct{}{}
+		}
+		kept := rows[:0]
+		for _, row := range rows {
+			if _, ok := drop[row.VLANID]; ok {
+				continue
+			}
+			kept = append(kept, row)
+		}
+		rows = kept
+	}
+	sort.Slice(rows, func(i, j int) bool { return rows[i].VLANID < rows[j].VLANID })
+	return rows
+}
+
+func cloneVLANInventory(inv []VLANInventoryRow) []VLANInventoryRow {
+	rows := make([]VLANInventoryRow, len(inv))
+	for i, r := range inv {
+		rows[i] = r
+		rows[i].AccessPorts = append([]VLANPortRef(nil), r.AccessPorts...)
+		rows[i].TaggedPorts = append([]VLANPortRef(nil), r.TaggedPorts...)
+		rows[i].FDBPorts = append([]VLANPortRef(nil), r.FDBPorts...)
+	}
+	return rows
+}
+
+func stripPortVLAN(rows []VLANInventoryRow, ifIndex int, access, tagged bool) []VLANInventoryRow {
+	for i := range rows {
+		if access {
+			rows[i].AccessPorts = dropVLANPort(rows[i].AccessPorts, ifIndex)
+		}
+		if tagged {
+			rows[i].TaggedPorts = dropVLANPort(rows[i].TaggedPorts, ifIndex)
+		}
+	}
+	return rows
+}
+
+func stripPortFromVLAN(rows []VLANInventoryRow, vlanID, ifIndex int, access, tagged bool) []VLANInventoryRow {
+	for i := range rows {
+		if rows[i].VLANID != vlanID {
+			continue
+		}
+		if access {
+			rows[i].AccessPorts = dropVLANPort(rows[i].AccessPorts, ifIndex)
+		}
+		if tagged {
+			rows[i].TaggedPorts = dropVLANPort(rows[i].TaggedPorts, ifIndex)
+		}
+	}
+	return rows
+}
+
+func dropVLANPort(list []VLANPortRef, ifIndex int) []VLANPortRef {
+	if ifIndex <= 0 || len(list) == 0 {
+		return list
+	}
+	out := make([]VLANPortRef, 0, len(list))
+	for _, p := range list {
+		if p.IfIndex == ifIndex {
+			continue
+		}
+		out = append(out, p)
+	}
+	return out
+}
+
+func ensureVLANRow(rows []VLANInventoryRow, id int) []VLANInventoryRow {
+	for i := range rows {
+		if rows[i].VLANID == id {
+			if rows[i].AccessPorts == nil {
+				rows[i].AccessPorts = []VLANPortRef{}
+			}
+			if rows[i].TaggedPorts == nil {
+				rows[i].TaggedPorts = []VLANPortRef{}
+			}
+			return rows
+		}
+	}
+	return append(rows, VLANInventoryRow{
+		VLANID:      id,
+		AccessPorts: []VLANPortRef{},
+		TaggedPorts: []VLANPortRef{},
+	})
+}
+
+func addAccessPort(rows []VLANInventoryRow, vlanID int, ref VLANPortRef) []VLANInventoryRow {
+	if vlanID < 1 {
+		return rows
+	}
+	rows = ensureVLANRow(rows, vlanID)
+	for i := range rows {
+		if rows[i].VLANID != vlanID {
+			continue
+		}
+		if !hasPort(rows[i].AccessPorts, ref.IfIndex) {
+			rows[i].AccessPorts = append(rows[i].AccessPorts, ref)
+		}
+	}
+	return rows
+}
+
+func addTaggedPort(rows []VLANInventoryRow, vlanID int, ref VLANPortRef) []VLANInventoryRow {
+	if vlanID < 1 {
+		return rows
+	}
+	rows = ensureVLANRow(rows, vlanID)
+	for i := range rows {
+		if rows[i].VLANID != vlanID {
+			continue
+		}
+		if hasPort(rows[i].AccessPorts, ref.IfIndex) || hasPort(rows[i].TaggedPorts, ref.IfIndex) {
+			continue
+		}
+		rows[i].TaggedPorts = append(rows[i].TaggedPorts, ref)
+	}
+	return rows
+}
+
+func inventoryDatabaseIDs(rows []VLANInventoryRow) []int {
+	var ids []int
+	for _, r := range rows {
+		if r.InDatabase || r.VLANID == 1 {
+			ids = append(ids, r.VLANID)
+		}
+	}
+	if len(ids) == 0 {
+		for _, r := range rows {
+			ids = append(ids, r.VLANID)
+		}
+	}
+	return ids
+}
+
 func findParsedIface(modes map[string]ParsedInterfaceCLI, ifIndex int, ifName string) (ParsedInterfaceCLI, bool) {
 	if len(modes) == 0 {
 		return ParsedInterfaceCLI{}, false

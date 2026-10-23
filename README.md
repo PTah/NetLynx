@@ -23,7 +23,7 @@ SNMP-мониторинг коммутаторов, веб-UI.
 | Опрос по SNMP | порты, скорость, утилизация, CPU, события Link Up/Down, flap, broadcast storm; лёгкий опрос каждые 15–60 с, тяжёлый (LLDP/CDP/ARP/PoE/STP/FDB) — раз в 5 мин | [Polling-and-Topology-Cache.md](docs/Polling-and-Topology-Cache.md) |
 | Топология | LLDP/CDP + FDB, карта, ручные линки, поиск пути, blast-radius (VLAN / shutdown порта) | [Manual-Topology-Links.md](docs/Manual-Topology-Links.md) |
 | Обнаружение и инвентарь | подсеть по SNMP/ICMP, «Обнаружено» → «Узлы», типы устройств, UISP | [Autodiscover.md](docs/Autodiscover.md) |
-| Порты и VLAN | access/trunk/native/allowed, VLAN database, PoE (детект, ватты, reset), описание порта, mass-edit | [VLAN.md](docs/VLAN.md), [PoE-detection.md](docs/PoE-detection.md) |
+| Порты и VLAN | access/trunk/native/allowed, VLAN database, live-настройки порта по SSH, PoE (детект, ватты, reset / расписание), mass-edit; FDB «кто за портом» (в т.ч. SNR ifIndex 5001+) | [VLAN.md](docs/VLAN.md), [PoE-detection.md](docs/PoE-detection.md), [Vendors.md](docs/Vendors.md) |
 | Расследования | где MAC, почему петля, кто за портом | [MAC-Investigation.md](docs/MAC-Investigation.md), [Loop-Investigation.md](docs/Loop-Investigation.md) |
 | МФУ / принтеры | счётчик страниц, остаток тонера, графики | [Printer-MIB.md](docs/Printer-MIB.md) |
 | ИБП | UPS-MIB: заряд, автономия, вход/выход, нагрузка, температура, аварии; события и история | [UPS.md](docs/UPS.md) |
@@ -121,6 +121,20 @@ SNMP-мониторинг коммутаторов, веб-UI.
 ### Последние версии (кратко)
 
 Полный журнал всех версий — [docs/Changelog.md](docs/Changelog.md). Ниже — последние 8 релизов.
+
+**0.5.9** — docs: VLAN/API/Vendors/Polling приведены к поведению 0.5.6–0.5.8 (ответ «Готово», live settings, FDB SNR).
+
+**0.5.8** — FDB на SNR: SNMP-маппинг ifIndex 5001–5009 (ge1–ge9), иначе таблица MAC была пустой при живом CLI.
+
+**0.5.7** — настройки порта SNR открываются чтением одного интерфейса, без зависания на `--More--`.
+
+**0.5.6** — вкладка VLAN: зелёное «Готово» сразу после записи на коммутатор, не после долгого show run. Если ответ затянулся, под кнопкой прямо сказано, что повторно нажимать нельзя.
+
+**0.5.5** — порт: **Сброс PoE по расписанию** (раз в сутки или N раз начиная с времени; 3× с 03:00 → 03:00/11:00/19:00).
+
+**0.5.4** — SNMP-backoff не глушит коммутаторы: «Проверить SNMP» обновляет статус и запускает опрос (раньше UI залипал на timeout при живом SNMP).
+
+**0.5.3** — приоритеты мониторинга по типу (критичные → NAS → ИБП/ПК → AP/телефоны → камеры/МФУ); антидребезг offline для «мягких» узлов; в карточке — **«Подключен к…»** (авто LLDP/CDP/FDB) перед «Ручные связи».
 
 **0.5.2** — документация, партия 4 (весь эксплуатационный блок переведён): [Autodiscover](docs/en/Autodiscover.md), [Vendors](docs/en/Vendors.md), [PoE-detection](docs/en/PoE-detection.md) — **19 из 30** документов на английском, включая все руководства для админа и инженера.
 

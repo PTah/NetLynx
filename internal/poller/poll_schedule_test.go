@@ -26,22 +26,26 @@ func TestPollPriority(t *testing.T) {
 		"router":   pollPriorityCritical,
 		"switch":   pollPriorityCritical,
 		"server":   pollPriorityCritical,
+		"nas":      pollPriorityHigh,
 		"ups":      pollPriorityImportant,
-		"nas":      pollPriorityImportant,
 		"computer": pollPriorityImportant,
 		"ilo":      pollPriorityImportant,
-		"phone":    pollPriorityNormal,
-		"camera":   pollPriorityNormal,
-		"mfu":      pollPriorityNormal,
-		"":         pollPriorityNormal,
+		"phone":    pollPrioritySoft,
+		"ap":       pollPrioritySoft,
+		"camera":   pollPriorityLow,
+		"mfu":      pollPriorityLow,
+		"":         pollPriorityCritical, // NormalizeDeviceCategory("") → switch
 	}
 	for cat, want := range cases {
 		if got := pollPriority(cat); got != want {
 			t.Fatalf("pollPriority(%q)=%d, want %d", cat, got, want)
 		}
 	}
-	// Критичные типы должны идти раньше остальных в очереди опроса.
-	if pollPriority("switch") >= pollPriority("ups") || pollPriority("ups") >= pollPriority("phone") {
+	// Очередь: switch < nas < ups < phone < camera
+	if !(pollPriority("switch") < pollPriority("nas") &&
+		pollPriority("nas") < pollPriority("ups") &&
+		pollPriority("ups") < pollPriority("phone") &&
+		pollPriority("phone") < pollPriority("camera")) {
 		t.Fatal("порядок приоритетов нарушен")
 	}
 }
@@ -158,7 +162,7 @@ func TestUtilSampleThrottle(t *testing.T) {
 	}
 }
 
-// Узел без SNMP (камера/ПК/ТВ): после 3 сбоев подряд SNMP не опрашивается,
+// Узел без SNMP (камера/AP/телефон): после 3 сбоев подряд SNMP не опрашивается,
 // ICMP-достижимость остаётся — иначе такие узлы жгут слоты таймаутами.
 func TestSNMPBackoff(t *testing.T) {
 	e := testEngine()
@@ -193,5 +197,17 @@ func TestSNMPBackoff(t *testing.T) {
 	}
 	if !e.snmpBackoffActive(id, now.Add(time.Hour)) {
 		t.Fatal("повторный эпизод должен ставить паузу")
+	}
+}
+
+func TestSNMPBackoffEligibleCategories(t *testing.T) {
+	if snmpBackoffEligible("switch") || snmpBackoffEligible("router") || snmpBackoffEligible("server") {
+		t.Fatal("критичные типы не должны уходить в SNMP-backoff")
+	}
+	if snmpBackoffEligible("ups") || snmpBackoffEligible("computer") || snmpBackoffEligible("nas") {
+		t.Fatal("ИБП/ПК/NAS не должны уходить в SNMP-backoff")
+	}
+	if !snmpBackoffEligible("camera") || !snmpBackoffEligible("ap") || !snmpBackoffEligible("phone") {
+		t.Fatal("камеры/AP/телефоны — кандидаты на backoff")
 	}
 }

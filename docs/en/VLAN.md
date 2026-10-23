@@ -50,12 +50,16 @@ The **VLAN** column in the ports table and the port editor share one model:
 Also:
 
 - **Native VLAN** — a separate field for trunks (what leaves untagged).
-- **Allowed VLANs** — the allowed list on a trunk; modes: `add`, `remove`, `set` (exactly this list), `all`.
-- Port change: `PATCH /api/v1/devices/{id}/ports/{ifIndex}/vlan` (`mode`, `access_vlan`, `native_vlan`, `allowed_mode`, `allowed_vlans`).
+- **Allowed VLANs** — the allowed list on a trunk; modes: `add`, `remove`, `set` (exactly this list), `all`, `except`.
+- Port change: `PATCH /api/v1/devices/{id}/interfaces/{ifIndex}/vlan` with body `{ op, vlan_id?, allowed_mode?, allowed_vlans? }` (`set_access` / `remove` / `trunk_allow` / `no_vlan`). Same from the VLAN tab and from advanced port settings.
 
-After applying, NetLynx reports what it actually did (`via`: tagged/untagged) — visible in the UI notification.
+After applying, a green confirmation line (and API field `message`) means the switch already accepted the command. The follow-up `show run` runs **in the background** and does not delay the response (on SNR a full dump is often slow). If there is no reply for ~25 s, the UI warns that the write may already have happened — do not click again until you see success or an error.
 
 If a PoE device is connected to the port, the port is not power-cycled: the VLAN is applied on the fly (a PoE reset is a separate button).
+
+### Advanced port settings (live)
+
+The “Advanced settings” dialog reads the port over SSH: `GET …/interfaces/{ifIndex}/settings` (optional `?force=1`). It prefers the config cache / snapshot; otherwise a short `show running-config interface …`. On **SNR** it does not start with a long `show running-config current-mode`; the `--More--` pager is advanced so the UI does not stick on “Reading settings from device…”.
 
 ## Related
 
@@ -71,17 +75,19 @@ If a PoE device is connected to the port, the port is not power-cycled: the VLAN
 - VLAN 1 is a special case: on most vendors it cannot be deleted or renamed; "No VLAN" ≠ "VLAN 1".
 - If the SSH session is busy (someone is in the terminal), the switch may refuse — retry the operation.
 - Bulk changes are applied sequentially; if one port fails, the others are still applied and the error is returned in the response.
+- Management SVI = `devices.host`: deleting that VLAN is **blocked** (API 409; delete-impact sets `blocks_delete`).
 
 ## API
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/api/v1/devices/{id}/vlans` | device VLAN database (source: `config`/`snmp`) |
-| POST | `/api/v1/devices/{id}/vlans` | create a VLAN |
-| PATCH | `/api/v1/devices/{id}/vlans/{vlanId}` | rename |
+| GET | `/api/v1/devices/{id}/vlans` | device VLAN database (source: `config_cache` / `snapshot` / `ports`) |
+| POST | `/api/v1/devices/{id}/vlans` | create a VLAN; response: `message`, `vlans[]`, `source` |
+| PATCH | `/api/v1/devices/{id}/vlans/{vlanId}` | rename; response: `message`, `vlans[]` |
 | DELETE | `/api/v1/devices/{id}/vlans/{vlanId}` | delete a VLAN |
 | DELETE | `/api/v1/devices/{id}/vlans` | delete a list (`vlan_ids`) |
-| GET | `/api/v1/devices/{id}/vlans/delete-impact` | pre-delete impact check |
-| PATCH | `/api/v1/devices/{id}/ports/{ifIndex}/vlan` | port mode + VLANs |
+| GET | `/api/v1/devices/{id}/vlans/delete-impact` | pre-delete impact (`blocks_delete` for mgmt SVI) |
+| PATCH | `/api/v1/devices/{id}/interfaces/{ifIndex}/vlan` | VLAN on a port; response: `message`, `vlans[]`, `source` |
+| GET | `/api/v1/devices/{id}/interfaces/{ifIndex}/settings` | live port settings (SSH / show run cache) |
 
-Full list — [API.md](API.md).
+Full list — [API.md](API.md). SNR / EdgeSwitch quirks — [Vendors.md](Vendors.md).

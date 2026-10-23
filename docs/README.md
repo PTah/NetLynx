@@ -11,11 +11,11 @@ NetLynx documentation. **Russian is the primary language**; English versions liv
 | [Roles.md](Roles.md) | ✅ | ✅ [en](en/Roles.md) | viewer / operator / admin |
 | [SNMP-Community.md](SNMP-Community.md) | ✅ | ✅ [en](en/SNMP-Community.md) | RO vs RW community, traps, minimal rights |
 | [UPS.md](UPS.md) | ✅ | ✅ [en](en/UPS.md) | UPS-MIB polling, OID map, alerts, card traps |
-| [VLAN.md](VLAN.md) | ✅ | ✅ [en](en/VLAN.md) | VLAN database, access/trunk/native/allowed, delete impact |
+| [VLAN.md](VLAN.md) | ✅ | ✅ [en](en/VLAN.md) | VLAN database, access/trunk/native/allowed, delete impact, «Готово» after write, live port settings |
 | [Notifications.md](Notifications.md) | ✅ | ✅ [en](en/Notifications.md) | Telegram/email/webhook, filters, event types, statistics |
 | [Autodiscover.md](Autodiscover.md) | ✅ | ✅ [en](en/Autodiscover.md) | discovery: LLDP/CDP, SNMP scan, promotion to inventory |
-| [Polling-and-Topology-Cache.md](Polling-and-Topology-Cache.md) | ✅ | ✅ [en](en/Polling-and-Topology-Cache.md) | light/heavy polling, priorities, blast cache |
-| [Vendors.md](Vendors.md) | ✅ | ✅ [en](en/Vendors.md) | supported vendors and their quirks |
+| [Polling-and-Topology-Cache.md](Polling-and-Topology-Cache.md) | ✅ | ✅ [en](en/Polling-and-Topology-Cache.md) | light/heavy polling, FDB vendor mapping (SNR/EdgeSwitch), blast cache |
+| [Vendors.md](Vendors.md) | ✅ | ✅ [en](en/Vendors.md) | vendors, VLAN CLI, SNR FDB ifIndex 5001+, live port read |
 | [PoE-detection.md](PoE-detection.md) | ✅ | ✅ [en](en/PoE-detection.md) | PoE detection, watts, reset, SSH fallback |
 | [Printer-MIB.md](Printer-MIB.md) | ✅ | ✅ [en](en/Printer-MIB.md) | MFPs: pages, toner, alerts |
 | [Config-History.md](Config-History.md) | ✅ | ✅ [en](en/Config-History.md) | `show run` snapshots, diffs, backups |

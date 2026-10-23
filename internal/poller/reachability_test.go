@@ -103,23 +103,48 @@ func TestShouldEmitDeviceOnline(t *testing.T) {
 
 func TestShouldEmitDeviceOfflineNow(t *testing.T) {
 	// Обычный путь: SNMP-сбой, ICMP не менялся — ждём второй опрос.
-	if shouldEmitDeviceOfflineNow(offlineStreakState{n: 1, fromOnline: true}, false) {
+	if shouldEmitDeviceOfflineNow(offlineStreakState{n: 1, fromOnline: true}, false, 2, true) {
 		t.Fatal("первый сбой без пропажи ICMP не должен шуметь")
 	}
-	if !shouldEmitDeviceOfflineNow(offlineStreakState{n: offlineConfirmPolls, fromOnline: true}, false) {
+	if !shouldEmitDeviceOfflineNow(offlineStreakState{n: offlineConfirmPolls, fromOnline: true}, false, 2, true) {
 		t.Fatal("второй подряд сбой — OFFLINE")
 	}
-	// ICMP отвечал и замолчал — сообщаем сразу.
-	if !shouldEmitDeviceOfflineNow(offlineStreakState{n: 1, fromOnline: true}, true) {
+	// ICMP отвечал и замолчал — сообщаем сразу (критичные/важные).
+	if !shouldEmitDeviceOfflineNow(offlineStreakState{n: 1, fromOnline: true}, true, 2, true) {
 		t.Fatal("пропажа ICMP + SNMP = OFFLINE на первом опросе")
 	}
+	// Телефон/камера: instant ping-dead выключен — ждём 3 опроса.
+	if shouldEmitDeviceOfflineNow(offlineStreakState{n: 1, fromOnline: true}, true, 3, false) {
+		t.Fatal("мягкий узел: ICMP-флап на первом опросе не шлёт OFFLINE")
+	}
+	if shouldEmitDeviceOfflineNow(offlineStreakState{n: 2, fromOnline: true}, false, 3, false) {
+		t.Fatal("мягкий узел: второй сбой ещё не порог")
+	}
+	if !shouldEmitDeviceOfflineNow(offlineStreakState{n: 3, fromOnline: true}, false, 3, false) {
+		t.Fatal("мягкий узел: третий подряд — OFFLINE")
+	}
 	// Без эпизода online→offline (после рестарта) — не шумим.
-	if shouldEmitDeviceOfflineNow(offlineStreakState{n: 1}, true) {
+	if shouldEmitDeviceOfflineNow(offlineStreakState{n: 1}, true, 2, true) {
 		t.Fatal("нет перехода online→offline — OFFLINE не шлём")
 	}
 	// Повторные опросы в том же эпизоде не дублируют событие.
-	if shouldEmitDeviceOfflineNow(offlineStreakState{n: offlineConfirmPolls + 1, fromOnline: true}, true) {
+	if shouldEmitDeviceOfflineNow(offlineStreakState{n: offlineConfirmPolls + 1, fromOnline: true}, true, 2, true) {
 		t.Fatal("повтор OFFLINE в том же эпизоде")
+	}
+}
+
+func TestOfflineConfirmForCategory(t *testing.T) {
+	if offlineConfirmForCategory("switch") != 2 || offlineConfirmForCategory("nas") != 2 {
+		t.Fatal("критичные/NAS: confirm=2")
+	}
+	if offlineConfirmForCategory("phone") != 3 || offlineConfirmForCategory("ap") != 3 {
+		t.Fatal("AP/телефон: confirm=3")
+	}
+	if offlineConfirmForCategory("camera") != 3 || offlineConfirmForCategory("mfu") != 3 {
+		t.Fatal("камера/МФУ: confirm=3")
+	}
+	if allowInstantPingDead("switch") != true || allowInstantPingDead("phone") != false {
+		t.Fatal("instant ping-dead только для критичных/важных")
 	}
 }
 

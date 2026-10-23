@@ -17,13 +17,13 @@ const persistedAttachmentMaxAge = 365 * 24 * time.Hour
 
 // DeviceAttachment — где узел «висит» на инфраструктуре (свитч/роутер + порт).
 type DeviceAttachment struct {
-	ParentID       int64
-	ParentName     string
-	ParentHost     string
-	ParentCategory string // switch | router | …
-	PortName       string // if_name или ifIndex
-	IfIndex        int    // для persist в devices.attach_*
-	Protocol       string // lldp | cdp | manual | fdb
+	ParentID       int64  `json:"parent_id"`
+	ParentName     string `json:"parent_name"`
+	ParentHost     string `json:"parent_host"`
+	ParentCategory string `json:"parent_category"` // switch | router | …
+	PortName       string `json:"port_name"`      // if_name или ifIndex
+	IfIndex        int    `json:"if_index"`       // для persist в devices.attach_*
+	Protocol       string `json:"protocol"`       // lldp | cdp | manual | fdb
 }
 
 func (a DeviceAttachment) ParentKindLabel() string {
@@ -141,6 +141,16 @@ func attachmentCandidateBetter(pri, linkSc, sc, bestPri, bestLink, bestSc int, t
 
 // FindDeviceAttachment ищет порт свитча/роутера, к которому привязан узел (manual / LLDP / CDP / FDB).
 func (s *Store) FindDeviceAttachment(ctx context.Context, deviceID int64) (*DeviceAttachment, error) {
+	return s.findDeviceAttachment(ctx, deviceID, false)
+}
+
+// FindAutoDeviceAttachment — только автообнаружение (LLDP/CDP/FDB), без ручных связей.
+// Для карточки узла: «Подключен к…»; ручные линки показываются отдельно.
+func (s *Store) FindAutoDeviceAttachment(ctx context.Context, deviceID int64) (*DeviceAttachment, error) {
+	return s.findDeviceAttachment(ctx, deviceID, true)
+}
+
+func (s *Store) findDeviceAttachment(ctx context.Context, deviceID int64, autoOnly bool) (*DeviceAttachment, error) {
 	if deviceID <= 0 {
 		return nil, nil
 	}
@@ -235,23 +245,25 @@ func (s *Store) FindDeviceAttachment(ctx context.Context, deviceID int64) (*Devi
 		}
 	}
 
-	// 1) Ручные связи
-	manuals, err := s.ListActiveManualLinks(ctx)
-	if err != nil {
-		return nil, err
-	}
-	for _, ml := range manuals {
-		var parentID int64
-		var ifIndex int
-		switch {
-		case ml.ADeviceID == deviceID:
-			parentID, ifIndex = ml.BDeviceID, ml.BIfIndex
-		case ml.BDeviceID == deviceID:
-			parentID, ifIndex = ml.ADeviceID, ml.AIfIndex
-		default:
-			continue
+	// 1) Ручные связи (для уведомлений; в карточке «Подключен к» — только auto)
+	if !autoOnly {
+		manuals, err := s.ListActiveManualLinks(ctx)
+		if err != nil {
+			return nil, err
 		}
-		consider(parentID, ifIndex, "manual", "", "access", time.Time{})
+		for _, ml := range manuals {
+			var parentID int64
+			var ifIndex int
+			switch {
+			case ml.ADeviceID == deviceID:
+				parentID, ifIndex = ml.BDeviceID, ml.BIfIndex
+			case ml.BDeviceID == deviceID:
+				parentID, ifIndex = ml.ADeviceID, ml.AIfIndex
+			default:
+				continue
+			}
+			consider(parentID, ifIndex, "manual", "", "access", time.Time{})
+		}
 	}
 
 	// 1b) Uplink свитча/роутера: LLDP/CDP на его trunk смотрит на родительский коммутатор.
@@ -331,10 +343,15 @@ func (s *Store) FindDeviceAttachment(ctx context.Context, deviceID int64) (*Devi
 	}
 
 	if best != nil {
-		_ = s.persistDeviceAttachment(ctx, deviceID, best)
+		if !autoOnly {
+			_ = s.persistDeviceAttachment(ctx, deviceID, best)
+		}
 		return best, nil
 	}
 	if persisted := s.loadPersistedDeviceAttachment(ctx, deviceID, byID); persisted != nil {
+		if autoOnly && strings.EqualFold(strings.TrimSpace(persisted.Protocol), "manual") {
+			return nil, nil
+		}
 		return persisted, nil
 	}
 	return nil, nil

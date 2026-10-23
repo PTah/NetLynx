@@ -2,6 +2,40 @@ package snmp
 
 import "testing"
 
+func TestResolveFDBIfIndex_SNRUsesIfIndex(t *testing.T) {
+	// SNR-S5010: bridge 1..10 → ifIndex 5001..5010 (ge1..ge10).
+	baseToIf := map[int]int{}
+	for bp := 1; bp <= 10; bp++ {
+		baseToIf[bp] = 5000 + bp
+	}
+	known := fdbKnownIfIndexes(baseToIf)
+
+	// Классика: значение = bridge-port.
+	if got := resolveFDBIfIndex(1, baseToIf, known); got != 5001 {
+		t.Fatalf("bridge 1 → ge1: got %d", got)
+	}
+	if got := resolveFDBIfIndex(8, baseToIf, known); got != 5008 {
+		t.Fatalf("bridge 8 → ge8: got %d", got)
+	}
+	if got := resolveFDBIfIndex(9, baseToIf, known); got != 5009 {
+		t.Fatalf("bridge 9 → ge9: got %d", got)
+	}
+
+	// SNR: значение уже ifIndex.
+	if got := resolveFDBIfIndex(5001, baseToIf, known); got != 5001 {
+		t.Fatalf("ifIndex 5001 (ge1): got %d", got)
+	}
+	if got := resolveFDBIfIndex(5008, baseToIf, known); got != 5008 {
+		t.Fatalf("ifIndex 5008 (ge8): got %d", got)
+	}
+	if got := resolveFDBIfIndex(5009, baseToIf, known); got != 5009 {
+		t.Fatalf("ifIndex 5009 (ge9): got %d", got)
+	}
+	if got := resolveFDBIfIndex(9999, baseToIf, known); got != 0 {
+		t.Fatalf("unknown port must be 0, got %d", got)
+	}
+}
+
 func TestParseVLANAndMACSuffix(t *testing.T) {
 	base := oidDot1qTpFdbPort
 	tests := []struct {

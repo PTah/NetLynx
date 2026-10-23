@@ -151,3 +151,33 @@ exit
 		t.Fatalf("0/1 vs 0/10: ok=%v admin=%v", ok, s2.AdminUp)
 	}
 }
+
+func TestInterfaceSnippetOK(t *testing.T) {
+	ok := `
+interface ge1
+ switchport access vlan 20
+!
+`
+	if !interfaceSnippetOK(ok, "ge1") {
+		t.Fatal("expected ge1 block")
+	}
+	bad := "% Invalid input detected at '^' marker.\nshow running-config interface ge1"
+	if interfaceSnippetOK(bad, "ge1") {
+		t.Fatal("invalid input must not count as a port block")
+	}
+}
+
+func TestShowInterfaceCmds_SNR(t *testing.T) {
+	cmds := showInterfaceCmds(VendorSNR, "ge1")
+	if len(cmds) != 2 || cmds[0] != "show running-config interface ge1" || cmds[1] != "show running-config interface ethernet ge1" {
+		t.Fatalf("%v", cmds)
+	}
+	one := showInterfaceCmds(VendorSNR, "ethernet1/0/1")
+	if len(one) != 1 || one[0] != "show running-config interface ethernet1/0/1" {
+		t.Fatalf("%v", one)
+	}
+	cisco := showInterfaceCmds(VendorCisco, "GigabitEthernet1/0/1")
+	if len(cisco) != 1 {
+		t.Fatalf("%v", cisco)
+	}
+}

@@ -47,8 +47,9 @@ type snmpBackoffState struct {
 	until    time.Time
 }
 
-// Сколько подряд опросов с IsOnline=false нужно, прежде чем слать DEVICE_OFFLINE.
+// Базовое число подряд опросов с IsOnline=false до DEVICE_OFFLINE (критичные/важные).
 // Один сбой SNMP при живом ping (часто EdgeSwitch) иначе даёт ложный email.
+// Для AP/телефонов/камер/МФУ см. offlineConfirmForCategory — там порог выше.
 const offlineConfirmPolls = 2
 
 // Пустой LLDP/CDP walk (err=nil, len=0) не должен мгновенно staleить все рёбра —
@@ -317,17 +318,20 @@ func shouldCatchUpDeviceOffline(wasOnline bool, streak offlineStreakState, offli
 }
 
 // shouldEmitDeviceOfflineNow — когда сообщать DEVICE_OFFLINE.
-// Обычно ждём offlineConfirmPolls опросов (короткий SNMP-блип при живом ping не должен
-// давать письмо). Но если узел, который раньше отвечал на ICMP, замолчал и по ping,
-// и по SNMP — это пропажа из сети, сообщаем сразу на первом таком опросе.
-func shouldEmitDeviceOfflineNow(streak offlineStreakState, pingWentDead bool) bool {
+// Обычно ждём confirm опросов (короткий SNMP-блип при живом ping не должен давать письмо).
+// Для критичных/важных: если ICMP отвечал и замолчал (и SNMP тоже) — сразу на первом опросе.
+// Для AP/телефонов/камер instant ping-dead выключен — только полный confirm.
+func shouldEmitDeviceOfflineNow(streak offlineStreakState, pingWentDead bool, confirm int, instantPingDead bool) bool {
 	if !streak.fromOnline {
 		return false
 	}
-	if streak.n == offlineConfirmPolls {
+	if confirm < 1 {
+		confirm = offlineConfirmPolls
+	}
+	if streak.n == confirm {
 		return true
 	}
-	return streak.n == 1 && pingWentDead
+	return instantPingDead && streak.n == 1 && pingWentDead
 }
 
 // pingWentDead — ICMP отвечал в прошлом опросе и молчит в текущем (при этом SNMP тоже
@@ -375,16 +379,18 @@ func (e *Engine) emitReachabilityTransition(ctx context.Context, d store.PollDev
 	}
 
 	st := e.noteOfflinePoll(d.ID, wasOnline)
-	if shouldEmitDeviceOfflineNow(st, pingWentDead(cur, prev)) {
+	confirm := offlineConfirmForCategory(d.DeviceCategory)
+	instant := allowInstantPingDead(d.DeviceCategory)
+	if shouldEmitDeviceOfflineNow(st, pingWentDead(cur, prev), confirm, instant) {
 		e.emitDeviceOffline(ctx, d, cur, prev, st.n)
 		// Эпизод зафиксирован: до восстановления повторов не шлём
 		// (следующий опрос даст n=confirm+1 и условие уже не сработает).
-		e.offlineStreak.Store(d.ID, offlineStreakState{n: offlineConfirmPolls, fromOnline: true})
+		e.offlineStreak.Store(d.ID, offlineStreakState{n: confirm, fromOnline: true})
 		return
 	}
 	if shouldCatchUpDeviceOffline(wasOnline, st, since, now, d.PollIntervalSeconds, hasOff) {
 		e.emitDeviceOffline(ctx, d, cur, prev, st.n)
-		e.offlineStreak.Store(d.ID, offlineStreakState{n: offlineConfirmPolls, fromOnline: true})
+		e.offlineStreak.Store(d.ID, offlineStreakState{n: confirm, fromOnline: true})
 	}
 }
 
@@ -549,18 +555,50 @@ func (e *Engine) pruneStaleLiveFDB(ctx context.Context) {
 // Приоритет опроса по типу узла: критичные типы опрашиваются чаще и раньше в очереди.
 const (
 	pollPriorityCritical  = 0 // роутер, коммутатор, сервер — падение надо видеть сразу
-	pollPriorityImportant = 1 // ИБП, NAS, компьютер, гипервизор/out-of-band
-	pollPriorityNormal    = 2 // всё остальное (телефоны, камеры, МФУ, ТВ…)
+	pollPriorityHigh      = 1 // NAS — сразу после критичных
+	pollPriorityImportant = 2 // ИБП, компьютер, iLO/IPMI, гипервизор
+	pollPrioritySoft      = 3 // AP, SIP-телефоны — алерт после нескольких неудач
+	pollPriorityLow       = 4 // камеры, МФУ, прочее — реже и с большим подтверждением
 )
 
 func pollPriority(category string) int {
-	switch category {
-	case store.DeviceCategoryRouter, store.DeviceCategorySwitch, "server":
+	switch store.NormalizeDeviceCategory(category) {
+	case store.DeviceCategoryRouter, store.DeviceCategorySwitch, store.DeviceCategoryServer:
 		return pollPriorityCritical
-	case store.DeviceCategoryUPS, "nas", store.DeviceCategoryComputer, "ilo", "hypervisor":
+	case "nas":
+		return pollPriorityHigh
+	case store.DeviceCategoryUPS, store.DeviceCategoryComputer, "ilo", "hypervisor", "ipmi":
 		return pollPriorityImportant
+	case store.DeviceCategoryAP, store.DeviceCategoryPhone:
+		return pollPrioritySoft
 	default:
-		return pollPriorityNormal
+		return pollPriorityLow
+	}
+}
+
+// offlineConfirmForCategory — сколько подряд неудачных опросов до DEVICE_OFFLINE.
+// Карточка «Опрашивать каждые N сек» задаёт частоту; здесь — антидребезг алерта.
+func offlineConfirmForCategory(category string) int {
+	switch pollPriority(category) {
+	case pollPriorityCritical, pollPriorityHigh:
+		return offlineConfirmPolls // 2; при пропаже ICMP — сразу (см. allowInstantPingDead)
+	case pollPriorityImportant:
+		return offlineConfirmPolls
+	case pollPrioritySoft:
+		return 3 // AP / телефоны: веб может молчать при живом SIP
+	default:
+		return 3 // камеры, МФУ, иное
+	}
+}
+
+// allowInstantPingDead — слать OFFLINE на первом опросе, если ICMP отвечал и замолчал.
+// Для «мягких» узлов (телефоны, камеры) ICMP часто врёт — ждём полный confirm.
+func allowInstantPingDead(category string) bool {
+	switch pollPriority(category) {
+	case pollPrioritySoft, pollPriorityLow:
+		return false
+	default:
+		return true
 	}
 }
 
@@ -620,6 +658,18 @@ func (e *Engine) shouldPollHeavy(d *store.PollDevice, now time.Time) bool {
 	return now.Sub(*d.LastHeavyPollAt) >= interval
 }
 
+// snmpBackoffEligible — пауза SNMP только для узлов, у которых агента часто нет
+// (камеры, МФУ, AP, телефоны, «прочее»). Коммутатор/роутер/сервер/ИБП/ПК —
+// всегда опрашиваем: один таймаут не должен прятать свитч на 15 минут.
+func snmpBackoffEligible(category string) bool {
+	switch pollPriority(category) {
+	case pollPrioritySoft, pollPriorityLow:
+		return true
+	default:
+		return false
+	}
+}
+
 // snmpBackoffActive — SNMP-опрос узла на паузе (устройство не отвечает по SNMP).
 func (e *Engine) snmpBackoffActive(deviceID int64, now time.Time) bool {
 	if v, ok := e.snmpBackoff.Load(deviceID); ok {
@@ -650,6 +700,38 @@ func (e *Engine) noteSNMPFailure(deviceID int64, now time.Time) snmpBackoffState
 // clearSNMPFailures — успешный опрос: счётчик сбоев и пауза сбрасываются.
 func (e *Engine) clearSNMPFailures(deviceID int64) {
 	e.snmpBackoff.Delete(deviceID)
+}
+
+// ClearSNMPBackoff — сброс паузы SNMP (после ручной проверки / смены community).
+func (e *Engine) ClearSNMPBackoff(deviceID int64) {
+	e.clearSNMPFailures(deviceID)
+}
+
+// RequestPoll — сбрасывает backoff и ставит полный опрос узла в фон (не блокирует HTTP).
+func (e *Engine) RequestPoll(deviceID int64) {
+	if e == nil || deviceID <= 0 {
+		return
+	}
+	e.clearSNMPFailures(deviceID)
+	if !e.tryBgAdd() {
+		return
+	}
+	go func() {
+		defer e.bg.Done()
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+		pd, err := e.st.GetPollDevice(ctx, deviceID)
+		if err != nil || pd == nil {
+			return
+		}
+		if _, loaded := e.pollInflight.LoadOrStore(pd.ID, struct{}{}); loaded {
+			return
+		}
+		defer e.pollInflight.Delete(pd.ID)
+		if err := e.pollOne(ctx, *pd); err != nil {
+			e.log.Debug("request poll", "device_id", deviceID, "err", err)
+		}
+	}()
 }
 
 // snmpFailures — сколько сбоев SNMP подряд у узла (для уровня логирования).
@@ -760,9 +842,9 @@ func (e *Engine) pollOne(ctx context.Context, d store.PollDevice) error {
 		return nil
 	}
 
-	// Узел стабильно не отвечает по SNMP (нет агента: камеры, ПК, ТВ) — пауза.
-	// ICMP продолжает работать, достижимость и оффлайн видны как обычно.
-	if e.snmpBackoffActive(d.ID, time.Now()) {
+	// Узел стабильно не отвечает по SNMP (нет агента: камеры, AP, телефоны) — пауза.
+	// ICMP продолжает работать. Коммутаторы/роутеры/серверы в паузу не ставятся.
+	if snmpBackoffEligible(d.DeviceCategory) && e.snmpBackoffActive(d.ID, time.Now()) {
 		if err := e.st.UpdateDevicePollTime(ctx, d.ID); err != nil {
 			e.log.Warn("poll meta (snmp backoff)", "device_id", d.ID, "err", err)
 		}
@@ -786,7 +868,9 @@ func (e *Engine) pollOne(ctx context.Context, d store.PollDevice) error {
 	if err := g.Connect(); err != nil {
 		msg := err.Error()
 		_ = e.st.UpdateDevicePollMeta(ctx, d.ID, false, &msg, nil, nil, nil, nil, nil, nil)
-		e.noteSNMPFailure(d.ID, time.Now())
+		if snmpBackoffEligible(d.DeviceCategory) {
+			e.noteSNMPFailure(d.ID, time.Now())
+		}
 		return err
 	}
 	defer g.Conn.Close()
@@ -795,7 +879,9 @@ func (e *Engine) pollOne(ctx context.Context, d store.PollDevice) error {
 	if err != nil {
 		msg := err.Error()
 		_ = e.st.UpdateDevicePollMeta(ctx, d.ID, false, &msg, nil, nil, nil, nil, nil, nil)
-		e.noteSNMPFailure(d.ID, time.Now())
+		if snmpBackoffEligible(d.DeviceCategory) {
+			e.noteSNMPFailure(d.ID, time.Now())
+		}
 		return err
 	}
 	e.clearSNMPFailures(d.ID)
