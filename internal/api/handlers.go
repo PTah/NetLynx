@@ -1421,6 +1421,30 @@ func (s *Server) handleDeleteDevice(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func parseEventsTimeParam(raw string) (*time.Time, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	for _, layout := range []string{time.RFC3339Nano, time.RFC3339} {
+		if t, err := time.Parse(layout, raw); err == nil {
+			return &t, nil
+		}
+	}
+	// Без зоны — как локальное время сервера (UI обычно шлёт RFC3339 с offset браузера).
+	for _, layout := range []string{
+		"2006-01-02T15:04:05",
+		"2006-01-02T15:04",
+		"2006-01-02 15:04:05",
+		"2006-01-02",
+	} {
+		if t, err := time.ParseInLocation(layout, raw, time.Local); err == nil {
+			return &t, nil
+		}
+	}
+	return nil, errors.New("invalid time")
+}
+
 func (s *Server) handleListEvents(w http.ResponseWriter, r *http.Request) {
 	limit := 100
 	if v := r.URL.Query().Get("limit"); v != "" {
@@ -1437,7 +1461,21 @@ func (s *Server) handleListEvents(w http.ResponseWriter, r *http.Request) {
 			deviceID = &n
 		}
 	}
-	list, err := s.st.ListEvents(r.Context(), limit, deviceID, eventType, severity)
+	from, err := parseEventsTimeParam(q.Get("from"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "from: ожидается RFC3339 или YYYY-MM-DD[THH:MM]")
+		return
+	}
+	to, err := parseEventsTimeParam(q.Get("to"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "to: ожидается RFC3339 или YYYY-MM-DD[THH:MM]")
+		return
+	}
+	if from != nil && to != nil && to.Before(*from) {
+		writeError(w, http.StatusBadRequest, "to раньше from")
+		return
+	}
+	list, err := s.st.ListEvents(r.Context(), limit, deviceID, eventType, severity, from, to)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return

@@ -20,6 +20,7 @@ NetLynx documentation. **Russian is the primary language**; English versions liv
 | [Printer-MIB.md](Printer-MIB.md) | ✅ | ✅ [en](en/Printer-MIB.md) | MFPs: pages, toner, alerts |
 | [Config-History.md](Config-History.md) | ✅ | ✅ [en](en/Config-History.md) | `show run` snapshots, diffs, backups |
 | [MAC-Investigation.md](MAC-Investigation.md) | ✅ | ✅ [en](en/MAC-Investigation.md) | where a MAC lives, flapping |
+| [Remote-Syslog.md](Remote-Syslog.md) | ✅ | ⏳ | rsyslog archive `/var/lib/remotelogs`, device logging |
 | [Loop-Investigation.md](Loop-Investigation.md) | ✅ | ✅ [en](en/Loop-Investigation.md) | LLDP/CDP loops |
 | [Manual-Topology-Links.md](Manual-Topology-Links.md) | ✅ | ✅ [en](en/Manual-Topology-Links.md) | manual links (SFP, VLAN cuts) |
 | [Ignore-List.md](Ignore-List.md) | ✅ | ✅ [en](en/Ignore-List.md) | ignoring ports and events |

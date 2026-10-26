@@ -11,8 +11,17 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// NeighborStaleTTL — после этого без успешного наблюдения запись удаляется.
-const NeighborStaleTTL = 2 * time.Hour
+// NeighborStaleMarkAge — live без подтверждения → stale (offline-свитч не опрашивается,
+// иначе зомби-LLDP держат «живые» рёбра бесконечно).
+const NeighborStaleMarkAge = 2 * time.Hour
+
+// NeighborLastKnownRetain — сколько хранить stale «последнюю известную» топологию
+// (UISP-style: отвалившийся свитч/порт ещё показывает прежние связи).
+const NeighborLastKnownRetain = 30 * 24 * time.Hour
+
+// NeighborStaleTTL — срок хранения stale-записей (= NeighborLastKnownRetain).
+// Пометка live→stale — NeighborStaleMarkAge; удаление — NeighborLastKnownRetain.
+const NeighborStaleTTL = NeighborLastKnownRetain
 
 // NeighborProtocolFDB — сосед, закреплённый с порта по MAC из FDB (не LLDP/CDP).
 // Poller не трогает этот protocol при upsert lldp/cdp, поэтому ребро живёт на топологии.
@@ -33,7 +42,7 @@ type PortNeighbor struct {
 }
 
 // UpsertPortNeighbors пишет актуальный снимок протокола для устройства.
-// Невиденные в этом опросе помечаются stale; старше NeighborStaleTTL удаляются.
+// Невиденные в этом опросе помечаются stale; старше NeighborLastKnownRetain удаляются.
 // Дубликаты с тем же remote identity (MikroTik и др. меняют rem_index на каждом опросе) схлопываются.
 // При пустом списке (успешный walk без соседей) все текущие записи протокола становятся stale.
 func (s *Store) UpsertPortNeighbors(ctx context.Context, deviceID int64, protocol string, neighbors []PortNeighbor, at time.Time) error {
@@ -105,7 +114,7 @@ func (s *Store) UpsertPortNeighbors(ctx context.Context, deviceID int64, protoco
 		}
 	}
 
-	cutoff := at.Add(-NeighborStaleTTL)
+	cutoff := at.Add(-NeighborLastKnownRetain)
 	if _, err := tx.Exec(ctx, `
 		DELETE FROM port_neighbors
 		WHERE device_id = $1 AND protocol = $2 AND stale = true AND last_seen_at < $3`,
@@ -145,22 +154,24 @@ func (s *Store) UpsertPortNeighbors(ctx context.Context, deviceID int64, protoco
 
 // ExpireStaleNeighbors — глобальный age-out: offline-свитч не опрашивается → Upsert не
 // помечает его соседей stale, и зомби-LLDP держат «живые» рёбра бесконечно.
-// Помечает stale=true и удаляет записи с last_seen_at старше NeighborStaleTTL.
+// Помечает stale=true после NeighborStaleMarkAge; удаляет только после NeighborLastKnownRetain
+// (чтобы в UI оставалась last-known топология).
 func (s *Store) ExpireStaleNeighbors(ctx context.Context, at time.Time) (marked, deleted int64, err error) {
 	if at.IsZero() {
 		at = time.Now().UTC()
 	}
-	cutoff := at.Add(-NeighborStaleTTL)
+	markCutoff := at.Add(-NeighborStaleMarkAge)
+	retainCutoff := at.Add(-NeighborLastKnownRetain)
 	tag, err := s.pool.Exec(ctx, `
 		UPDATE port_neighbors SET stale = true, updated_at = $1
-		WHERE stale = false AND last_seen_at < $2`, at, cutoff)
+		WHERE stale = false AND last_seen_at < $2`, at, markCutoff)
 	if err != nil {
 		return 0, 0, err
 	}
 	marked = tag.RowsAffected()
 	tag, err = s.pool.Exec(ctx, `
 		DELETE FROM port_neighbors
-		WHERE stale = true AND last_seen_at < $1`, cutoff)
+		WHERE stale = true AND last_seen_at < $1`, retainCutoff)
 	if err != nil {
 		return marked, 0, err
 	}
@@ -755,7 +766,7 @@ func (s *Store) SyncFDBTopologyNeighbors(
 			return linked, err
 		}
 	}
-	cutoff := at.Add(-NeighborStaleTTL)
+	cutoff := at.Add(-NeighborLastKnownRetain)
 	_, err = s.pool.Exec(ctx, `
 		DELETE FROM port_neighbors
 		WHERE device_id = $1 AND protocol = $2 AND stale = true AND last_seen_at < $3`,

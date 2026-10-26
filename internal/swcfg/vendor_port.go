@@ -41,7 +41,8 @@ func confEnterCmds(v Vendor) (priv, conf, write string) {
 	case VendorEltex:
 		return "enable", "configure terminal", "write"
 	case VendorSNR:
-		return "enable", "configure terminal", "write memory"
+		// SNR S29xx: команда «write» (как в CMD-логе); «write memory» тоже часто ок.
+		return "enable", "configure terminal", "write"
 	case VendorCisco, VendorAruba, VendorZyxel, VendorHP, VendorTPLink, VendorDLink,
 		VendorDahua, VendorHikvision, VendorHiWatch, VendorTrassir:
 		return "enable", "configure terminal", "write memory"

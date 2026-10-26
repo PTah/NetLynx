@@ -336,8 +336,9 @@ func runPortConfigure(client *ssh.Client, timeout time.Duration, v Vendor, enabl
 			(strings.Contains(tail, "confirm") ||
 				strings.Contains(tail, "(y/n)") ||
 				strings.Contains(tail, "[y/n]") ||
-				strings.Contains(tail, "[y/n]:")) {
-			_ = send("y", 1500*time.Millisecond)
+				strings.Contains(tail, "y/n:") ||
+				strings.Contains(tail, "overwrite")) {
+			_ = send("Y", 2500*time.Millisecond)
 		}
 	}
 

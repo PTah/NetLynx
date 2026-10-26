@@ -83,6 +83,11 @@ func (r *Receiver) Run(ctx context.Context) error {
 }
 
 func (r *Receiver) handle(ctx context.Context, sourceIP, raw string) {
+	// rsyslog on the same host may fan-out UDP to :9514 from 127.0.0.1 while
+	// putting the real sender into the RFC3164 HOSTNAME field — unwrap it.
+	if ip := unwrapForwardedSource(sourceIP, raw); ip != "" {
+		sourceIP = ip
+	}
 	body := StripSyslogHeader(raw)
 	flap, ok := ParseMACFlapping(body)
 	if !ok {

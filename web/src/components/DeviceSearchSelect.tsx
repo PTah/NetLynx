@@ -11,6 +11,9 @@ type Props = {
   ariaLabel?: string;
   placeholder?: string;
   inputStyle?: CSSProperties;
+  /** Показать пункт «Все» / сброс выбора (value = ""). */
+  allowEmpty?: boolean;
+  emptyLabel?: string;
 };
 
 function deviceLabel(d: Device): string {
@@ -29,6 +32,8 @@ export function DeviceSearchSelect({
   ariaLabel = "Узел",
   placeholder = "Поиск по имени…",
   inputStyle,
+  allowEmpty = false,
+  emptyLabel = "Все",
 }: Props) {
   const rootRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -87,7 +92,17 @@ export function DeviceSearchSelect({
     setOpen(false);
   };
 
-  const display = open ? query : selected ? deviceLabel(selected) : "";
+  const pickEmpty = () => {
+    onChange("");
+    setQuery("");
+    setOpen(false);
+  };
+
+  const closedLabel = selected ? deviceLabel(selected) : allowEmpty && !value ? emptyLabel : "";
+  const display = open ? query : closedLabel;
+
+  /** Индекс в listbox: 0 = empty (если allowEmpty), иначе устройство. */
+  const optionCount = filtered.length + (allowEmpty ? 1 : 0);
 
   return (
     <div ref={rootRef} style={{ position: "relative", minWidth: 220 }}>
@@ -131,13 +146,18 @@ export function DeviceSearchSelect({
           if (!open) return;
           if (e.key === "ArrowDown") {
             e.preventDefault();
-            setHi((i) => Math.min(i + 1, Math.max(0, filtered.length - 1)));
+            setHi((i) => Math.min(i + 1, Math.max(0, optionCount - 1)));
           } else if (e.key === "ArrowUp") {
             e.preventDefault();
             setHi((i) => Math.max(0, i - 1));
           } else if (e.key === "Enter") {
             e.preventDefault();
-            const d = filtered[hi];
+            if (allowEmpty && hi === 0) {
+              pickEmpty();
+              return;
+            }
+            const di = allowEmpty ? hi - 1 : hi;
+            const d = filtered[di];
             if (d) pick(d);
           }
         }}
@@ -163,18 +183,39 @@ export function DeviceSearchSelect({
             boxShadow: "0 8px 24px #0008",
           }}
         >
+          {allowEmpty && (
+            <li
+              role="option"
+              aria-selected={!value}
+              onMouseEnter={() => setHi(0)}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                pickEmpty();
+              }}
+              style={{
+                padding: "7px 10px",
+                cursor: "pointer",
+                background: hi === 0 ? "#1e3a5f" : "transparent",
+                color: !value ? "#f0c14a" : "#9aa3b5",
+                fontSize: "0.9rem",
+              }}
+            >
+              {emptyLabel}
+            </li>
+          )}
           {filtered.length === 0 && (
             <li style={{ padding: "8px 10px", color: "#9aa3b5", fontSize: "0.85rem" }}>Нет совпадений</li>
           )}
           {filtered.map((d, i) => {
-            const active = i === hi;
+            const row = allowEmpty ? i + 1 : i;
+            const active = row === hi;
             const isSel = String(d.id) === value;
             return (
               <li
                 key={d.id}
                 role="option"
                 aria-selected={isSel}
-                onMouseEnter={() => setHi(i)}
+                onMouseEnter={() => setHi(row)}
                 onMouseDown={(e) => {
                   e.preventDefault();
                   pick(d);

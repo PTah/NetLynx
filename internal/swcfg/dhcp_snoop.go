@@ -187,11 +187,16 @@ func runDHCPSnoopingTrust(client *ssh.Client, timeout time.Duration, v Vendor, e
 func maybeConfirmWrite(outBuf *bytes.Buffer, send func(string, time.Duration) error) {
 	tail := strings.ToLower(outBuf.String())
 	n := len(tail)
-	if n > 240 {
-		tail = tail[n-240:]
+	if n > 320 {
+		tail = tail[n-320:]
 	}
-	if strings.Contains(tail, "confirm") || strings.Contains(tail, "(y/n)") || strings.Contains(tail, "[y/n]") {
-		_ = send("y", 1500*time.Millisecond)
+	if strings.Contains(tail, "confirm") ||
+		strings.Contains(tail, "(y/n)") ||
+		strings.Contains(tail, "[y/n]") ||
+		strings.Contains(tail, "y/n:") ||
+		strings.Contains(tail, "overwrite") {
+		// SNR: «Confirm to overwrite … [Y/N]:» — лучше заглавная Y.
+		_ = send("Y", 2500*time.Millisecond)
 	}
 }
 

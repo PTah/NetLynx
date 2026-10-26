@@ -132,6 +132,13 @@ func fetchConfigOnce(c Creds) ([]byte, error) {
 			return []byte(cfg), nil
 		}
 	}
+	// IP мог стать MikroTik — не оставляем Cisco-like ошибку с баннером в событиях.
+	if looksLikeMikrotikSession(out) {
+		mout, merr := fetchMikrotikExport(client, timeout)
+		if merr == nil && looksLikeMikrotikExport(mout) {
+			return []byte(mout), nil
+		}
+	}
 	return nil, err
 }
 
@@ -408,8 +415,7 @@ func ciscoLikeRunning(client *ssh.Client, timeout time.Duration, steps []string,
 		return out, fmt.Errorf("это BusyBox/ash, не Cisco-like CLI")
 	}
 	if !looksLikeConfig(out) {
-		snip := compactCLIErr(out, redact...)
-		return out, fmt.Errorf("вывод CLI не похож на конфиг: %s", snip)
+		return out, notConfigCLIError(out, redact...)
 	}
 	return stripPager(out), nil
 }
@@ -464,6 +470,7 @@ func tailHasPager(s string) bool {
 
 func compactCLIErr(s string, secrets ...string) string {
 	s = redactSecrets(s, secrets...)
+	s = stripASCIIArtLines(s)
 	s = strings.Join(strings.Fields(s), " ")
 	if len(s) > 240 {
 		return s[:240] + "…"
@@ -472,6 +479,88 @@ func compactCLIErr(s string, secrets ...string) string {
 		return "(пусто)"
 	}
 	return s
+}
+
+// notConfigCLIError — без figlet/MOTD в тексте события (иначе дашборд выглядит как глюк).
+func notConfigCLIError(out string, redact ...string) error {
+	switch {
+	case looksLikeMikrotikSession(out):
+		return fmt.Errorf("вывод CLI не похож на конфиг: хост отвечает как MikroTik RouterOS (нужен /export), а не Cisco-like running-config")
+	case looksLikeLinuxShellSession(out):
+		return fmt.Errorf("вывод CLI не похож на конфиг: похоже на Linux shell/MOTD, а не CLI коммутатора — проверьте IP и что устройство на месте")
+	case looksLikeASCIIArtBanner(out):
+		return fmt.Errorf("вывод CLI не похож на конфиг: получен баннер/MOTD без running-config — проверьте SSH-пароль, enable и IP")
+	default:
+		snip := compactCLIErr(out, redact...)
+		return fmt.Errorf("вывод CLI не похож на конфиг: %s", snip)
+	}
+}
+
+func looksLikeArtLine(line string) bool {
+	t := strings.TrimSpace(line)
+	if len(t) < 8 {
+		return false
+	}
+	art := 0
+	runes := []rune(t)
+	for _, r := range runes {
+		switch r {
+		case '|', '/', '\\', '_', '`', '\'', '-', '<', '>', '.', ' ', '(', ')':
+			art++
+		}
+	}
+	return float64(art)/float64(len(runes)) >= 0.72
+}
+
+func stripASCIIArtLines(s string) string {
+	var keep []string
+	for _, line := range strings.Split(s, "\n") {
+		if looksLikeArtLine(line) {
+			continue
+		}
+		keep = append(keep, line)
+	}
+	return strings.Join(keep, "\n")
+}
+
+func looksLikeASCIIArtBanner(s string) bool {
+	lines, art := 0, 0
+	for _, line := range strings.Split(s, "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		lines++
+		if looksLikeArtLine(line) {
+			art++
+		}
+	}
+	return lines >= 3 && art >= 2 && art*2 >= lines
+}
+
+func looksLikeMikrotikSession(s string) bool {
+	l := strings.ToLower(s)
+	return strings.Contains(l, "routeros") ||
+		strings.Contains(l, "mikrotik") ||
+		strings.Contains(l, "[admin@") ||
+		strings.Contains(l, "bad command name") ||
+		(strings.Contains(l, "syntax error") && strings.Contains(l, "expected end of command"))
+}
+
+func looksLikeLinuxShellSession(s string) bool {
+	l := strings.ToLower(s)
+	if strings.Contains(l, "welcome to ubuntu") ||
+		strings.Contains(l, "welcome to debian") ||
+		strings.Contains(l, "welcome to linux") ||
+		strings.Contains(l, "last login:") ||
+		strings.Contains(l, "documentation: https://help.ubuntu") {
+		return true
+	}
+	if (strings.Contains(l, "command not found") || strings.Contains(l, "not found")) &&
+		(strings.Contains(l, "bash:") || strings.Contains(l, "-bash:") || strings.Contains(l, "sh:")) {
+		return true
+	}
+	// user@host:~$ / #
+	return linuxShellPromptRe.MatchString(s)
 }
 
 func redactSecrets(s string, secrets ...string) string {
@@ -549,6 +638,7 @@ func stripPager(s string) string {
 }
 
 var (
-	pagerMoreRe = regexp.MustCompile(`(?i)--More--[^\r\n]*`)
-	pagerQuitRe = regexp.MustCompile(`(?im)^[ \t]*or \(q\)uit[ \t]*$`)
+	pagerMoreRe        = regexp.MustCompile(`(?i)--More--[^\r\n]*`)
+	pagerQuitRe        = regexp.MustCompile(`(?im)^[ \t]*or \(q\)uit[ \t]*$`)
+	linuxShellPromptRe = regexp.MustCompile(`(?m)^[\w.-]+@[\w.-]+:[~/\w.-]*[$#]\s*$`)
 )

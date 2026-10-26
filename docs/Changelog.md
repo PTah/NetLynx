@@ -2,6 +2,16 @@
 
 Полная история изменений. В [README](../README.md) — последние версии и правила нумерации.
 
+**0.6.4** — правка порта (admin/description) на SNR/EdgeSwitch и др.: сначала SSH (`no shutdown`/`shutdown`/`description` + `write`/`write memory` с подтверждением Y), иначе SNMP + обязательный `write` в startup. Раньше SNMP SET менял только runtime — после reboot порт снова брал старый `shutdown` из startup (как Ethernet1/0/24 на SNR-S2989G).
+
+**0.6.3** — раздел «События»: вместо нефильтруемого `<select>` — поиск узла (`DeviceSearchSelect`); фильтр по дате/времени (`from`/`to` в API `GET /api/v1/events`, поля «С»/«По» в UI).
+
+**0.6.2** — remote syslog-архив на сервере NetLynx: rsyslog → `/var/lib/remotelogs/<IP>/syslog.log` (ротация 60 дней), fan-out в `:9514` с сохранением IP отправителя; скрипты `docs/setup-remote-syslog.sh` и `docs/configure-device-syslog.py`, см. [Remote-Syslog.md](Remote-Syslog.md).
+
+**0.6.1** — события CONFIG_SSH_FAIL: не показывать figlet/MOTD в тексте; понятная диагностика «баннер/Linux shell вместо running-config» (EdgeSwitch 48 #9).
+
+**0.6.0** — топология: цвет карточки следует за цветом типа устройства (в т.ч. пользовательский NVR); last-known связи offline-узлов хранятся 30 дней и рисуются пунктиром без обязательной галочки «устаревшие связи» (как в UISP).
+
 **0.5.9** — документация под 0.5.6–0.5.8: VLAN/API (`interfaces/…/vlan`, `message`, live settings), SNR FDB ifIndex 5001–5009 и чтение порта, Polling FDB-маппинг, Vendors; исправлены устаревшие пути `/ports/…` и `blocks_delete`.
 
 **0.5.8** — FDB по SNMP на SNR (S5010 и др.): в `dot1d`/`dot1q` порт приходит уже как ifIndex (`5001`=ge1 … `5009`=ge9), а не как bridge-port 1…9 — раньше все MAC отбрасывались, вкладка портов была пустой при живом `show mac`. Классический bridge-port→ifIndex по-прежнему работает (EdgeSwitch/Cisco).

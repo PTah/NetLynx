@@ -1,6 +1,7 @@
 package syslogrecv
 
 import (
+	"net"
 	"regexp"
 	"strconv"
 	"strings"
@@ -53,6 +54,44 @@ func ParseMACFlapping(msg string) (*MACFlapMsg, bool) {
 		return out, true
 	}
 	return nil, false
+}
+
+// unwrapForwardedSource — если пакет пришёл с loopback (rsyslog omfwd),
+// берёт реальный IP устройства из поля HOSTNAME шаблона NetLynxAppFwd.
+func unwrapForwardedSource(udpSource, raw string) string {
+	ip := net.ParseIP(strings.TrimSpace(udpSource))
+	if ip == nil || !ip.IsLoopback() {
+		return ""
+	}
+	s := strings.TrimSpace(raw)
+	if strings.HasPrefix(s, "<") {
+		if i := strings.IndexByte(s, '>'); i >= 0 && i < 6 {
+			s = strings.TrimSpace(s[i+1:])
+		}
+	}
+	// RFC3164 after PRI: "Mmm dd hh:mm:ss HOSTNAME rest" or "YYYY-MM-DDTHH:MM:SS HOSTNAME rest"
+	fields := strings.Fields(s)
+	// Classic: TIMESTAMP = 3 tokens (Oct 24 12:00:00) then HOST
+	if len(fields) >= 4 {
+		cand := fields[3]
+		if parsed := net.ParseIP(cand); parsed != nil && !parsed.IsLoopback() {
+			return parsed.String()
+		}
+	}
+	// RFC3339 / ISO timestamp as first token
+	if len(fields) >= 2 {
+		cand := fields[1]
+		if parsed := net.ParseIP(cand); parsed != nil && !parsed.IsLoopback() {
+			return parsed.String()
+		}
+	}
+	for _, f := range fields {
+		parsed := net.ParseIP(f)
+		if parsed != nil && !parsed.IsLoopback() {
+			return parsed.String()
+		}
+	}
+	return ""
 }
 
 // StripSyslogHeader убирает <PRI> и типичный RFC3164/5424 префикс, оставляя тело.

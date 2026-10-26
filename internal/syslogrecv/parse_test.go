@@ -30,3 +30,14 @@ func TestStripSyslogPRI(t *testing.T) {
 		t.Fatalf("mac=%q", msg.MAC)
 	}
 }
+
+func TestUnwrapForwardedSource(t *testing.T) {
+	raw := `<134>Oct 24 12:00:00 192.168.160.38 %BRG_MACNTFY-I-MAC_FLAPPING: Host 52:54:4c:83:09:e0 in vlan 1 is flapping between port gi1/0/23 and port gi1/0/10`
+	got := unwrapForwardedSource("127.0.0.1", raw)
+	if got != "192.168.160.38" {
+		t.Fatalf("got %q", got)
+	}
+	if unwrapForwardedSource("192.168.160.38", raw) != "" {
+		t.Fatal("non-loopback must not unwrap")
+	}
+}

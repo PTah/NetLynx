@@ -843,7 +843,7 @@ func scanEvents(rows pgx.Rows) ([]models.Event, error) {
 	return out, rows.Err()
 }
 
-func (s *Store) ListEvents(ctx context.Context, limit int, deviceID *int64, eventType, severity string) ([]models.Event, error) {
+func (s *Store) ListEvents(ctx context.Context, limit int, deviceID *int64, eventType, severity string, from, to *time.Time) ([]models.Event, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
@@ -853,14 +853,23 @@ func (s *Store) ListEvents(ctx context.Context, limit int, deviceID *int64, even
 	if deviceID != nil {
 		dev = *deviceID
 	}
+	var fromArg, toArg interface{}
+	if from != nil {
+		fromArg = *from
+	}
+	if to != nil {
+		toArg = *to
+	}
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, device_id, if_index, event_type, severity, payload, created_at
 		FROM events
 		WHERE ($2::bigint IS NULL OR device_id = $2)
 		  AND ($3::text = '' OR event_type = $3)
 		  AND ($4::text = '' OR severity = $4)
+		  AND ($5::timestamptz IS NULL OR created_at >= $5)
+		  AND ($6::timestamptz IS NULL OR created_at <= $6)
 		ORDER BY created_at DESC LIMIT $1`,
-		limit, dev, et, sev)
+		limit, dev, et, sev, fromArg, toArg)
 	if err != nil {
 		return nil, err
 	}

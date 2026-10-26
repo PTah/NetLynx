@@ -14,6 +14,8 @@ func TestClassifySSHError(t *testing.T) {
 		{"ssh: handshake failed: crypto/rsa: verification error", "hostkey"},
 		{"SSH: ключ хоста 1.2.3.4 изменился (возможна подмена)", "hostkey"},
 		{"dial tcp: i/o timeout", "timeout"},
+		{"вывод CLI не похож на конфиг: получен баннер/MOTD без running-config", "cli"},
+		{"это BusyBox/ash, не Cisco-like CLI", "cli"},
 		{"something else", "other"},
 	}
 	for _, tc := range cases {

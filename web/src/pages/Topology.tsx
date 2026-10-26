@@ -105,6 +105,27 @@ function hideAsOffline(n: TopologyNode): boolean {
   return offline(n) && isInfra(n);
 }
 
+/**
+ * Показывать ребро: живое всегда; stale — если включены «устаревшие связи»
+ * или хотя бы один конец offline (last-known, как в UISP).
+ */
+function keepTopologyEdge(
+  e: TopologyEdge,
+  opts: {
+    includeStale: boolean;
+    visibleIds: Set<number>;
+    nodeById: Map<number, TopologyNode>;
+  },
+): boolean {
+  if (e.remote_device_id == null) return false;
+  if (!opts.visibleIds.has(e.local_device_id) || !opts.visibleIds.has(e.remote_device_id)) return false;
+  if (!e.stale) return true;
+  if (opts.includeStale) return true;
+  const a = opts.nodeById.get(e.local_device_id);
+  const b = opts.nodeById.get(e.remote_device_id);
+  return (!!a && offline(a)) || (!!b && offline(b));
+}
+
 /** MAC virtual-узла для копирования (заголовок или chassis/port из связи). */
 function virtualNodeMac(n: TopologyNode, edges: TopologyEdge[]): string | null {
   const candidates = [
@@ -292,7 +313,11 @@ export default function Topology() {
   const dragRef = useRef<{ cx: number; cy: number; x: number; y: number; moved: boolean } | null>(null);
   const viewRef = useRef(view);
   viewRef.current = view;
-  const serverQuery = useMemo(() => ({ q: query.trim(), protocol, includeStale, vlan, location, depth, deviceId }), [query, protocol, includeStale, vlan, location, depth, deviceId]);
+  // Всегда тянем stale с API — UI сам решает, какие last-known рёбра показать (offline / галочка).
+  const serverQuery = useMemo(
+    () => ({ q: query.trim(), protocol, includeStale: true as const, vlan, location, depth, deviceId }),
+    [query, protocol, vlan, location, depth, deviceId],
+  );
 
   const nonInfraCategories = useMemo(
     () => categories.filter((c) => !isInfraDeviceCategory(c.id)),
@@ -493,22 +518,30 @@ export default function Topology() {
   );
   const nodeById = useMemo(() => new Map(nodes.map((n) => [n.id, n])), [nodes]);
   const visibleIds = useMemo(() => new Set(nodes.map((n) => n.id)), [nodes]);
-  const edges = useMemo(() => (graph?.edges ?? []).filter((e) => (includeStale || !e.stale) && e.remote_device_id != null && visibleIds.has(e.local_device_id) && visibleIds.has(e.remote_device_id)), [graph, includeStale, visibleIds]);
+  const edges = useMemo(
+    () =>
+      (graph?.edges ?? []).filter((e) =>
+        keepTopologyEdge(e, { includeStale, visibleIds, nodeById }),
+      ),
+    [graph, includeStale, visibleIds, nodeById],
+  );
 
   const locSourceNodes = useMemo(
     () => (graph?.nodes ?? []).filter((n) => !n.virtual && n.id > 0 && (showOffline || !hideAsOffline(n))),
     [graph, showOffline],
   );
+  const locSourceNodeById = useMemo(() => new Map(locSourceNodes.map((n) => [n.id, n])), [locSourceNodes]);
+  const locSourceVisibleIds = useMemo(() => new Set(locSourceNodes.map((n) => n.id)), [locSourceNodes]);
   const locSourceEdges = useMemo(
     () =>
-      (graph?.edges ?? []).filter(
-        (e) =>
-          (includeStale || !e.stale) &&
-          e.remote_device_id != null &&
-          locSourceNodes.some((n) => n.id === e.local_device_id) &&
-          locSourceNodes.some((n) => n.id === e.remote_device_id),
+      (graph?.edges ?? []).filter((e) =>
+        keepTopologyEdge(e, {
+          includeStale,
+          visibleIds: locSourceVisibleIds,
+          nodeById: locSourceNodeById,
+        }),
       ),
-    [graph, includeStale, locSourceNodes],
+    [graph, includeStale, locSourceVisibleIds, locSourceNodeById],
   );
   const locGraph = useMemo(() => buildLocationGraph(locSourceNodes, locSourceEdges), [locSourceNodes, locSourceEdges]);
   const locById = useMemo(() => new Map(locGraph.locNodes.map((n) => [n.id, n])), [locGraph]);
@@ -1280,8 +1313,10 @@ export default function Topology() {
             </div>
           )}
         </div>
-        <label><input type="checkbox" checked={showOffline} onChange={(e) => setShowOffline(e.target.checked)} /> offline свитчи</label>
-        <label title="Показывать связи, которые давно не подтверждались опросом (пунктир). Выкл — только живые.">
+        <label title="Показать offline свитчи/роутеры на карте с последними известными связями (пунктир).">
+          <input type="checkbox" checked={showOffline} onChange={(e) => setShowOffline(e.target.checked)} /> offline свитчи
+        </label>
+        <label title="Все устаревшие связи (пунктир), в т.ч. между online-узлами. Для offline last-known связи показываются и без этой галочки.">
           <input type="checkbox" checked={includeStale} onChange={(e) => setIncludeStale(e.target.checked)} /> устаревшие связи
         </label>
         <label><input type="checkbox" checked={showLabels} onChange={(e) => setShowLabels(e.target.checked)} /> подписи</label>
@@ -1741,7 +1776,7 @@ export default function Topology() {
                             width={el.cardW}
                             height={el.deviceCardH}
                             rx={8}
-                            fill={vlanHL ? "#14352f" : topologyCardFill(n, isOff)}
+                            fill={vlanHL ? "#14352f" : topologyCardFill(n, isOff, categories)}
                             stroke={stroke}
                             strokeWidth={isSelected || vlanHL ? 2.5 : 1.4}
                           />
@@ -1986,7 +2021,7 @@ export default function Topology() {
                       width={layout.cardW}
                       height={cardH}
                       rx={8}
-                      fill={vlanHL ? "#14352f" : topologyCardFill(n, isOff)}
+                      fill={vlanHL ? "#14352f" : topologyCardFill(n, isOff, categories)}
                       stroke={stroke}
                       strokeWidth={isSelected || isPath || vlanHL ? 2.5 : 1.4}
                     />

@@ -1,0 +1,3 @@
+# NetLynx remote syslog archive (included by /etc/apparmor.d/usr.sbin.rsyslogd)
+/var/lib/remotelogs/ rw,
+/var/lib/remotelogs/** rw,

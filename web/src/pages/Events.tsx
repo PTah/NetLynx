@@ -1,5 +1,6 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { apiGet, asArray } from "../api";
+import { DeviceSearchSelect } from "../components/DeviceSearchSelect";
 import EventsTable from "../components/EventsTable";
 import { useEventStream } from "../hooks/useEventStream";
 import { formatEventTypeLabel } from "../eventFormat";
@@ -44,6 +45,15 @@ function clampEventLimit(raw: string): number {
   return Math.min(EVENT_LIMIT_MAX, Math.max(EVENT_LIMIT_MIN, n));
 }
 
+/** datetime-local → RFC3339 с offset браузера; пусто → "". */
+function localInputToRFC3339(local: string): string {
+  const v = local.trim();
+  if (!v) return "";
+  const d = new Date(v);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toISOString();
+}
+
 export default function Events() {
   const [rows, setRows] = useState<EventRow[]>([]);
   const [devices, setDevices] = useState<Device[]>([]);
@@ -53,6 +63,8 @@ export default function Events() {
   const [eventType, setEventType] = useState("");
   const [severity, setSeverity] = useState("");
   const [eventLimit, setEventLimit] = useState(String(EVENT_LIMIT_DEFAULT));
+  const [fromLocal, setFromLocal] = useState("");
+  const [toLocal, setToLocal] = useState("");
 
   const load = useCallback((signal?: AbortSignal) => {
     setErr(null);
@@ -62,14 +74,23 @@ export default function Events() {
     if (d) p.set("device_id", d);
     if (eventType) p.set("event_type", eventType);
     if (severity) p.set("severity", severity);
+    const fromISO = localInputToRFC3339(fromLocal);
+    const toISO = localInputToRFC3339(toLocal);
+    if (fromISO) p.set("from", fromISO);
+    if (toISO) p.set("to", toISO);
     apiGet<EventRow[]>(`/api/v1/events?${p.toString()}`, signal ? { signal } : undefined)
       .then((rows) => setRows(asArray(rows)))
       .catch((e: Error) => {
         if (e.name !== "AbortError") setErr(e.message);
       });
-  }, [deviceId, eventType, severity, eventLimit]);
+  }, [deviceId, eventType, severity, eventLimit, fromLocal, toLocal]);
 
   useEventStream((ev) => {
+    // При активном окне времени не подмешиваем live — иначе список «уплывает» за пределы фильтра.
+    if (fromLocal.trim() || toLocal.trim()) return;
+    if (deviceId.trim() && String(ev.device_id) !== deviceId.trim()) return;
+    if (eventType && ev.event_type !== eventType) return;
+    if (severity && ev.severity !== severity) return;
     setRows((prev) => {
       if (prev.some((r) => r.id === ev.id)) return prev;
       return [ev, ...prev].slice(0, clampEventLimit(eventLimit));
@@ -129,14 +150,16 @@ export default function Events() {
         <label>
           Узел
           <br />
-          <select value={deviceId} onChange={(e) => setDeviceId(e.target.value)} style={{ minWidth: 160 }}>
-            <option value="">Все</option>
-            {devices.map((d) => (
-              <option key={d.id} value={String(d.id)}>
-                {d.id} — {d.name}
-              </option>
-            ))}
-          </select>
+          <DeviceSearchSelect
+            devices={devices}
+            value={deviceId}
+            onChange={setDeviceId}
+            allowEmpty
+            emptyLabel="Все"
+            ariaLabel="Узел"
+            placeholder="Поиск по имени…"
+            inputStyle={{ minWidth: 220 }}
+          />
         </label>
         <label>
           Тип
@@ -161,6 +184,26 @@ export default function Events() {
           </select>
         </label>
         <label>
+          С
+          <br />
+          <input
+            type="datetime-local"
+            value={fromLocal}
+            onChange={(e) => setFromLocal(e.target.value)}
+            title="Начало периода (локальное время)"
+          />
+        </label>
+        <label>
+          По
+          <br />
+          <input
+            type="datetime-local"
+            value={toLocal}
+            onChange={(e) => setToLocal(e.target.value)}
+            title="Конец периода (локальное время)"
+          />
+        </label>
+        <label>
           Количество событий
           <br />
           <input
@@ -174,6 +217,18 @@ export default function Events() {
           />
         </label>
         <button type="submit">Обновить</button>
+        {(fromLocal || toLocal) && (
+          <button
+            type="button"
+            onClick={() => {
+              setFromLocal("");
+              setToLocal("");
+            }}
+            title="Сбросить период"
+          >
+            Сбросить период
+          </button>
+        )}
       </form>
       {err && <p style={{ color: "#f88" }}>{err}</p>}
       <EventsTable

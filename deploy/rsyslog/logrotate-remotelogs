@@ -1,0 +1,22 @@
+# Daily rotation, 60 days keep. Rename + HUP so omfile reopens the path.
+/var/lib/remotelogs/*/syslog.log {
+    daily
+    rotate 60
+    dateext
+    dateformat -%Y%m%d
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 0640 syslog adm
+    su syslog adm
+    maxsize 512M
+    sharedscripts
+    postrotate
+        if [ -s /run/rsyslogd.pid ]; then
+            kill -HUP "$(cat /run/rsyslogd.pid)" 2>/dev/null || true
+        elif command -v systemctl >/dev/null 2>&1; then
+            systemctl kill -s HUP rsyslog.service 2>/dev/null || true
+        fi
+    endscript
+}

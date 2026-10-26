@@ -122,6 +122,16 @@ SNMP-мониторинг коммутаторов, веб-UI.
 
 Полный журнал всех версий — [docs/Changelog.md](docs/Changelog.md). Ниже — последние 8 релизов.
 
+**0.6.4** — вкл/выкл порта и description: сначала SSH + `write` в startup (не только SNMP runtime).
+
+**0.6.3** — События: поиск узла по имени (не только select), фильтр периода «С»/«По».
+
+**0.6.2** — remote syslog-архив (`/var/lib/remotelogs`), fan-out в `:9514`; см. [docs/Remote-Syslog.md](docs/Remote-Syslog.md).
+
+**0.6.1** — события SSH-конфига без мусорного баннера в тексте; диагностика Linux MOTD / не-CLI.
+
+**0.6.0** — топология: заливка карточки по цвету типа (NVR и др.); last-known связи offline 30 дней (UISP-style).
+
 **0.5.9** — docs: VLAN/API/Vendors/Polling приведены к поведению 0.5.6–0.5.8 (ответ «Готово», live settings, FDB SNR).
 
 **0.5.8** — FDB на SNR: SNMP-маппинг ifIndex 5001–5009 (ge1–ge9), иначе таблица MAC была пустой при живом CLI.

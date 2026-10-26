@@ -54,3 +54,33 @@ func TestLooksLikeEnableSecretStep(t *testing.T) {
 		t.Fatal("show")
 	}
 }
+
+func TestNotConfigCLIErrorStripsASCIIArt(t *testing.T) {
+	banner := `
+ _  __     _ _
+| |/ /__ _| (_)_ __   __ _
+| ' // _' | | | '_ \ / _' |
+| . \ (_| | | | | | | (_| |
+|_|\_\__,_|_|_|_| |_|\__,_|
+`
+	err := notConfigCLIError(banner)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "|_|\\_\\") || strings.Contains(msg, "| |/ /") {
+		t.Fatalf("banner leaked into event text: %q", msg)
+	}
+	if !strings.Contains(msg, "баннер/MOTD") && !strings.Contains(msg, "Linux") {
+		t.Fatalf("expected banner/linux hint: %q", msg)
+	}
+}
+
+func TestLooksLikeLinuxShellSession(t *testing.T) {
+	if !looksLikeLinuxShellSession("bash: en: command not found\n-bash: show: command not found\n") {
+		t.Fatal("bash not found")
+	}
+	if looksLikeLinuxShellSession("hostname EdgeSwitch\ninterface 0/1\nvlan 10\n") {
+		t.Fatal("config must not look like linux")
+	}
+}

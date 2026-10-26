@@ -202,16 +202,22 @@ func (s *Server) pushPortDescription(ctx context.Context, deviceID int64, ifInde
 	if pd == nil {
 		return "", store.ErrDeviceNotFound
 	}
-	snmpErr := s.snmpSetAlias(pd, ifIndex, descr)
-	if snmpErr == nil {
-		s.invalidateDeviceRunningConfig(deviceID)
-		return "snmp", nil
-	}
-	sshErr := s.sshPortChange(ctx, deviceID, ifIndex, &descr, nil)
+	// SSH first: CLI + write memory → running и startup.
+	// SNMP ifAlias сам по себе startup не сохраняет (после reboot описание/порт откатываются).
+	d := descr
+	sshErr := s.sshPortChange(ctx, deviceID, ifIndex, &d, nil)
 	if sshErr == nil {
 		return "ssh", nil
 	}
-	return "", fmt.Errorf("не удалось записать описание на свитч (SNMP: %v; SSH: %v)", snmpErr, sshErr)
+	snmpErr := s.snmpSetAlias(pd, ifIndex, descr)
+	if snmpErr != nil {
+		return "", fmt.Errorf("не удалось записать описание на свитч (SNMP: %v; SSH: %v)", snmpErr, sshErr)
+	}
+	s.invalidateDeviceRunningConfig(deviceID)
+	if werr := s.sshWriteMemory(ctx, deviceID); werr != nil {
+		return "snmp", fmt.Errorf("описание записано по SNMP, но startup не сохранён (write: %v); после reboot откатится. SSH: %v", werr, sshErr)
+	}
+	return "snmp+write", nil
 }
 
 func (s *Server) pushPortAdmin(ctx context.Context, deviceID int64, ifIndex, status int) (via string, err error) {
@@ -223,18 +229,38 @@ func (s *Server) pushPortAdmin(ctx context.Context, deviceID int64, ifIndex, sta
 		return "", store.ErrDeviceNotFound
 	}
 	up := status == 1
-	snmpErr := s.snmpSetAdmin(pd, ifIndex, status)
-	if snmpErr == nil {
-		// SNMP SET не трогает SSH-кэш сам — сбрасываем, иначе /settings отдаёт
-		// старый snapshot (в т.ч. PoE Mode) после вкл/выкл порта.
-		s.invalidateDeviceRunningConfig(deviceID)
-		return "snmp", nil
-	}
+	// SSH first: no/shutdown в running-config + write memory в startup.
+	// Раньше SNMP SET ifAdminStatus менял только runtime — после reboot порт
+	// снова брал shutdown из старого startup (типичный баг SNR/EdgeSwitch).
 	sshErr := s.sshPortChange(ctx, deviceID, ifIndex, nil, &up)
 	if sshErr == nil {
 		return "ssh", nil
 	}
-	return "", fmt.Errorf("не удалось сменить admin status (SNMP: %v; SSH: %v)", snmpErr, sshErr)
+	snmpErr := s.snmpSetAdmin(pd, ifIndex, status)
+	if snmpErr != nil {
+		return "", fmt.Errorf("не удалось сменить admin status (SNMP: %v; SSH: %v)", snmpErr, sshErr)
+	}
+	s.invalidateDeviceRunningConfig(deviceID)
+	if werr := s.sshWriteMemory(ctx, deviceID); werr != nil {
+		return "snmp", fmt.Errorf("порт изменён по SNMP, но startup не сохранён (write: %v); после reboot откатится. SSH: %v", werr, sshErr)
+	}
+	return "snmp+write", nil
+}
+
+// sshWriteMemory — copy running → startup на устройстве (после SNMP SET).
+func (s *Server) sshWriteMemory(ctx context.Context, deviceID int64) error {
+	if err := s.guardMikrotikRouterPortWrite(ctx, deviceID); err != nil {
+		return err
+	}
+	creds, err := s.resolveDeviceSSH(ctx, deviceID)
+	if err != nil {
+		return err
+	}
+	if err := swcfg.WriteMemory(creds); err != nil {
+		return err
+	}
+	s.invalidateDeviceRunningConfig(deviceID)
+	return nil
 }
 
 func (s *Server) snmpSetAlias(pd *store.PollDevice, ifIndex int, descr string) error {

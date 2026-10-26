@@ -213,6 +213,18 @@ function str(v: unknown): string {
   return String(v).trim();
 }
 
+/** Старые CONFIG_SSH_FAIL клали figlet/MOTD в err — в таблице это выглядит как мусор. */
+function sanitizeConfigSSHFailErr(err: string): string {
+  const e = err.trim();
+  if (!e) return "";
+  const artHeavy = (e.match(/[|/_\\`'\-]{3,}/g) || []).length >= 3 || /\|\\\/\|/.test(e);
+  if (artHeavy && /не похож на конфиг/i.test(e)) {
+    return "вывод CLI не похож на конфиг: получен баннер/MOTD без running-config — проверьте SSH-пароль, enable и IP";
+  }
+  if (e.length > 180) return `${e.slice(0, 180)}…`;
+  return e;
+}
+
 /**
  * Человекочитаемая подпись порта для событий — как в карточке узла:
  * Ubiquiti «port N: подпись» → только подпись; иначе ifAlias (колонка «Комментарий»); иначе «Порт №» (if_name);
@@ -474,7 +486,7 @@ export function formatEventSummary(ev: Pick<EventRow, "event_type" | "payload" |
     case "CONFIG_SSH_FAIL": {
       const cls = str(p.err_class) || "other";
       const src = str(p.source) || "";
-      const err = str(p.err);
+      const err = sanitizeConfigSSHFailErr(str(p.err));
       const clsRu =
         cls === "auth"
           ? "пароль/логин"
@@ -482,7 +494,9 @@ export function formatEventSummary(ev: Pick<EventRow, "event_type" | "payload" |
             ? "ключ хоста"
             : cls === "timeout"
               ? "таймаут"
-              : cls;
+              : cls === "cli"
+                ? "CLI/вывод"
+                : cls;
       const head = src ? `SSH (${src}, ${clsRu})` : `SSH (${clsRu})`;
       return err ? `${head}: ${err}` : head;
     }

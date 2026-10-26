@@ -69,7 +69,7 @@ func dialSwitchProfiles(c Creds, user, addr string, timeout time.Duration) (*ssh
 	return nil, last
 }
 
-// ClassifySSHError — auth | hostkey | timeout | other.
+// ClassifySSHError — auth | hostkey | timeout | cli | other.
 func ClassifySSHError(err error) string {
 	if err == nil {
 		return ""
@@ -91,6 +91,13 @@ func ClassifySSHError(err error) string {
 		strings.Contains(s, "i/o timeout"),
 		strings.Contains(s, "deadline exceeded"):
 		return "timeout"
+	case strings.Contains(s, "не похож на конфиг"),
+		strings.Contains(s, "busybox"),
+		strings.Contains(s, "linux shell"),
+		strings.Contains(s, "linux motd"),
+		strings.Contains(s, "баннер/motd"),
+		strings.Contains(s, "mikrotik routeros"):
+		return "cli"
 	default:
 		return "other"
 	}
