@@ -15,6 +15,8 @@ Cameras (Dahua / Hikvision / Trassir and others) can already appear in FDB with 
 | **L2 — control** | + SNMP SET (admin/ifAlias) and/or SSH CLI: shutdown, description, PoE, isolate |
 | **L3 — ops** | + running-config backup over SSH, vendor quirks (pager, enable, XP/BusyBox, etc.) |
 
+**Port persist (since 0.6.4):** UI admin/description prefers SSH, then saves startup: SNR/ELTEX `write`, Cisco-like / EdgeSwitch `write memory`, Huawei `save`. Without SSH credentials on the device card, a SNMP-only change stays in runtime and is lost after reboot.
+
 Current state (reference **0.6.0**, the level table keeps its meaning). **W3** (Keenetic/Cudy/…) — not started, **no ETA** (after polishing W1/W2 and getting real hardware):
 
 | Vendor | Level | Notes |

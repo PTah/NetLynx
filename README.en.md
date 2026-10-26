@@ -120,6 +120,18 @@ History before the reset (the `0.13.x` line and older) is kept in the journal �
 
 Full journal of every version — [docs/Changelog.md](docs/Changelog.md) (Russian). Latest releases:
 
+**0.6.5** — docs: port admin/description is written to startup on SNR / EdgeSwitch / Cisco / Huawei (and other CLI vendors) when SSH is set on the device card — not SNMP runtime only.
+
+**0.6.4** — port admin and description: SSH first + `write` / `write memory` / `save` to startup (not SNMP runtime alone).
+
+**0.6.3** — Events: device name search (not only a plain select), date/time range filters.
+
+**0.6.2** — remote syslog archive on the NetLynx host (`/var/lib/remotelogs`), fan-out to `:9514`; see [docs/Remote-Syslog.md](docs/Remote-Syslog.md) / [docs/en/](docs/en/) when translated.
+
+**0.6.1** — SSH config events without MOTD/banner noise in the message text.
+
+**0.6.0** — topology: card fill by device type; last-known offline links for 30 days (UISP-style).
+
 **0.5.9** — docs: VLAN/API/Vendors/Polling aligned with 0.5.6–0.5.8 (immediate “done”, live settings, SNR FDB).
 
 **0.5.8** — SNR FDB over SNMP: map ifIndex 5001–5009 (ge1–ge9); previously the MAC table stayed empty while CLI showed entries.

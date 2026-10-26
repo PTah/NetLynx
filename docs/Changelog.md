@@ -2,6 +2,8 @@
 
 Полная история изменений. В [README](../README.md) — последние версии и правила нумерации.
 
+**0.6.5** — docs: явно в README/Vendors — persist порта в startup работает для SNR, EdgeSwitch, Cisco, Huawei и прочих CLI-вендоров с SSH-учёткой в карточке узла (команды `write` / `write memory` / Huawei `save`).
+
 **0.6.4** — правка порта (admin/description) на SNR/EdgeSwitch и др.: сначала SSH (`no shutdown`/`shutdown`/`description` + `write`/`write memory` с подтверждением Y), иначе SNMP + обязательный `write` в startup. Раньше SNMP SET менял только runtime — после reboot порт снова брал старый `shutdown` из startup (как Ethernet1/0/24 на SNR-S2989G).
 
 **0.6.3** — раздел «События»: вместо нефильтруемого `<select>` — поиск узла (`DeviceSearchSelect`); фильтр по дате/времени (`from`/`to` в API `GET /api/v1/events`, поля «С»/«По» в UI).

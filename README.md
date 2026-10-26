@@ -122,7 +122,9 @@ SNMP-мониторинг коммутаторов, веб-UI.
 
 Полный журнал всех версий — [docs/Changelog.md](docs/Changelog.md). Ниже — последние 8 релизов.
 
-**0.6.4** — вкл/выкл порта и description: сначала SSH + `write` в startup (не только SNMP runtime).
+**0.6.5** — docs: вкл/выкл порта пишется в startup на SNR / EdgeSwitch / Cisco / Huawei (и др. CLI-вендорах) при настроенном SSH — не только runtime SNMP.
+
+**0.6.4** — вкл/выкл порта и description: сначала SSH + `write`/`write memory`/`save` в startup (не только SNMP runtime).
 
 **0.6.3** — События: поиск узла по имени (не только select), фильтр периода «С»/«По».
 

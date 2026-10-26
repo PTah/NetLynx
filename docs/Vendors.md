@@ -15,6 +15,8 @@
 | **L2 — control** | + SNMP SET (admin/ifAlias) и/или SSH CLI: shutdown, description, PoE, isolate |
 | **L3 — ops** | + бэкап running-config по SSH, вендорные нюансы (пейджер, enable, XP/BusyBox и т.п.) |
 
+**Persist порта (с 0.6.4):** вкл/выкл и description из UI сначала идут по SSH, затем сохранение startup: SNR/ELTEX `write`, Cisco-like / EdgeSwitch `write memory`, Huawei `save`. Если SSH нет — SNMP SET + тот же `WriteMemory` (нужна SSH-учётка в карточке). Без SSH правка остаётся только в runtime и откатится после reboot.
+
 Сейчас (ориентир **0.6.0**, таблица уровней без изменений смысла). **W3** (Keenetic/Cudy/…) — не начата, **срока нет** (после polish W1/W2 и живого железа):
 
 | Вендор | Уровень | Заметки |
