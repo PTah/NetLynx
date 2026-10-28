@@ -90,11 +90,18 @@ func pduString(p gosnmp.SnmpPDU) string {
 // Важно: 4 печатаемых ASCII-байта (например ifName EdgeSwitch "0/24") — это текст,
 // а не IPv4. Раньше любой len==4 превращали в "48.47.50.52", из‑за чего порты
 // 0/10+ отображались как «IP» и путали топологию.
+//
+// Windows SNMP часто отдаёт DisplayString с хвостовым NUL («…Filter-0000\x00»).
+// Раньше containsNUL гнал такую строку в hex — в UI «4d6963726f736f6674…».
 func sanitizeSNMPBytes(b []byte) string {
 	if len(b) == 0 {
 		return ""
 	}
-	// Печатный UTF-8/ASCII без NUL — обычные ifName/sysName/Port ID ("0/24", "gi1/0/3").
+	b = trimTrailingNULs(b)
+	if len(b) == 0 {
+		return ""
+	}
+	// Печатный UTF-8/ASCII — обычные ifName/sysName/Port ID ("0/24", "gi1/0/3").
 	if utf8.Valid(b) && !containsNUL(b) && isMostlyPrintableASCII(b) {
 		return string(b)
 	}
@@ -120,7 +127,66 @@ func sanitizeSNMPBytes(b []byte) string {
 	if utf8.Valid(b) && !containsNUL(b) {
 		return string(b)
 	}
+	// DisplayString с NUL посередине редко; если после выкидывания NUL остаётся печатный ASCII — текст.
+	if stripped := stripAllNULs(b); len(stripped) > 0 && isMostlyPrintableASCII(stripped) && utf8.Valid(stripped) {
+		return string(stripped)
+	}
 	return hex.EncodeToString(b)
+}
+
+func trimTrailingNULs(b []byte) []byte {
+	i := len(b)
+	for i > 0 && b[i-1] == 0 {
+		i--
+	}
+	return b[:i]
+}
+
+func stripAllNULs(b []byte) []byte {
+	out := make([]byte, 0, len(b))
+	for _, c := range b {
+		if c != 0 {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// HumanizeSNMPText — для уже сохранённых значений: если строка = hex от печатного ASCII
+// (старый баг с NUL-terminated DisplayString), вернуть читаемый текст.
+func HumanizeSNMPText(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return s
+	}
+	if decoded, ok := decodeHexPrintableASCII(s); ok {
+		return decoded
+	}
+	return s
+}
+
+func decodeHexPrintableASCII(s string) (string, bool) {
+	if len(s) < 16 || len(s)%2 != 0 {
+		return "", false
+	}
+	for _, c := range s {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+			return "", false
+		}
+	}
+	raw, err := hex.DecodeString(s)
+	if err != nil || len(raw) == 0 {
+		return "", false
+	}
+	raw = trimTrailingNULs(raw)
+	if len(raw) == 0 || !isMostlyPrintableASCII(raw) {
+		return "", false
+	}
+	// Отсекаем короткие «случайные» hex (MAC без двоеточий и т.п.): текст обычно длинный.
+	if len(raw) < 8 {
+		return "", false
+	}
+	return string(raw), true
 }
 
 func isMostlyPrintableASCII(b []byte) bool {

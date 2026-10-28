@@ -11,6 +11,12 @@ func TestExpandNameKeys(t *testing.T) {
 	if len(got) < 2 || got[0] != "sw-core.example.com" || got[1] != "sw-core" {
 		t.Fatalf("unexpected keys: %#v", got)
 	}
+	// «SW-…» — префикс до '-' всего 2 символа, не добавляем (слишком общий).
+	for _, k := range got {
+		if k == "sw" {
+			t.Fatalf("short hyphen prefix must not appear: %#v", got)
+		}
+	}
 	ipKeys := expandNameKeys("192.168.160.54")
 	if len(ipKeys) != 1 || ipKeys[0] != "192.168.160.54" {
 		t.Fatalf("IP must not strip first octet: %#v", ipKeys)
@@ -18,6 +24,34 @@ func TestExpandNameKeys(t *testing.T) {
 	ipKeys = expandNameKeys("48.47.50.52")
 	if len(ipKeys) != 1 || ipKeys[0] != "48.47.50.52" {
 		t.Fatalf("IP-like must stay whole: %#v", ipKeys)
+	}
+	phone := expandNameKeys("X3U-ANITA")
+	if len(phone) < 2 || phone[0] != "x3u-anita" || phone[1] != "x3u" {
+		t.Fatalf("phone inventory name want x3u prefix: %#v", phone)
+	}
+}
+
+func TestResolveRemoteLLDPShortNameToHyphenInventory(t *testing.T) {
+	// Телефон: LLDP sysName=X3U, в Узлах X3U-ANITA — без MAC/IP (stale LLDP) не должен давать virtual.
+	devices := []models.Device{
+		{ID: 177, Name: "X3U-ANITA", Host: "192.168.170.77"},
+		{ID: 10, Name: "Other-Phone", Host: "192.168.170.10"},
+	}
+	idx := buildDeviceNameIndex(devices)
+	sys := "X3U"
+	id, ok := resolveRemoteDeviceID(idx, PortNeighbor{RemoteSysName: &sys})
+	if !ok || id != 177 {
+		t.Fatalf("want X3U-ANITA (177) for LLDP X3U, got ok=%v id=%d", ok, id)
+	}
+	// Два DESKTOP-* — префикс неоднозначен, не матчим.
+	devices = []models.Device{
+		{ID: 1, Name: "DESKTOP-AAA", Host: "10.0.0.1"},
+		{ID: 2, Name: "DESKTOP-BBB", Host: "10.0.0.2"},
+	}
+	idx = buildDeviceNameIndex(devices)
+	sys = "DESKTOP"
+	if _, ok := resolveRemoteDeviceID(idx, PortNeighbor{RemoteSysName: &sys}); ok {
+		t.Fatal("ambiguous DESKTOP prefix must not resolve")
 	}
 }
 

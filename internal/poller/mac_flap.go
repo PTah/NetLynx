@@ -112,6 +112,18 @@ func (e *Engine) maybeEmitMACFlapping(
 	e.emit(ctx, ignore, d, ifIdx, "MAC_FLAPPING", "warning", pl)
 }
 
+func (e *Engine) macMultiAccessDebounce() time.Duration {
+	if e.cfg.MACMultiAccessDebounce > 0 {
+		return e.cfg.MACMultiAccessDebounce
+	}
+	// Fallback: не короче MAC_FLAP_DEBOUNCE и не меньше 6ч (антиспам после деплоя).
+	d := e.cfg.MACFlapDebounce
+	if d < 6*time.Hour {
+		return 6 * time.Hour
+	}
+	return d
+}
+
 func (e *Engine) scanMACMultiAccess(ctx context.Context) {
 	hits, err := e.st.ListMACMultiAccessCandidates(ctx)
 	if err != nil {
@@ -125,10 +137,7 @@ func (e *Engine) scanMACMultiAccess(ctx context.Context) {
 	for _, h := range hits {
 		byMAC[h.MAC] = append(byMAC[h.MAC], h)
 	}
-	debounce := e.cfg.MACFlapDebounce
-	if debounce <= 0 {
-		debounce = 15 * time.Minute
-	}
+	debounce := e.macMultiAccessDebounce()
 	now := time.Now()
 	devs, err := e.st.ListPollDevices(ctx)
 	if err != nil {
@@ -138,6 +147,7 @@ func (e *Engine) scanMACMultiAccess(ctx context.Context) {
 	for _, d := range devs {
 		devByID[d.ID] = d
 	}
+	emitted, skipped := 0, 0
 	for mac, list := range byMAC {
 		if len(list) < 2 {
 			continue
@@ -145,10 +155,10 @@ func (e *Engine) scanMACMultiAccess(ctx context.Context) {
 		if !e.shouldTrackMAC(ctx, mac) {
 			continue
 		}
-		// Глобальный дедуп по MAC: не эмитить повторно в окне debounce
-		// (раньше HasMACEventSince только по list[0].DeviceID → дубли на разные свитчи).
+		// In-memory дедуп (внутри процесса) + БД глобально по MAC (переживает рестарт/деплой).
 		if v, ok := e.macMultiAccessLastEmit.Load(mac); ok {
 			if last, ok := v.(time.Time); ok && now.Sub(last) < debounce {
+				skipped++
 				continue
 			}
 		}
@@ -156,9 +166,14 @@ func (e *Engine) scanMACMultiAccess(ctx context.Context) {
 		if !ok {
 			continue
 		}
-		dup, err := e.st.HasMACEventSince(ctx, d.ID, "MAC_MULTI_ACCESS", mac, now.Add(-debounce))
-		if err != nil || dup {
+		dup, err := e.st.HasMACEventAnywhereSince(ctx, "MAC_MULTI_ACCESS", mac, now.Add(-debounce))
+		if err != nil {
+			e.log.Warn("mac multi-access debounce", "mac", mac, "err", err)
+			continue
+		}
+		if dup {
 			e.macMultiAccessLastEmit.Store(mac, now)
+			skipped++
 			continue
 		}
 		locs := make([]map[string]interface{}, 0, len(list))
@@ -178,6 +193,10 @@ func (e *Engine) scanMACMultiAccess(ctx context.Context) {
 		}
 		e.emit(ctx, nil, d, &idx, "MAC_MULTI_ACCESS", "warning", pl)
 		e.macMultiAccessLastEmit.Store(mac, now)
+		emitted++
+	}
+	if emitted > 0 || skipped > 0 {
+		e.log.Info("mac multi-access scan", "candidates", len(byMAC), "emitted", emitted, "deduped", skipped, "debounce", debounce.String())
 	}
 }
 
@@ -197,10 +216,7 @@ func (e *Engine) pruneMACMoves(ctx context.Context) {
 
 // pruneMACMultiAccessLastEmit сбрасывает устаревшие метки дедупа MAC_MULTI_ACCESS.
 func (e *Engine) pruneMACMultiAccessLastEmit() {
-	debounce := e.cfg.MACFlapDebounce
-	if debounce <= 0 {
-		debounce = 15 * time.Minute
-	}
+	debounce := e.macMultiAccessDebounce()
 	cutoff := time.Now().Add(-2 * debounce)
 	e.macMultiAccessLastEmit.Range(func(key, value any) bool {
 		if t, ok := value.(time.Time); ok && t.Before(cutoff) {

@@ -75,7 +75,8 @@ NETLYNX_SYSLOG_LISTEN=:9514
 |------------|---------|--------|
 | `MAC_FLAP_MIN_MOVES` | 3 | смен порта за окно → событие `MAC_FLAPPING` |
 | `MAC_FLAP_WINDOW_SECONDS` | 3600 | окно |
-| `MAC_FLAP_DEBOUNCE_SECONDS` | 900 | антиспам |
+| `MAC_FLAP_DEBOUNCE_SECONDS` | 900 | антиспам `MAC_FLAPPING` |
+| `MAC_MULTI_ACCESS_DEBOUNCE_SECONDS` | 21600 (6ч) | антиспам `MAC_MULTI_ACCESS` (глобально по MAC; переживает рестарт/деплой) |
 | `MAC_MOVES_RETENTION_DAYS` | 14 | хранение moves |
 | `NETLYNX_SYSLOG_LISTEN` | пусто | UDP; `off` = выкл |
 | `FDB_SNAPSHOT_ENABLED` | true | ежедневные снимки |

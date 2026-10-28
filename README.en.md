@@ -120,6 +120,10 @@ History before the reset (the `0.13.x` line and older) is kept in the journal �
 
 Full journal of every version — [docs/Changelog.md](docs/Changelog.md) (Russian). Latest releases:
 
+**0.7.0** — `DEVICE_ONLINE` debounce (2 polls); Windows SNMP DisplayString no longer shown as hex.
+
+**0.6.6** — anti-spam after deploy/restart: no `MAC_MULTI_ACCESS` flood; no duplicate `DEVICE_OFFLINE` without `DEVICE_ONLINE`.
+
 **0.6.5** — docs: port admin/description is written to startup on SNR / EdgeSwitch / Cisco / Huawei (and other CLI vendors) when SSH is set on the device card — not SNMP runtime only.
 
 **0.6.4** — port admin and description: SSH first + `write` / `write memory` / `save` to startup (not SNMP runtime alone).

@@ -481,6 +481,14 @@ func (s *Store) UpdateDevicePing(ctx context.Context, id int64, ok bool, rttMs *
 	return err
 }
 
+// EnsureOfflineSince ставит offline_since=now(), если ещё NULL (до InsertEvent DEVICE_OFFLINE).
+// Нужно, чтобы created_at события не оказался на миллисекунды раньше offline_since —
+// иначе после рестарта HasEventSince(since=offline_since) не видит алерт и шлёт второй OFFLINE.
+func (s *Store) EnsureOfflineSince(ctx context.Context, id int64) error {
+	_, err := s.pool.Exec(ctx, `UPDATE devices SET offline_since = COALESCE(offline_since, now()) WHERE id = $1`, id)
+	return err
+}
+
 // RefreshOfflineSince ставит offline_since при переходе в оффлайн и сбрасывает при возврате онлайн.
 func (s *Store) RefreshOfflineSince(ctx context.Context, id int64) error {
 	d, err := s.GetDevice(ctx, id)
@@ -494,8 +502,7 @@ func (s *Store) RefreshOfflineSince(ctx context.Context, id int64) error {
 		_, err = s.pool.Exec(ctx, `UPDATE devices SET offline_since = NULL WHERE id = $1 AND offline_since IS NOT NULL`, id)
 		return err
 	}
-	_, err = s.pool.Exec(ctx, `UPDATE devices SET offline_since = COALESCE(offline_since, now()) WHERE id = $1`, id)
-	return err
+	return s.EnsureOfflineSince(ctx, id)
 }
 
 func (s *Store) RefreshAllOfflineSince(ctx context.Context) error {
@@ -610,7 +617,7 @@ func (s InterfaceSnapshot) DisplayDescr() string {
 		}
 	}
 	if s.IfDescr != nil {
-		return strings.TrimSpace(*s.IfDescr)
+		return humanizeSNMPText(*s.IfDescr)
 	}
 	return ""
 }

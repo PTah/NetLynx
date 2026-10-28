@@ -75,6 +75,9 @@ type Config struct {
 	MACFlapMinMoves  int           // ≥K смен порта за окно → MAC_FLAPPING
 	MACFlapWindow    time.Duration // окно подсчёта moves
 	MACFlapDebounce  time.Duration
+	// MACMultiAccessDebounce — антиспам MAC_MULTI_ACCESS (скан при старте и раз в ~6ч).
+	// Отдельно от MAC_FLAP_DEBOUNCE: иначе после каждого деплоя снова сыпятся сотни одних и тех же MAC.
+	MACMultiAccessDebounce time.Duration
 
 	// PORT_FLAP: N LINK_UP/DOWN на порту за окно.
 	PortFlapMinBounces int
@@ -344,6 +347,15 @@ func Load() (Config, error) {
 			return Config{}, fmt.Errorf("MAC_FLAP_DEBOUNCE_SECONDS: invalid value %q", v)
 		}
 		c.MACFlapDebounce = time.Duration(n) * time.Second
+	}
+	// По умолчанию = интервал prune-скана (6ч): повтор только для новых MAC или по истечении окна.
+	c.MACMultiAccessDebounce = 6 * time.Hour
+	if v := os.Getenv("MAC_MULTI_ACCESS_DEBOUNCE_SECONDS"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 60 || n > 7*86400 {
+			return Config{}, fmt.Errorf("MAC_MULTI_ACCESS_DEBOUNCE_SECONDS: invalid value %q (60…604800)", v)
+		}
+		c.MACMultiAccessDebounce = time.Duration(n) * time.Second
 	}
 	c.PortFlapMinBounces = 4
 	if v := os.Getenv("PORT_FLAP_MIN_BOUNCES"); v != "" {

@@ -28,7 +28,7 @@ func eventDisplayDescr(override, cliDescr, ifDescr *string) string {
 		}
 	}
 	if ifDescr != nil {
-		return strings.TrimSpace(*ifDescr)
+		return humanizeSNMPText(*ifDescr)
 	}
 	return ""
 }

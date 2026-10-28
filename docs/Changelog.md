@@ -2,6 +2,16 @@
 
 Полная история изменений. В [README](../README.md) — последние версии и правила нумерации.
 
+**0.7.0** — `DEVICE_ONLINE` после 2 подряд успешных опросов (антидребезг краткого ping во сне, кейс Varenik-PC); Windows SNMP DisplayString с NUL больше не уходит в hex (`Microsoft Wi-Fi Direct…` вместо `4d6963726f…`).
+
+**0.6.9** — топология: LLDP короткое имя (`X3U`) сопоставляется с inventory `X3U-ANITA` (префикс до `-`/`_`, ≥3 символа, только если уникален) — фантомный virtual «не в списке Узлы» больше не болтается рядом с телефоном.
+
+**0.6.8** — при старте `RepairAllFDBTopologyLinks` сразу дописывает last-known FDB-рёбра из `attach_*` по всем свитчам (не ждать следующего FDB-poll) — offline ПК вроде MDV-PC получают серую линию сразу после деплоя.
+
+**0.6.7** — топология FDB: ПК/телефон/камера/МФУ/ИБП на «тихом» trunk (≤10 MAC, без AP) получают ребро `protocol=fdb` (кейс Yurkov-PC на EdgeSwitch 0/15 с `cli_port_mode=trunk`); offline-узлы с сохранённым `attach_*` дописывают last-known соседа, если `port_neighbors` пуст — серые пунктирные линии без галочки «устаревшие связи».
+
+**0.6.6** — антиспам после рестарта/деплоя: `MAC_MULTI_ACCESS` дедуп глобально по MAC с окном 6ч (`MAC_MULTI_ACCESS_DEBOUNCE_SECONDS`); `DEVICE_OFFLINE` больше не дублируется после рестарта (ensure `offline_since` до события + skew 30с в HasEventSince — кейс SNR 10.0.0.1: алерт на 3 мс раньше `offline_since`).
+
 **0.6.5** — docs: явно в README/Vendors — persist порта в startup работает для SNR, EdgeSwitch, Cisco, Huawei и прочих CLI-вендоров с SSH-учёткой в карточке узла (команды `write` / `write memory` / Huawei `save`).
 
 **0.6.4** — правка порта (admin/description) на SNR/EdgeSwitch и др.: сначала SSH (`no shutdown`/`shutdown`/`description` + `write`/`write memory` с подтверждением Y), иначе SNMP + обязательный `write` в startup. Раньше SNMP SET менял только runtime — после reboot порт снова брал старый `shutdown` из startup (как Ethernet1/0/24 на SNR-S2989G).

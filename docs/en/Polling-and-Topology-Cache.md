@@ -17,7 +17,7 @@ The poller scheduler (`POLL_SCHEDULER_SECONDS`, each device has its own `poll_in
 | What it reads | Where it writes / why |
 |---------------|-----------------------|
 | LLDP / CDP neighbours | `port_neighbors` → "Discovered" candidates; topology map edges |
-| FDB / MAC | live FDB snapshot, events, FDB→topology links |
+| FDB / MAC | live FDB snapshot, events, FDB→topology links (`protocol=fdb`: access — any inventory; trunk — AP/NAS/server or a “quiet” port ≤10 MACs with no AP, including PCs; offline — sticky / last-known from `attach_*`) |
 | IF-MIB, PoE, CPU, Printer-MIB… | device card, metrics, charts |
 
 New devices **do not enter Devices by themselves** — only "Discovered". They are added to the inventory manually (promote from a port / topology / the discovered list).
@@ -31,7 +31,7 @@ Code: `internal/poller`; neighbours are written by `UpsertPortNeighbors` / `Sync
 | "Online" | `auto`: ICMP **or** SNMP; `ping`: ICMP only (SNMP not polled); `online`/`offline` — manual mark |
 | `DEVICE_OFFLINE` (normal) | after **N consecutive** failed polls: critical/NAS/UPS/PC — **2**; AP/phones/cameras/MFPs — **3** (debounce) |
 | `DEVICE_OFFLINE` (gone) | for critical/important — **immediately on the first poll** when ICMP used to work and both ICMP and SNMP went silent; for AP/phones/cameras instant ping-dead is **off** |
-| `DEVICE_ONLINE` | on the first successful poll after a recorded offline episode |
+| `DEVICE_ONLINE` | after **2 consecutive** successful polls following a recorded offline episode (debounce: a single sleep/ARP ping must not flash ONLINE→OFFLINE) |
 | NetLynx restart | the confirmation counter is in memory; if the process restarts mid-outage, `DEVICE_OFFLINE` is caught up once the outage exceeds 2 poll intervals (at least 3 minutes) |
 
 #### Light and heavy polling

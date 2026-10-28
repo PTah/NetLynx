@@ -1454,6 +1454,10 @@ func resolveRemoteDeviceID(idx deviceNameIndex, nb PortNeighbor) (int64, bool) {
 	return 0, false
 }
 
+// expandNameKeyMinPrefix — короткий префикс до '-' / '_' (LLDP «X3U» ↔ inventory «X3U-ANITA»).
+// Меньше 3 символов не берём («AP-…», «SW-…» слишком общие).
+const expandNameKeyMinPrefix = 3
+
 func expandNameKeys(raw string) []string {
 	s := strings.TrimSpace(raw)
 	if s == "" {
@@ -1461,13 +1465,31 @@ func expandNameKeys(raw string) []string {
 	}
 	lower := strings.ToLower(s)
 	out := []string{lower}
+	seen := map[string]struct{}{lower: {}}
+	add := func(k string) {
+		if k == "" {
+			return
+		}
+		if _, ok := seen[k]; ok {
+			return
+		}
+		seen[k] = struct{}{}
+		out = append(out, k)
+	}
 	// Для IP не отрезаем «домен» по первой точке: иначе 192.168.1.10 и 48.47.50.52
 	// дают ключи "192"/"48" и ложно схлопывают соседей на первый device с таким префиксом.
 	if looksLikeIPKey(lower) {
 		return out
 	}
 	if i := strings.IndexByte(lower, '.'); i > 0 {
-		out = append(out, lower[:i])
+		add(lower[:i])
+	}
+	// Yealink и др.: LLDP sysName = «X3U», в Узлах имя «X3U-ANITA» / «X3U_ANITA».
+	for _, sep := range []byte{'-', '_'} {
+		if i := strings.IndexByte(lower, sep); i >= expandNameKeyMinPrefix {
+			add(lower[:i])
+			break
+		}
 	}
 	return out
 }

@@ -303,9 +303,22 @@ func (s *Store) ListAllPortNeighbors(ctx context.Context) ([]PortNeighbor, error
 	return CollapsePortNeighborsByIdentity(out), nil
 }
 
-// UpsertFDBTopologyNeighbor закрепляет соседа protocol=fdb на порту (MAC → chassis).
+// UpsertFDBTopologyNeighbor закрепляет соседа protocol=fdb на порту (MAC → chassis), stale=false.
 // Не помечает stale другие FDB-записи этого устройства.
 func (s *Store) UpsertFDBTopologyNeighbor(ctx context.Context, localDeviceID int64, ifIndex int, mac string, mgmtAddr, sysName *string, at time.Time) error {
+	return s.upsertFDBTopologyNeighbor(ctx, localDeviceID, ifIndex, mac, mgmtAddr, sysName, at, false)
+}
+
+// upsertFDBTopologyNeighbor — FDB-сосед; stale=true для last-known (offline ПК без MAC в live FDB).
+func (s *Store) upsertFDBTopologyNeighbor(
+	ctx context.Context,
+	localDeviceID int64,
+	ifIndex int,
+	mac string,
+	mgmtAddr, sysName *string,
+	at time.Time,
+	stale bool,
+) error {
 	if localDeviceID <= 0 || ifIndex <= 0 {
 		return fmt.Errorf("device_id and if_index must be positive")
 	}
@@ -356,18 +369,115 @@ func (s *Store) UpsertFDBTopologyNeighbor(ctx context.Context, localDeviceID int
 			device_id, if_index, rem_index, protocol,
 			remote_sys_name, remote_port_id, remote_chassis_id, remote_mgmt_addr,
 			stale, last_seen_at, updated_at
-		) VALUES ($1,$2,$3,$4,$5,NULL,$6,$7,false,$8,$8)
+		) VALUES ($1,$2,$3,$4,$5,NULL,$6,$7,$8,$9,$9)
 		ON CONFLICT (device_id, if_index, protocol, rem_index) DO UPDATE SET
 			remote_sys_name = COALESCE(EXCLUDED.remote_sys_name, port_neighbors.remote_sys_name),
 			remote_chassis_id = EXCLUDED.remote_chassis_id,
 			remote_mgmt_addr = COALESCE(EXCLUDED.remote_mgmt_addr, port_neighbors.remote_mgmt_addr),
-			stale = false,
-			last_seen_at = EXCLUDED.last_seen_at,
+			stale = EXCLUDED.stale,
+			last_seen_at = CASE
+				WHEN EXCLUDED.stale AND NOT port_neighbors.stale THEN port_neighbors.last_seen_at
+				WHEN EXCLUDED.stale AND EXCLUDED.last_seen_at < port_neighbors.last_seen_at THEN port_neighbors.last_seen_at
+				ELSE EXCLUDED.last_seen_at
+			END,
 			updated_at = EXCLUDED.updated_at`,
 		localDeviceID, ifIndex, remIndex, NeighborProtocolFDB,
-		sys, macNorm, mgmt, at,
+		sys, macNorm, mgmt, stale, at,
 	)
 	return err
+}
+
+// EnsureFDBNeighborsFromAttachments — last-known FDB-рёбра из devices.attach_* (protocol=fdb),
+// если в port_neighbors ещё нет соседа по этому chassis. Нужно для offline ПК, у которых
+// карточка «Подключен к…» есть, а SyncFDB никогда не записал линк (тихий trunk / пустой chassis_mac).
+func (s *Store) EnsureFDBNeighborsFromAttachments(ctx context.Context, switchID int64, at time.Time) (int, error) {
+	if switchID <= 0 {
+		return 0, nil
+	}
+	if at.IsZero() {
+		at = time.Now().UTC()
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT d.id, d.name, COALESCE(d.host, ''), d.chassis_mac, d.attach_if_index,
+		       COALESCE(d.attach_updated_at, d.updated_at, $2::timestamptz)
+		FROM devices d
+		WHERE d.attach_parent_id = $1
+		  AND lower(btrim(COALESCE(d.attach_protocol, ''))) = $3
+		  AND d.attach_if_index IS NOT NULL AND d.attach_if_index > 0
+		  AND d.chassis_mac IS NOT NULL AND btrim(d.chassis_mac) <> ''`,
+		switchID, at, NeighborProtocolFDB)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+
+	type attRow struct {
+		id      int64
+		name    string
+		host    string
+		mac     string
+		ifIndex int
+		seenAt  time.Time
+	}
+	var list []attRow
+	for rows.Next() {
+		var r attRow
+		var rawMAC string
+		if err := rows.Scan(&r.id, &r.name, &r.host, &rawMAC, &r.ifIndex, &r.seenAt); err != nil {
+			return 0, err
+		}
+		mac, ok := FormatFullMAC(rawMAC)
+		if !ok {
+			continue
+		}
+		r.mac = mac
+		if r.seenAt.IsZero() {
+			r.seenAt = at
+		}
+		list = append(list, r)
+	}
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+
+	linked := 0
+	for _, r := range list {
+		hex := macHexDigits(r.mac)
+		var exists bool
+		err := s.pool.QueryRow(ctx, `
+			SELECT EXISTS(
+				SELECT 1 FROM port_neighbors
+				WHERE device_id = $1 AND protocol = $2
+				  AND lower(replace(replace(COALESCE(remote_chassis_id, ''), ':', ''), '-', '')) = $3
+			)`, switchID, NeighborProtocolFDB, hex).Scan(&exists)
+		if err != nil {
+			return linked, err
+		}
+		if exists {
+			continue
+		}
+		inFDB, err := s.HasPortFDBEntry(ctx, switchID, r.ifIndex, r.mac)
+		if err != nil {
+			return linked, err
+		}
+		var mgmt, sys *string
+		if h := strings.TrimSpace(r.host); h != "" {
+			mgmt = &h
+		}
+		if n := strings.TrimSpace(r.name); n != "" {
+			sys = &n
+		}
+		seen := r.seenAt
+		stale := !inFDB
+		if !stale {
+			seen = at
+		}
+		if err := s.upsertFDBTopologyNeighbor(ctx, switchID, r.ifIndex, r.mac, mgmt, sys, seen, stale); err != nil {
+			return linked, err
+		}
+		linked++
+	}
+	return linked, nil
 }
 
 // ChassisEndpoint — узел inventory с известным chassis MAC (для FDB→топология).
@@ -549,7 +659,7 @@ func fdbTopoPortEligible(role string, portMACCount, apDeviceCount, inventoryMACC
 	}
 }
 
-// fdbTopoTrunkRemoteOK — кого можно вешать FDB-линком на trunk.
+// fdbTopoTrunkRemoteOK — кого можно вешать FDB-линком на trunk без учёта «тихости» порта.
 // AP (UniFi uplink); NAS/server/other/custom — bond; не switch/router и не «шум» VLAN (PC/МФУ/телефон).
 func fdbTopoTrunkRemoteOK(remoteCategory string) bool {
 	cat := NormalizeDeviceCategory(remoteCategory)
@@ -565,14 +675,41 @@ func fdbTopoTrunkRemoteOK(remoteCategory string) bool {
 	}
 }
 
-// fdbTopoLinkEligible — можно ли строить линк к конкретному inventory MAC.
+// fdbTopoQuietTrunkEndpointOK — endpoint на «тихом» trunk (мало MAC, без AP):
+// hybrid/misconfig access, не VLAN-flood с core.
+func fdbTopoQuietTrunkEndpointOK(remoteCategory string) bool {
+	cat := NormalizeDeviceCategory(remoteCategory)
+	switch cat {
+	case DeviceCategoryComputer, DeviceCategoryPhone, DeviceCategoryMFU, DeviceCategoryCamera, DeviceCategoryUPS:
+		return true
+	case DeviceCategorySwitch, DeviceCategoryRouter:
+		return false
+	default:
+		return false
+	}
+}
+
+// fdbTopoLinkEligible — access: любой inventory; trunk: AP/server/other (см. fdbTopoTrunkRemoteOK).
+// Без счётчиков MAC тихий trunk→ПК не разрешается (безопасный дефолт для старых вызовов).
 func fdbTopoLinkEligible(role, remoteCategory string) bool {
+	return fdbTopoLinkEligibleCounted(role, remoteCategory, -1, -1)
+}
+
+// fdbTopoLinkEligibleCounted — как fdbTopoLinkEligible, плюс quiet-trunk:
+// если на trunk ≤10 MAC и 0 AP — можно линковать ПК/телефон/камеру/МФУ/ИБП (прямой кабель).
+func fdbTopoLinkEligibleCounted(role, remoteCategory string, macCount, apCount int) bool {
 	role = strings.ToLower(strings.TrimSpace(role))
 	switch role {
 	case "access":
 		return true
 	case "trunk":
-		return fdbTopoTrunkRemoteOK(remoteCategory)
+		if fdbTopoTrunkRemoteOK(remoteCategory) {
+			return true
+		}
+		if macCount >= 0 && trunkQuietEdgeLikely(macCount, apCount) {
+			return fdbTopoQuietTrunkEndpointOK(remoteCategory)
+		}
+		return false
 	default:
 		return NormalizeDeviceCategory(remoteCategory) == DeviceCategoryAP
 	}
@@ -664,10 +801,12 @@ func (s *Store) SyncFDBTopologyNeighbors(
 		if discChassis[hex] {
 			continue
 		}
-		if !fdbTopoLinkEligible(portRole[ifIndex], ep.Category) {
+		macN := portMACCount[ifIndex]
+		apN := inv.apDeviceCount[ifIndex]
+		if !fdbTopoLinkEligibleCounted(portRole[ifIndex], ep.Category, macN, apN) {
 			continue
 		}
-		if fdbAPLinkScore(portRole[ifIndex], portMACCount[ifIndex], inv.apDeviceCount[ifIndex], inv.inventoryMACCount[ifIndex], sibling) < fdbAPLinkMinTrunkScore &&
+		if fdbAPLinkScore(portRole[ifIndex], macN, apN, inv.inventoryMACCount[ifIndex], sibling) < fdbAPLinkMinTrunkScore &&
 			strings.ToLower(strings.TrimSpace(portRole[ifIndex])) == "trunk" {
 			continue
 		}
@@ -739,7 +878,7 @@ func (s *Store) SyncFDBTopologyNeighbors(
 		if hex == "" {
 			continue
 		}
-		if ep, ok := chassis[hex]; !ok || !fdbTopoLinkEligible(portRole[ifi], ep.Category) {
+		if ep, ok := chassis[hex]; !ok || !fdbTopoLinkEligibleCounted(portRole[ifi], ep.Category, portMACCount[ifi], inv.apDeviceCount[ifi]) {
 			addStale(ifi, ri)
 			continue
 		}
@@ -898,82 +1037,105 @@ func (s *Store) PruneGlobalFDBChassisLinks(ctx context.Context, at time.Time) (i
 	return staled, nil
 }
 
-// RepairAllFDBTopologyLinks: разовый проход по device_fdb_entries → protocol=fdb линки.
+// RepairAllFDBTopologyLinks: разовый проход по device_fdb_entries → protocol=fdb линки
+// + EnsureFDBNeighborsFromAttachments по всем свитчам с attach_* (offline ПК сразу, без ожидания FDB-poll).
 func (s *Store) RepairAllFDBTopologyLinks(ctx context.Context) (int, error) {
+	now := time.Now().UTC()
+	total := 0
 	chassis, err := s.ListChassisMACIndex(ctx)
 	if err != nil {
 		return 0, err
 	}
-	if len(chassis) == 0 {
-		return 0, nil
-	}
-	rows, err := s.pool.Query(ctx, `SELECT DISTINCT device_id FROM device_fdb_entries`)
-	if err != nil {
-		return 0, err
-	}
-	var switchIDs []int64
-	for rows.Next() {
-		var id int64
-		if err := rows.Scan(&id); err != nil {
-			rows.Close()
+	if len(chassis) > 0 {
+		rows, err := s.pool.Query(ctx, `SELECT DISTINCT device_id FROM device_fdb_entries`)
+		if err != nil {
 			return 0, err
 		}
-		switchIDs = append(switchIDs, id)
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return 0, err
-	}
-	total := 0
-	now := time.Now().UTC()
-	for _, switchID := range switchIDs {
-		fdbRows, err := s.pool.Query(ctx, `
-			SELECT mac, if_index FROM device_fdb_entries WHERE device_id = $1`, switchID)
-		if err != nil {
-			return total, err
+		var switchIDs []int64
+		for rows.Next() {
+			var id int64
+			if err := rows.Scan(&id); err != nil {
+				rows.Close()
+				return 0, err
+			}
+			switchIDs = append(switchIDs, id)
 		}
-		entries := make(map[string]FDBLearnedEntry)
-		portMACCount := make(map[int]int)
-		for fdbRows.Next() {
-			var mac string
-			var ifIndex int
-			if err := fdbRows.Scan(&mac, &ifIndex); err != nil {
-				fdbRows.Close()
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return 0, err
+		}
+		for _, switchID := range switchIDs {
+			fdbRows, err := s.pool.Query(ctx, `
+				SELECT mac, if_index FROM device_fdb_entries WHERE device_id = $1`, switchID)
+			if err != nil {
 				return total, err
 			}
-			entries[mac] = FDBLearnedEntry{IfIndex: ifIndex}
-			portMACCount[ifIndex]++
-		}
-		fdbRows.Close()
-		if err := fdbRows.Err(); err != nil {
-			return total, err
-		}
-		roleRows, err := s.pool.Query(ctx, `
-			SELECT if_index, COALESCE(port_role, ''), cli_port_mode
-			FROM device_interfaces WHERE device_id = $1`, switchID)
-		if err != nil {
-			return total, err
-		}
-		portRole := make(map[int]string)
-		for roleRows.Next() {
-			var ifIndex int
-			var role string
-			var cliMode *string
-			if err := roleRows.Scan(&ifIndex, &role, &cliMode); err != nil {
-				roleRows.Close()
+			entries := make(map[string]FDBLearnedEntry)
+			portMACCount := make(map[int]int)
+			for fdbRows.Next() {
+				var mac string
+				var ifIndex int
+				if err := fdbRows.Scan(&mac, &ifIndex); err != nil {
+					fdbRows.Close()
+					return total, err
+				}
+				entries[mac] = FDBLearnedEntry{IfIndex: ifIndex}
+				portMACCount[ifIndex]++
+			}
+			fdbRows.Close()
+			if err := fdbRows.Err(); err != nil {
 				return total, err
 			}
-			portRole[ifIndex] = ResolveInterfacePortRole(role, cliMode)
+			roleRows, err := s.pool.Query(ctx, `
+				SELECT if_index, COALESCE(port_role, ''), cli_port_mode
+				FROM device_interfaces WHERE device_id = $1`, switchID)
+			if err != nil {
+				return total, err
+			}
+			portRole := make(map[int]string)
+			for roleRows.Next() {
+				var ifIndex int
+				var role string
+				var cliMode *string
+				if err := roleRows.Scan(&ifIndex, &role, &cliMode); err != nil {
+					roleRows.Close()
+					return total, err
+				}
+				portRole[ifIndex] = ResolveInterfacePortRole(role, cliMode)
+			}
+			roleRows.Close()
+			if err := roleRows.Err(); err != nil {
+				return total, err
+			}
+			n, err := s.SyncFDBTopologyNeighbors(ctx, switchID, entries, portMACCount, portRole, chassis, now)
+			if err != nil {
+				return total, err
+			}
+			total += n
 		}
-		roleRows.Close()
-		if err := roleRows.Err(); err != nil {
+	}
+	// Last-known для offline: attach_* → port_neighbors, не ждать следующего FDB-poll свитча.
+	attRows, err := s.pool.Query(ctx, `
+		SELECT DISTINCT attach_parent_id FROM devices
+		WHERE attach_parent_id IS NOT NULL AND attach_parent_id > 0
+		  AND lower(btrim(COALESCE(attach_protocol, ''))) = $1
+		  AND attach_if_index IS NOT NULL AND attach_if_index > 0
+		  AND chassis_mac IS NOT NULL AND btrim(chassis_mac) <> ''`,
+		NeighborProtocolFDB)
+	if err != nil {
+		return total, err
+	}
+	defer attRows.Close()
+	for attRows.Next() {
+		var switchID int64
+		if err := attRows.Scan(&switchID); err != nil {
 			return total, err
 		}
-		n, err := s.SyncFDBTopologyNeighbors(ctx, switchID, entries, portMACCount, portRole, chassis, now)
+		m, err := s.EnsureFDBNeighborsFromAttachments(ctx, switchID, now)
 		if err != nil {
 			return total, err
 		}
-		total += n
+		total += m
 	}
-	return total, nil
+	return total, attRows.Err()
 }

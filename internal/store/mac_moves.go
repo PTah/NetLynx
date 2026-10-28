@@ -171,7 +171,7 @@ func (s *Store) PruneMACFDBMoves(ctx context.Context, olderThan time.Time) (int6
 	return tag.RowsAffected(), nil
 }
 
-// HasMACEventSince — debounce по типу события и MAC в payload.
+// HasMACEventSince — debounce по типу события и MAC в payload (на одном устройстве).
 func (s *Store) HasMACEventSince(ctx context.Context, deviceID int64, eventType, mac string, since time.Time) (bool, error) {
 	macNorm, ok := FormatFullMAC(mac)
 	if !ok {
@@ -184,6 +184,22 @@ func (s *Store) HasMACEventSince(ctx context.Context, deviceID int64, eventType,
 			WHERE device_id = $1 AND event_type = $2 AND created_at >= $3
 			  AND lower(COALESCE(payload->>'mac', '')) = $4
 		)`, deviceID, eventType, since, macNorm).Scan(&okExists)
+	return okExists, err
+}
+
+// HasMACEventAnywhereSince — то же по MAC без привязки к device_id (антиспам MAC_MULTI_ACCESS после рестарта).
+func (s *Store) HasMACEventAnywhereSince(ctx context.Context, eventType, mac string, since time.Time) (bool, error) {
+	macNorm, ok := FormatFullMAC(mac)
+	if !ok {
+		return false, nil
+	}
+	var okExists bool
+	err := s.pool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM events
+			WHERE event_type = $1 AND created_at >= $2
+			  AND lower(COALESCE(payload->>'mac', '')) = $3
+		)`, eventType, since, macNorm).Scan(&okExists)
 	return okExists, err
 }
 

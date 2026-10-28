@@ -7,6 +7,12 @@ import (
 	"git.kalinamall.ru/PapaTramp/netlynx/internal/models"
 )
 
+func TestOnlineConfirmPolls(t *testing.T) {
+	if onlineConfirmPolls < 2 {
+		t.Fatal("ONLINE нужен антидребезг ≥2 опросов (кейс Varenik: 1 ping во сне)")
+	}
+}
+
 func TestShouldEmitDeviceOnline(t *testing.T) {
 	now := time.Date(2026, 8, 23, 9, 5, 0, 0, time.UTC)
 	hours := func(h time.Duration) *time.Time {
@@ -182,5 +188,18 @@ func TestShouldCatchUpDeviceOffline(t *testing.T) {
 	}
 	if shouldCatchUpDeviceOffline(false, offlineStreakState{fromOnline: true, n: 1}, &since, now, 120, false) {
 		t.Fatal("confirm in progress")
+	}
+}
+
+func TestOfflineEventLookupSkew(t *testing.T) {
+	// Реальный кейс: событие на 3 мс раньше offline_since → без skew HasEventSince=false → второй OFFLINE.
+	offlineSince := time.Date(2026, 10, 26, 1, 41, 20, 855559000, time.UTC)
+	eventAt := time.Date(2026, 10, 26, 1, 41, 20, 852815000, time.UTC)
+	if !eventAt.Before(offlineSince) {
+		t.Fatal("fixture: event must be before offline_since")
+	}
+	lookup := offlineSince.Add(-offlineEventLookupSkew)
+	if eventAt.Before(lookup) {
+		t.Fatalf("skew %s слишком мал: event %s < lookup %s", offlineEventLookupSkew, eventAt, lookup)
 	}
 }

@@ -90,6 +90,25 @@ type IfRow = {
   cli_access_vlan?: number | null;
 };
 
+/** Старый баг SNMP: hex от NUL-terminated DisplayString Windows → читаемый текст. */
+function humanizeSnmpText(s: string): string {
+  const t = s.trim();
+  if (t.length < 16 || t.length % 2 !== 0) return t;
+  if (!/^[0-9a-fA-F]+$/.test(t)) return t;
+  try {
+    const bytes: number[] = [];
+    for (let i = 0; i < t.length; i += 2) {
+      bytes.push(parseInt(t.slice(i, i + 2), 16));
+    }
+    while (bytes.length && bytes[bytes.length - 1] === 0) bytes.pop();
+    if (bytes.length < 8) return t;
+    if (bytes.some((c) => c < 0x20 || c >= 0x7f)) return t;
+    return String.fromCharCode(...bytes);
+  } catch {
+    return t;
+  }
+}
+
 function portDisplayDescr(p: {
   descr_override?: string | null;
   cli_description?: string | null;
@@ -99,7 +118,7 @@ function portDisplayDescr(p: {
   if (ov) return ov;
   const cli = (p.cli_description ?? "").trim();
   if (cli) return cli;
-  return (p.if_descr ?? "").trim();
+  return humanizeSnmpText((p.if_descr ?? "").trim());
 }
 
 /** Запись настроек порта по SSH: EdgeSwitch Fastpath / Eltex / SNR (не XP). RouterOS-роутеры — только просмотр. */

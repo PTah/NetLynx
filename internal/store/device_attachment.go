@@ -217,15 +217,18 @@ func (s *Store) findDeviceAttachment(ctx context.Context, deviceID int64, autoOn
 			if role == "" && fdbCtx != nil {
 				role = strings.ToLower(strings.TrimSpace(fdbCtx.PortRole[pk]))
 			}
-			// ПК/камера на trunk — только VLAN-flood с core; никогда attachment.
-			if !fdbTopoLinkEligible(role, cat) {
+			macN, apN, invN, sibling := -1, -1, 0, 0
+			if fdbCtx != nil {
+				macN = fdbCtx.MACCount[pk]
+				apN = fdbCtx.APDeviceCount[pk]
+				invN = fdbCtx.InventoryMACCount[pk]
+				sibling = fdbCtx.MaxSiblingTrunkAP[pk]
+			}
+			// ПК/камера на шумном trunk — VLAN-flood; на тихом (≤10 MAC, 0 AP) — прямой кабель.
+			if !fdbTopoLinkEligibleCounted(role, cat, macN, apN) {
 				return
 			}
 			if fdbCtx != nil {
-				macN := fdbCtx.MACCount[pk]
-				apN := fdbCtx.APDeviceCount[pk]
-				invN := fdbCtx.InventoryMACCount[pk]
-				sibling := fdbCtx.MaxSiblingTrunkAP[pk]
 				if !fdbTopoPortEligible(role, macN, apN, invN, sibling) {
 					return
 				}

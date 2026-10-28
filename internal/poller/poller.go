@@ -52,6 +52,10 @@ type snmpBackoffState struct {
 // Для AP/телефонов/камер/МФУ см. offlineConfirmForCategory — там порог выше.
 const offlineConfirmPolls = 2
 
+// Сколько подряд успешных опросов до DEVICE_ONLINE после оффлайна.
+// Один краткий ping во сне (WoL/ARP offload) иначе даёт ONLINE→OFFLINE за ~1 мин (Varenik-PC).
+const onlineConfirmPolls = 2
+
 // Пустой LLDP/CDP walk (err=nil, len=0) не должен мгновенно staleить все рёбра —
 // vendor SNMP иногда отдаёт пустую таблицу на один проход.
 const neighborEmptyConfirmPolls = 2
@@ -69,7 +73,8 @@ type Engine struct {
 	hub                    *live.Hub
 	topoDirty              func(reason string) // optional: topology blast cache NotifyDirty
 	pollInflight           sync.Map            // device id -> struct{}: опрос уже выполняется
-	offlineStreak          sync.Map            // device id -> int: подряд «оффлайн» после опроса
+	offlineStreak          sync.Map            // device id -> offlineStreakState
+	onlineStreak           sync.Map            // device id -> int: подряд «онлайн» после оффлайна
 	neighborEmptyStreak    sync.Map            // "deviceID:protocol" -> int: подряд пустой neighbor walk
 	broadcastStormActive   sync.Map            // device id -> bool: эвристика broadcast storm активна
 	upsDischargeAlertAt    sync.Map            // device id -> time.Time: антидребезг UPS_DISCHARGE_FAST
@@ -108,9 +113,9 @@ func (e *Engine) notifyTopologyDirty(reason string) {
 
 // ifaceEventPayload поля интерфейса для событий: ifAlias перекрывает SNMP ifDescr; ручная подпись порта — ещё выше.
 func ifaceEventPayload(row snmp.IfRow, old store.InterfaceSnapshot) map[string]interface{} {
-	desc := row.IfDescr
+	desc := snmp.HumanizeSNMPText(row.IfDescr)
 	if alias := strings.TrimSpace(row.IfAlias); alias != "" {
-		desc = alias
+		desc = snmp.HumanizeSNMPText(alias)
 	}
 	if ov := old.DisplayDescr(); ov != "" && old.DescrOverride != nil && strings.TrimSpace(*old.DescrOverride) != "" {
 		desc = ov
@@ -344,12 +349,19 @@ func pingWentDead(cur, prev *models.Device) bool {
 	return !*cur.LastPingOK && *prev.LastPingOK
 }
 
+// offlineEventLookupSkew — DEVICE_OFFLINE пишется до RefreshOfflineSince; created_at события
+// может быть на несколько мс раньше offline_since. Без запаса catch-up после рестарта
+// не видит алерт и шлёт второй OFFLINE (SNR 192.168.160.168: 3 мс → дубль в 12:01).
+const offlineEventLookupSkew = 30 * time.Second
+
 // emitReachabilityTransition — DEVICE_OFFLINE / DEVICE_ONLINE при смене IsOnline после опроса.
 // OFFLINE: был онлайн → N подряд неудачных опросов (короткий SNMP-timeout не шлёт письмо).
-func (e *Engine) emitReachabilityTransition(ctx context.Context, d store.PollDevice, prev *models.Device, wasOnline bool) {
+// ONLINE: после оффлайна ждём onlineConfirmPolls успешных опросов подряд (антидребезг сна/ARP).
+// holdOfflineSince=true — не сбрасывать offline_since (ждём подтверждения ONLINE).
+func (e *Engine) emitReachabilityTransition(ctx context.Context, d store.PollDevice, prev *models.Device, wasOnline bool) (holdOfflineSince bool) {
 	cur, err := e.st.GetDevice(ctx, d.ID)
 	if err != nil || cur == nil {
-		return
+		return false
 	}
 	nowOnline := cur.IsOnline()
 	var since *time.Time
@@ -359,23 +371,47 @@ func (e *Engine) emitReachabilityTransition(ctx context.Context, d store.PollDev
 	now := time.Now()
 	hasOff := false
 	if since != nil {
-		hasOff, err = e.st.HasEventSince(ctx, d.ID, "DEVICE_OFFLINE", *since)
+		hasOff, err = e.st.HasEventSince(ctx, d.ID, "DEVICE_OFFLINE", since.Add(-offlineEventLookupSkew))
 		if err != nil {
 			e.log.Warn("has DEVICE_OFFLINE", "device_id", d.ID, "err", err)
 		}
 	}
 
 	if nowOnline {
-		prevStreak := e.resetOfflineStreak(d.ID)
-		if shouldEmitDeviceOnline(wasOnline, prevStreak, since, now, d.PollIntervalSeconds, hasOff) {
-			e.emitDeviceOnline(ctx, d, cur, prev)
-			return
-		}
+		prevStreak := e.peekOfflineStreak(d.ID)
 		if shouldCatchUpDeviceOffline(wasOnline, prevStreak, since, now, d.PollIntervalSeconds, hasOff) {
 			e.emitDeviceOffline(ctx, d, cur, prev, 0)
-			e.emitDeviceOnline(ctx, d, cur, prev)
+			hasOff = true
+			prevStreak = offlineStreakState{n: offlineConfirmForCategory(d.DeviceCategory), fromOnline: true}
+			e.offlineStreak.Store(d.ID, prevStreak)
 		}
-		return
+		// recovering: OFFLINE уже был, offline_since ещё держим (в т.ч. после 1-го ping,
+		// когда wasOnline уже true из last_ping_ok — иначе confirm срывается).
+		recovering := hasOff && cur.OfflineSince != nil
+		wantOnline := recovering || shouldEmitDeviceOnline(wasOnline, prevStreak, since, now, d.PollIntervalSeconds, hasOff)
+		if wantOnline {
+			n := e.noteOnlinePoll(d.ID)
+			if n >= onlineConfirmPolls {
+				e.resetOfflineStreak(d.ID)
+				e.resetOnlineStreak(d.ID)
+				e.emitDeviceOnline(ctx, d, cur, prev)
+				return false
+			}
+			// Краткий ping во сне: ещё не ONLINE, offline_since держим.
+			e.resetOfflineStreak(d.ID)
+			return true
+		}
+		e.resetOfflineStreak(d.ID)
+		e.resetOnlineStreak(d.ID)
+		return false
+	}
+
+	// Снова оффлайн: если ONLINE ещё не подтвердили — тот же эпизод, без второго OFFLINE.
+	onlineN := e.resetOnlineStreak(d.ID)
+	if onlineN > 0 && onlineN < onlineConfirmPolls && hasOff {
+		confirm := offlineConfirmForCategory(d.DeviceCategory)
+		e.offlineStreak.Store(d.ID, offlineStreakState{n: confirm, fromOnline: true})
+		return false
 	}
 
 	st := e.noteOfflinePoll(d.ID, wasOnline)
@@ -386,12 +422,13 @@ func (e *Engine) emitReachabilityTransition(ctx context.Context, d store.PollDev
 		// Эпизод зафиксирован: до восстановления повторов не шлём
 		// (следующий опрос даст n=confirm+1 и условие уже не сработает).
 		e.offlineStreak.Store(d.ID, offlineStreakState{n: confirm, fromOnline: true})
-		return
+		return false
 	}
 	if shouldCatchUpDeviceOffline(wasOnline, st, since, now, d.PollIntervalSeconds, hasOff) {
 		e.emitDeviceOffline(ctx, d, cur, prev, st.n)
 		e.offlineStreak.Store(d.ID, offlineStreakState{n: confirm, fromOnline: true})
 	}
+	return false
 }
 
 func (e *Engine) emitDeviceOnline(ctx context.Context, d store.PollDevice, cur *models.Device, prev *models.Device) {
@@ -404,6 +441,10 @@ func (e *Engine) emitDeviceOnline(ctx context.Context, d store.PollDevice, cur *
 }
 
 func (e *Engine) emitDeviceOffline(ctx context.Context, d store.PollDevice, cur *models.Device, prev *models.Device, confirmPolls int) {
+	// Сначала offline_since, потом событие — иначе created_at < offline_since и после рестарта дубль.
+	if err := e.st.EnsureOfflineSince(ctx, d.ID); err != nil {
+		e.log.Warn("ensure offline_since", "device_id", d.ID, "err", err)
+	}
 	pl := deviceReachabilityPayload(cur)
 	if confirmPolls > 0 {
 		pl["offline_confirm_polls"] = confirmPolls
@@ -412,6 +453,8 @@ func (e *Engine) emitDeviceOffline(ctx context.Context, d store.PollDevice, cur 
 		pl["offline_since"] = prev.OfflineSince.UTC().Format(time.RFC3339)
 	} else if cur != nil && cur.OfflineSince != nil {
 		pl["offline_since"] = cur.OfflineSince.UTC().Format(time.RFC3339)
+	} else if fresh, err := e.st.GetDevice(ctx, d.ID); err == nil && fresh != nil && fresh.OfflineSince != nil {
+		pl["offline_since"] = fresh.OfflineSince.UTC().Format(time.RFC3339)
 	}
 	e.emit(ctx, nil, d, nil, "DEVICE_OFFLINE", "warning", pl)
 }
@@ -434,6 +477,15 @@ func (e *Engine) noteOfflinePoll(deviceID int64, wasOnline bool) offlineStreakSt
 	return st
 }
 
+func (e *Engine) peekOfflineStreak(deviceID int64) offlineStreakState {
+	v, _ := e.offlineStreak.Load(deviceID)
+	if v == nil {
+		return offlineStreakState{}
+	}
+	st, _ := v.(offlineStreakState)
+	return st
+}
+
 func (e *Engine) resetOfflineStreak(deviceID int64) offlineStreakState {
 	v, loaded := e.offlineStreak.LoadAndDelete(deviceID)
 	if !loaded || v == nil {
@@ -441,6 +493,26 @@ func (e *Engine) resetOfflineStreak(deviceID int64) offlineStreakState {
 	}
 	st, _ := v.(offlineStreakState)
 	return st
+}
+
+func (e *Engine) noteOnlinePoll(deviceID int64) int {
+	n := 1
+	if v, ok := e.onlineStreak.Load(deviceID); ok {
+		if prev, ok := v.(int); ok && prev > 0 {
+			n = prev + 1
+		}
+	}
+	e.onlineStreak.Store(deviceID, n)
+	return n
+}
+
+func (e *Engine) resetOnlineStreak(deviceID int64) int {
+	v, loaded := e.onlineStreak.LoadAndDelete(deviceID)
+	if !loaded || v == nil {
+		return 0
+	}
+	n, _ := v.(int)
+	return n
 }
 
 func (e *Engine) SetPollingPaused(v bool) {
@@ -817,7 +889,14 @@ func (e *Engine) pollOne(ctx context.Context, d store.PollDevice) error {
 		wasOnline = prev.IsOnline()
 	}
 	defer func() {
-		e.emitReachabilityTransition(ctx, d, prevDev, wasOnline)
+		holdOffline := e.emitReachabilityTransition(ctx, d, prevDev, wasOnline)
+		if holdOffline {
+			// Антидребезг ONLINE: один удачный ping ещё не «снова в сети».
+			if err := e.st.EnsureOfflineSince(ctx, d.ID); err != nil {
+				e.log.Warn("hold offline_since", "device_id", d.ID, "err", err)
+			}
+			return
+		}
 		if err := e.st.RefreshOfflineSince(ctx, d.ID); err != nil {
 			e.log.Warn("offline_since", "device_id", d.ID, "err", err)
 		}
@@ -1232,10 +1311,10 @@ func (e *Engine) pollOne(ctx context.Context, d store.PollDevice) error {
 			}
 		}
 
-		desc := row.IfDescr
+		desc := snmp.HumanizeSNMPText(row.IfDescr)
 		if alias := strings.TrimSpace(row.IfAlias); alias != "" {
 			// Для Ubiquiti и ряда других вендоров ifAlias — это человекочитаемое имя порта.
-			desc = alias
+			desc = snmp.HumanizeSNMPText(alias)
 		}
 		name := row.IfName
 		typ := row.IfType
@@ -1709,9 +1788,6 @@ func (e *Engine) syncFDBTopologyLinks(
 	chassis map[string]store.ChassisEndpoint,
 	now time.Time,
 ) {
-	if len(chassis) == 0 {
-		return
-	}
 	storeEntries := snmpFDBToStore(entries)
 	portMACCount := make(map[int]int, len(fdbStats))
 	for ifIndex, st := range fdbStats {
@@ -1724,13 +1800,19 @@ func (e *Engine) syncFDBTopologyLinks(
 		}
 	}
 	portRole := store.PortRolesForFDBTopology(ifs)
-	n, err := e.st.SyncFDBTopologyNeighbors(ctx, d.ID, storeEntries, portMACCount, portRole, chassis, now)
-	if err != nil {
-		e.log.Warn("fdb topology sync", "device_id", d.ID, "err", err)
-		return
+	if len(chassis) > 0 {
+		n, err := e.st.SyncFDBTopologyNeighbors(ctx, d.ID, storeEntries, portMACCount, portRole, chassis, now)
+		if err != nil {
+			e.log.Warn("fdb topology sync", "device_id", d.ID, "err", err)
+		} else if n > 0 {
+			e.log.Debug("fdb topology sync", "device_id", d.ID, "linked", n)
+		}
 	}
-	if n > 0 {
-		e.log.Debug("fdb topology sync", "device_id", d.ID, "linked", n)
+	// Offline ПК: карточка «Подключен к…» из attach_*, а port_neighbors мог так и не появиться.
+	if m, err := e.st.EnsureFDBNeighborsFromAttachments(ctx, d.ID, now); err != nil {
+		e.log.Warn("fdb topology ensure attach", "device_id", d.ID, "err", err)
+	} else if m > 0 {
+		e.log.Debug("fdb topology ensure attach", "device_id", d.ID, "linked", m)
 	}
 }
 

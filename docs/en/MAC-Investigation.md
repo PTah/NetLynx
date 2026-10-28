@@ -75,7 +75,8 @@ On the switch — send UDP to the NetLynx IP. A flapping message → `MAC_FLAPPI
 |----------|---------|---------|
 | `MAC_FLAP_MIN_MOVES` | 3 | port changes per window → `MAC_FLAPPING` event |
 | `MAC_FLAP_WINDOW_SECONDS` | 3600 | window |
-| `MAC_FLAP_DEBOUNCE_SECONDS` | 900 | anti-spam |
+| `MAC_FLAP_DEBOUNCE_SECONDS` | 900 | anti-spam for `MAC_FLAPPING` |
+| `MAC_MULTI_ACCESS_DEBOUNCE_SECONDS` | 21600 (6h) | anti-spam for `MAC_MULTI_ACCESS` (global per MAC; survives restart/deploy) |
 | `MAC_MOVES_RETENTION_DAYS` | 14 | moves retention |
 | `NETLYNX_SYSLOG_LISTEN` | empty | UDP; `off` = disabled |
 | `FDB_SNAPSHOT_ENABLED` | true | daily snapshots |

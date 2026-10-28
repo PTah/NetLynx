@@ -104,13 +104,16 @@ func TestInfraUplinkLocalPortEligible(t *testing.T) {
 
 func TestFDBAttachmentRejectsComputerOnTrunk(t *testing.T) {
 	if fdbTopoLinkEligible("trunk", DeviceCategoryComputer) {
-		t.Fatal("computer on trunk must be rejected")
+		t.Fatal("computer on trunk without quiet counts must be rejected")
 	}
 	if !fdbTopoLinkEligible("access", DeviceCategoryComputer) {
 		t.Fatal("computer on access should be allowed")
 	}
 	if fdbTopoLinkEligible("trunk", DeviceCategoryMFU) {
-		t.Fatal("MFU on trunk must be rejected")
+		t.Fatal("MFU on trunk without quiet counts must be rejected")
+	}
+	if !fdbTopoLinkEligibleCounted("trunk", DeviceCategoryComputer, 1, 0) {
+		t.Fatal("computer on quiet trunk (1 MAC) should be allowed")
 	}
 }
 

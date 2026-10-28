@@ -225,6 +225,25 @@ function sanitizeConfigSSHFailErr(err: string): string {
   return e;
 }
 
+/** Старый баг: Windows DisplayString с NUL уходил в hex — показать читаемый ASCII. */
+function humanizeSnmpText(s: string): string {
+  const t = s.trim();
+  if (t.length < 16 || t.length % 2 !== 0) return t;
+  if (!/^[0-9a-fA-F]+$/.test(t)) return t;
+  try {
+    const bytes: number[] = [];
+    for (let i = 0; i < t.length; i += 2) {
+      bytes.push(parseInt(t.slice(i, i + 2), 16));
+    }
+    while (bytes.length && bytes[bytes.length - 1] === 0) bytes.pop();
+    if (bytes.length < 8) return t;
+    if (bytes.some((c) => c < 0x20 || c >= 0x7f)) return t;
+    return String.fromCharCode(...bytes);
+  } catch {
+    return t;
+  }
+}
+
 /**
  * Человекочитаемая подпись порта для событий — как в карточке узла:
  * Ubiquiti «port N: подпись» → только подпись; иначе ifAlias (колонка «Комментарий»); иначе «Порт №» (if_name);
@@ -232,14 +251,14 @@ function sanitizeConfigSSHFailErr(err: string): string {
  */
 function eventPortDescription(p: Record<string, unknown>): string {
   const ifName = str(p.if_name);
-  const ifAlias = str(p.if_alias);
-  const descr = str(p.if_descr);
+  const ifAlias = humanizeSnmpText(str(p.if_alias));
+  const descr = humanizeSnmpText(str(p.if_descr));
 
   if (ifName) {
     const ubnt = ifName.match(/^\s*port\s+\d+\s*:\s*(.*)$/i);
     if (ubnt) {
       const tail = ubnt[1].trim();
-      if (tail) return tail;
+      if (tail) return humanizeSnmpText(tail);
     }
   }
   if (ifAlias) return ifAlias;

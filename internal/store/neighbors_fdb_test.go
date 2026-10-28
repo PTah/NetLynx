@@ -70,7 +70,7 @@ func TestFdbTopoLinkEligible(t *testing.T) {
 		t.Fatal("trunk should link AP")
 	}
 	if fdbTopoLinkEligible("trunk", DeviceCategoryMFU) {
-		t.Fatal("trunk must not link MFU/PC from VLAN flood")
+		t.Fatal("trunk without MAC counts must not link MFU/PC (VLAN flood)")
 	}
 	if !fdbTopoLinkEligible("trunk", "nas") {
 		t.Fatal("trunk bond should link NAS")
@@ -80,6 +80,19 @@ func TestFdbTopoLinkEligible(t *testing.T) {
 	}
 	if fdbTopoLinkEligible("trunk", DeviceCategorySwitch) {
 		t.Fatal("trunk must not FDB-link switch")
+	}
+	// Тихий trunk (1 MAC, 0 AP) — ПК как на access (Yurkov-PC / EdgeSwitch 0/15).
+	if !fdbTopoLinkEligibleCounted("trunk", DeviceCategoryComputer, 1, 0) {
+		t.Fatal("quiet trunk with 1 MAC should link computer")
+	}
+	if !fdbTopoLinkEligibleCounted("trunk", DeviceCategoryMFU, 2, 0) {
+		t.Fatal("quiet trunk should link MFU")
+	}
+	if fdbTopoLinkEligibleCounted("trunk", DeviceCategoryComputer, 20, 0) {
+		t.Fatal("noisy trunk must not link computer")
+	}
+	if fdbTopoLinkEligibleCounted("trunk", DeviceCategoryComputer, 3, 1) {
+		t.Fatal("trunk with AP must not treat PC as quiet endpoint")
 	}
 }
 

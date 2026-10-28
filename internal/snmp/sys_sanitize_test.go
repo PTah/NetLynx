@@ -29,4 +29,26 @@ func TestSanitizeSNMPBytes(t *testing.T) {
 	if got == string(bad) || got == "" {
 		t.Fatalf("expected hex for invalid utf8, got %q", got)
 	}
+
+	// Windows DisplayString с хвостовым NUL (Belyj-PC Wi-Fi Direct / WFP).
+	win := append([]byte("Microsoft Wi-Fi Direct Virtual Adapter-WFP Native MAC Layer LightWeight Filter-0000"), 0)
+	want := "Microsoft Wi-Fi Direct Virtual Adapter-WFP Native MAC Layer LightWeight Filter-0000"
+	if got := sanitizeSNMPBytes(win); got != want {
+		t.Fatalf("windows NUL-terminated DisplayString: %q", got)
+	}
+}
+
+func TestHumanizeSNMPText(t *testing.T) {
+	hexBlob := "4d6963726f736f66742057692d466920446972656374205669727475616c20416461707465722d574650204e6174697665204d4143204c61796572204c696768745765696768742046696c7465722d3030303000"
+	want := "Microsoft Wi-Fi Direct Virtual Adapter-WFP Native MAC Layer LightWeight Filter-0000"
+	if got := HumanizeSNMPText(hexBlob); got != want {
+		t.Fatalf("humanize hex DisplayString: %q", got)
+	}
+	if got := HumanizeSNMPText("port 15: LIFT"); got != "port 15: LIFT" {
+		t.Fatalf("plain text unchanged: %q", got)
+	}
+	// Короткий hex (не DisplayString) не трогаем.
+	if got := HumanizeSNMPText("aabbccdd"); got != "aabbccdd" {
+		t.Fatalf("short hex left as-is: %q", got)
+	}
 }
